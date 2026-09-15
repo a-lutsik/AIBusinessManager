@@ -1,0 +1,14 @@
+# Activate with: --spring.profiles.active=oauth2 (Keycloak must be running)
+spring:
+  config:
+    activate:
+      on-profile: oauth2
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${app.security.issuer-uri}
+
+app:
+  security:
+    oauth2-enabled: true

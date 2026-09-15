@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI Business Manager — booking, clients, and growth for solo specialists</title>
+  <meta name="description" content="AI-first business manager for solo specialists and micro-teams. Booking in three decisions, returning clients, six growth metrics, and an assistant that drafts — never silently changes." />
+  <meta property="og:title" content="AI Business Manager" />
+  <meta property="og:description" content="Booking, CRM, metrics, and an AI manager for salons and solo specialists." />
+  <meta property="og:type" content="website" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #f7f4ef;
+      --ink: #1c1917;
+      --muted: #57534e;
+      --accent: #0f766e;
+      --accent-ink: #ecfdf5;
+      --line: #d6d3d1;
+      --surface: #ffffff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      font-family: "Noto Sans", "Avenir Next", "Segoe UI", sans-serif;
+      background:
+        radial-gradient(1200px 600px at 10% -10%, #dbece8 0%, transparent 55%),
+        radial-gradient(900px 500px at 100% 0%, #efe6d8 0%, transparent 50%),
+        var(--bg);
+    }
+    header, section, footer { max-width: 64rem; margin: 0 auto; padding: 3.5rem 1.25rem; }
+    header { padding-top: 4.5rem; }
+    .brand { font-size: clamp(2rem, 5vw, 2.85rem); letter-spacing: -0.03em; margin: 0 0 0.75rem; line-height: 1.1; }
+    .lede { color: var(--muted); font-size: 1.15rem; line-height: 1.55; max-width: 40rem; }
+    .grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); }
+    article, .card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 0.75rem;
+      padding: 1.25rem 1.3rem;
+    }
+    h2 { font-size: 1.45rem; margin: 0 0 0.75rem; }
+    h3 { margin: 0 0 0.4rem; font-size: 1.05rem; }
+    p { color: var(--muted); line-height: 1.5; }
+    a.cta, button {
+      display: inline-block;
+      border: 0;
+      border-radius: 0.5rem;
+      padding: 0.85rem 1.1rem;
+      background: var(--accent);
+      color: var(--accent-ink);
+      font: inherit;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+    }
+    form { display: grid; gap: 0.85rem; max-width: 28rem; }
+    label { display: grid; gap: 0.35rem; font-size: 0.9rem; }
+    input, select, textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 0.5rem;
+      padding: 0.7rem 0.8rem;
+      font: inherit;
+      background: #fff;
+    }
+    .ok { display: none; color: var(--accent); }
+    .note { font-size: 0.85rem; color: var(--muted); }
+    .price { font-size: 1.6rem; font-weight: 700; margin: 0.3rem 0; }
+    footer { color: var(--muted); font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <p class="note">For solo specialists and micro-teams · RU / EN now, KA / UK / CS next</p>
+    <h1 class="brand">Stop running the salon from the chat thread.</h1>
+    <p class="lede">
+      AI Business Manager gives you a working booking page in one evening, a CRM that fills itself,
+      six honest metrics, and an assistant that drafts actions you confirm.
+    </p>
+    <p><a class="cta" href="#waitlist">Join the waitlist</a></p>
+  </header>
+
+  <section id="problem">
+    <h2>The problem</h2>
+    <div class="grid">
+      <article><h3>Booking eats the evening</h3><p>Clients write at 22:40. You juggle WhatsApp, Instagram, and a paper diary. Double-books happen.</p></article>
+      <article><h3>Clients do not return</h3><p>You remember regulars. You forget the woman who came twice and vanished after 47 days.</p></article>
+      <article><h3>Growth is a feeling</h3><p>Was Tuesday empty because of weather, price, or the wrong hours? Spreadsheets lie; chat logs do not add up.</p></article>
+    </div>
+  </section>
+
+  <section id="ai">
+    <h2>AI manager</h2>
+    <article>
+      <p>The assistant reads schedule, CRM, and metrics — never raw names or phones. It proposes drafts (book, move, cancel, message). You confirm. Booking Engine validates every change the same way the calendar does. Nothing applies silently.</p>
+    </article>
+  </section>
+
+  <section id="booking">
+    <h2>Smart booking</h2>
+    <article>
+      <p>Three decisions: service → specialist (filtered by who actually offers it) → a free slot. Phone with country code. Confirmed or pending, honestly. Add to calendar (.ics) and a private link. No client account, no OTP.</p>
+    </article>
+  </section>
+
+  <section id="retention">
+    <h2>Clients come back</h2>
+    <article>
+      <p>Every public booking creates a CRM profile (E.164 phone). Trust is NEW / HIGH / NORMAL / LOW with reasons, not a mystery score. Reminders go through Telegram when linked; otherwise a ready-to-send task lands on your dashboard.</p>
+    </article>
+  </section>
+
+  <section id="growth">
+    <h2>Growth on metrics</h2>
+    <div class="grid">
+      <article><h3>Slot utilization</h3><p>Booked service minutes / available minutes.</p></article>
+      <article><h3>Repeat rate</h3><p>Clients with two completed visits / clients with one.</p></article>
+      <article><h3>Return interval</h3><p>Median of each client’s median gap.</p></article>
+      <article><h3>No-show rate</h3><p>No-shows / visits that reached start time.</p></article>
+      <article><h3>Value per hour</h3><p>Completed service value / hours actually worked.</p></article>
+      <article><h3>Churn risk</h3><p>Rule-based: last visit vs 1.5× / 2× personal interval.</p></article>
+    </div>
+  </section>
+
+  <section id="pricing">
+    <h2>Plans (pilot)</h2>
+    <div class="grid">
+      <article>
+        <h3>Solo</h3>
+        <p class="price">Pilot</p>
+        <p>One specialist, public booking, calendar, CRM, metrics, AI drafts.</p>
+      </article>
+      <article>
+        <h3>Studio</h3>
+        <p class="price">Pilot</p>
+        <p>Up to five specialists, Trust, packages, owner tasks, growth signals.</p>
+      </article>
+    </div>
+  </section>
+
+  <section id="waitlist">
+    <h2>Join the waitlist</h2>
+    <p class="lede">Phase 0 interviews are open. Tell us the first thing you would pay to stop doing by hand.</p>
+    <form id="waitlist-form" action="#" method="post">
+      <label>Name <input name="name" required autocomplete="name" /></label>
+      <label>Email <input name="email" type="email" required autocomplete="email" /></label>
+      <label>Business type
+        <select name="business" required>
+          <option value="">Select…</option>
+          <option>Hair / beauty salon</option>
+          <option>Solo specialist</option>
+          <option>Micro-team (2–5)</option>
+          <option>Other</option>
+        </select>
+      </label>
+      <label>City / timezone <input name="city" placeholder="e.g. Tbilisi / Asia/Tbilisi" /></label>
+      <label>What would you pay for first?
+        <textarea name="pain" rows="3" placeholder="Booking chaos, no-shows, empty evenings…"></textarea>
+      </label>
+      <label><span><input type="checkbox" name="demo" /> Request a demo</span></label>
+      <button type="submit">Join waitlist</button>
+    </form>
+    <p class="ok" id="thanks">Thanks — we stored your interest in this browser for Phase 0 interviews.</p>
+    <p class="note">Submissions stay in localStorage until the waitlist API exists. Demo tenant: Lumen Studio, Tbilisi.</p>
+  </section>
+  <footer>AI Business Manager · not a payment system · Telegram is the only client channel in MVP</footer>
+  <script>
+    document.getElementById("waitlist-form").addEventListener("submit", (e) => {
+      e.preventDefault();
+      const data = Object.fromEntries(new FormData(e.target).entries());
+      const key = "abm-waitlist";
+      const prev = JSON.parse(localStorage.getItem(key) || "[]");
+      prev.push({ ...data, at: new Date().toISOString() });
+      localStorage.setItem(key, JSON.stringify(prev));
+      e.target.hidden = true;
+      document.getElementById("thanks").style.display = "block";
+    });
+  </script>
+</body>
+</html>

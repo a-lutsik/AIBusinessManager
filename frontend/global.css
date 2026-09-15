@@ -1,0 +1,35 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-ink: #1c1917;
+  --color-muted: #57534e;
+  --color-canvas: #f7f4ef;
+  --color-surface: #ffffff;
+  --color-accent: #0f766e;
+  --color-line: #e7e5e4;
+  --color-status-pending: #b45309;
+  --color-status-confirmed: #0f766e;
+  --color-status-completed: #1d4ed8;
+  --color-status-noshow: #be123c;
+  --color-status-cancelled: #78716c;
+  --font-sans: "Noto Sans", "Avenir Next", system-ui, sans-serif;
+  --font-display: "Noto Sans", "Avenir Next", system-ui, sans-serif;
+  --radius-control: 0.5rem;
+}
+
+[data-theme="dark"] {
+  --color-ink: #f5f5f4;
+  --color-muted: #a8a29e;
+  --color-canvas: #1c1917;
+  --color-surface: #292524;
+  --color-accent: #2dd4bf;
+  --color-line: #44403c;
+}
+
+html, body, #root {
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: "Noto Sans", var(--font-sans);
+}

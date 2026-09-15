@@ -1,0 +1,244 @@
+openapi: 3.0.3
+info:
+  title: AI Business Manager API
+  version: 0.2.0
+  description: Public booking vs authenticated console. Domain errors are application/problem+json with a machine `code`.
+paths:
+  /api/public/health:
+    get:
+      summary: Public health
+      responses:
+        "200":
+          description: OK
+  /api/public/tenants/{slug}:
+    get:
+      summary: Public tenant profile for booking page
+      parameters:
+        - in: path
+          name: slug
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Tenant
+  /api/public/tenants/{slug}/services:
+    get:
+      summary: Public services
+      parameters:
+        - in: path
+          name: slug
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Services
+  /api/public/tenants/{slug}/services/{serviceId}/specialists:
+    get:
+      summary: Specialists who offer the service (matrix filter)
+      parameters:
+        - in: path
+          name: slug
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: serviceId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Specialists
+  /api/public/tenants/{slug}/slots:
+    get:
+      summary: Free slots only
+      parameters:
+        - in: path
+          name: slug
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: serviceId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: specialistId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: from
+          required: true
+          schema:
+            type: string
+            format: date
+        - in: query
+          name: to
+          required: true
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: Instant[]
+        "429":
+          description: Rate limited
+  /api/public/tenants/{slug}/bookings:
+    post:
+      summary: Create public booking
+      parameters:
+        - in: path
+          name: slug
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [serviceId, specialistId, serviceStart, phone, name]
+              properties:
+                serviceId: { type: string, format: uuid }
+                specialistId: { type: string, format: uuid }
+                serviceStart: { type: string, format: date-time }
+                phone: { type: string }
+                name: { type: string }
+                locale: { type: string }
+                marketingConsent: { type: boolean }
+                countryCode: { type: string }
+      responses:
+        "200":
+          description: Booking created (CONFIRMED or PENDING)
+        "409":
+          description: Slot occupied or validation
+        "429":
+          description: Rate limited
+  /api/public/bookings/{id}:
+    get:
+      summary: Read visit by opaque token
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+        - in: query
+          name: token
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Visit }
+        "404": { description: Invalid token }
+  /api/public/bookings/{id}/cancel:
+    post:
+      summary: Cancel by opaque token
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+        - in: query
+          name: token
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Cancelled }
+  /api/public/bookings/{id}/calendar.ics:
+    get:
+      summary: Download .ics
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+        - in: query
+          name: token
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: text/calendar
+  /api/app/health:
+    get:
+      summary: App health
+      responses:
+        "200": { description: OK }
+  /api/app/me:
+    get:
+      summary: Current actor
+      responses:
+        "200": { description: Actor + tenant }
+  /api/app/dashboard:
+    get:
+      summary: Owner/master dashboard
+      responses:
+        "200": { description: Dashboard }
+  /api/app/calendar:
+    get:
+      summary: Calendar visits
+      parameters:
+        - in: query
+          name: from
+          required: true
+          schema: { type: string, format: date-time }
+        - in: query
+          name: to
+          required: true
+          schema: { type: string, format: date-time }
+        - in: query
+          name: specialistId
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: Visits }
+  /api/app/appointments/{id}/transition:
+    post:
+      summary: Status machine transition
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+        - in: query
+          name: to
+          required: true
+          schema:
+            type: string
+            enum: [PENDING, CONFIRMED, COMPLETED, NO_SHOW, CANCELLED_BY_CLIENT, CANCELLED_BY_BUSINESS]
+      responses:
+        "200": { description: Updated visit }
+        "403": { description: Master cannot access another specialist }
+        "409": { description: Invalid transition }
+  /api/app/clients:
+    get:
+      summary: Search clients
+      responses:
+        "200": { description: Clients }
+  /api/app/metrics:
+    get:
+      summary: Six metrics
+      responses:
+        "200": { description: Metric snapshots }
+  /api/app/metrics/recalculate:
+    post:
+      summary: Recalculate metrics for last 30 days
+      responses:
+        "200": { description: Metrics }
+  /api/app/ai/chat:
+    post:
+      summary: AI chat (owner only)
+      responses:
+        "200": { description: Reply + drafts }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

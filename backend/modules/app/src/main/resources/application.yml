@@ -1,0 +1,59 @@
+spring:
+  application:
+    name: ai-business-manager
+  datasource:
+    url: jdbc:postgresql://localhost:5433/aibusinessmanager
+    username: abm
+    password: abm
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  jooq:
+    sql-dialect: POSTGRES
+  batch:
+    jdbc:
+      initialize-schema: always
+    job:
+      enabled: false
+
+app:
+  security:
+    oauth2-enabled: false
+    issuer-uri: http://localhost:8081/realms/abm
+  seed:
+    enabled: true
+  outbox:
+    enabled: true
+    poll-ms: 2000
+  ai:
+    # Committed default stays stub so boot works without a key.
+    # Local DeepSeek: APP_AI_PROVIDER=deepseek and DEEPSEEK_API_KEY, or gitignored application-local.yml.
+    provider: ${APP_AI_PROVIDER:stub}
+    # Optional failover provider id used when the primary throws (e.g. stub).
+    fallback-provider: ${APP_AI_FALLBACK_PROVIDER:}
+    # Single source of truth for the model name (DeepSeek-V4.1-Flash).
+    # Not deepseek-chat (retired 2026-07-24). Retired alias deepseek-v4-flash still routes here.
+    # Pro (slower/costlier): deepseek-v4-pro.
+    model: ${APP_AI_MODEL:deepseek-flash}
+    # Only applied when deepseek.thinking is enabled.
+    reasoning-effort: ${APP_AI_REASONING_EFFORT:high}
+    deepseek:
+      api-key: ${DEEPSEEK_API_KEY:}
+      base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
+      # Interactive console: disabled. Official samples use enabled + reasoning_effort=high.
+      thinking: ${APP_AI_DEEPSEEK_THINKING:disabled}
+      timeout: ${APP_AI_DEEPSEEK_TIMEOUT:90s}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+server:
+  port: 8080
+
+logging:
+  level:
+    org.jooq: INFO
+    com.aibusinessmanager: INFO
