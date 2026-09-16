@@ -1,4 +1,4 @@
-# AI Business Manager
+# Cadence
 
 Modular monolith for solo specialists and micro-teams. Stack: **Java 25 / Spring Boot 4.1**, **jOOQ + Flyway**, **TimescaleDB**, **Keycloak**, **Expo Router** (RN Web).
 
@@ -36,8 +36,8 @@ open -a Docker
 docker compose up -d
 ```
 
-- TimescaleDB: `localhost:5433` (db/user/pass: `aibusinessmanager` / `abm` / `abm`) — host port **5433** so it does not clash with a local Postgres on 5432.
-- Keycloak: http://localhost:8081 (admin/admin), realm `abm`
+- TimescaleDB: `localhost:5433` (db/user/pass: `cadence` / `cadence` / `cadence`) — host port **5433** so it does not clash with a local Postgres on 5432.
+- Keycloak: http://localhost:8081 (admin/admin), realm `cadence`
   - Owner: `owner@lumen.studio` / `owner`
   - Master (Nino): `nino@lumen.studio` / `nino` (JWT `specialist_id` mapped)
 

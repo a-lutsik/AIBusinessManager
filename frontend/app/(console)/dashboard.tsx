@@ -17,7 +17,7 @@ import { t } from '@/src/i18n';
 import { statusColor, useThemeTokens } from '@/src/theme/tokens';
 
 function readRole(): 'OWNER' | 'MASTER' {
-  const stored = typeof localStorage !== 'undefined' ? localStorage.getItem('abm.role') : null;
+  const stored = typeof localStorage !== 'undefined' ? localStorage.getItem('cadence.role') : null;
   return stored === 'MASTER' ? 'MASTER' : 'OWNER';
 }
 

@@ -1,24 +1,24 @@
 services:
   timescaledb:
     image: timescale/timescaledb:2.30.0-pg16
-    container_name: abm-timescaledb
+    container_name: cadence-timescaledb
     environment:
-      POSTGRES_DB: aibusinessmanager
-      POSTGRES_USER: abm
-      POSTGRES_PASSWORD: abm
+      POSTGRES_DB: cadence
+      POSTGRES_USER: cadence
+      POSTGRES_PASSWORD: cadence
     ports:
       - "5433:5432"
     volumes:
       - timescaledb_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U abm -d aibusinessmanager"]
+      test: ["CMD-SHELL", "pg_isready -U cadence -d cadence"]
       interval: 5s
       timeout: 5s
       retries: 10
 
   keycloak:
     image: quay.io/keycloak/keycloak:26.2.5
-    container_name: abm-keycloak
+    container_name: cadence-keycloak
     command: ["start-dev", "--import-realm"]
     environment:
       KEYCLOAK_ADMIN: admin
@@ -27,7 +27,7 @@ services:
     ports:
       - "8081:8081"
     volumes:
-      - ./docker/keycloak/realm-abm.json:/opt/keycloak/data/import/realm-abm.json:ro
+      - ./docker/keycloak/realm-cadence.json:/opt/keycloak/data/import/realm-cadence.json:ro
       - ./docker/keycloak/themes/cadence:/opt/keycloak/themes/cadence:ro
     healthcheck:
       test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8081"]
@@ -46,11 +46,11 @@ services:
   #   ports:
   #     - "8080:8080"
   #   environment:
-  #     SPRING_DATASOURCE_URL: jdbc:postgresql://timescaledb:5432/aibusinessmanager
-  #     SPRING_DATASOURCE_USERNAME: abm
-  #     SPRING_DATASOURCE_PASSWORD: abm
+  #     SPRING_DATASOURCE_URL: jdbc:postgresql://timescaledb:5432/cadence
+  #     SPRING_DATASOURCE_USERNAME: cadence
+  #     SPRING_DATASOURCE_PASSWORD: cadence
   #     APP_SECURITY_OAUTH2_ENABLED: "true"
-  #     SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: http://keycloak:8081/realms/abm
+  #     SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: http://keycloak:8081/realms/cadence
 
 volumes:
   timescaledb_data:

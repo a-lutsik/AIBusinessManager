@@ -67,7 +67,7 @@ export default function AiScreen() {
       .catch(() => undefined);
 
     const stored =
-      typeof localStorage !== 'undefined' ? localStorage.getItem('abm.aiConversationId') : null;
+      typeof localStorage !== 'undefined' ? localStorage.getItem('cadence.aiConversationId') : null;
     if (!stored) return;
     setConversationId(stored);
     api
@@ -97,7 +97,7 @@ export default function AiScreen() {
       if (res.conversationId) {
         setConversationId(res.conversationId);
         if (typeof localStorage !== 'undefined') {
-          localStorage.setItem('abm.aiConversationId', res.conversationId);
+          localStorage.setItem('cadence.aiConversationId', res.conversationId);
         }
       }
       const drafts = res.drafts ?? [];

@@ -3,11 +3,12 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>AI Business Manager — booking, clients, and growth for solo specialists</title>
+  <title>Cadence — booking, clients, and growth for solo specialists</title>
   <meta name="description" content="AI-first business manager for solo specialists and micro-teams. Booking in three decisions, returning clients, six growth metrics, and an assistant that drafts — never silently changes." />
-  <meta property="og:title" content="AI Business Manager" />
+  <meta property="og:title" content="Cadence" />
   <meta property="og:description" content="Booking, CRM, metrics, and an AI manager for salons and solo specialists." />
   <meta property="og:type" content="website" />
+  <link rel="icon" type="image/png" href="./assets/favicon.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;600;700&display=swap" rel="stylesheet" />
@@ -16,7 +17,7 @@
       --bg: #f7f4ef;
       --ink: #1c1917;
       --muted: #57534e;
-      --accent: #0f766e;
+      --accent: #12A468;
       --accent-ink: #ecfdf5;
       --line: #d6d3d1;
       --surface: #ffffff;
@@ -71,14 +72,16 @@
     .note { font-size: 0.85rem; color: var(--muted); }
     .price { font-size: 1.6rem; font-weight: 700; margin: 0.3rem 0; }
     footer { color: var(--muted); font-size: 0.9rem; }
+    .logo { width: 3rem; height: 3rem; display: block; margin-bottom: 1.25rem; border-radius: 0.85rem; }
   </style>
 </head>
 <body>
   <header>
+    <img class="logo" src="./assets/logo.png" alt="Cadence" width="48" height="48" />
     <p class="note">For solo specialists and micro-teams · RU / EN now, KA / UK / CS next</p>
     <h1 class="brand">Stop running the salon from the chat thread.</h1>
     <p class="lede">
-      AI Business Manager gives you a working booking page in one evening, a CRM that fills itself,
+      Cadence gives you a working booking page in one evening, a CRM that fills itself,
       six honest metrics, and an assistant that drafts actions you confirm.
     </p>
     <p><a class="cta" href="#waitlist">Join the waitlist</a></p>
@@ -167,12 +170,12 @@
     <p class="ok" id="thanks">Thanks — we stored your interest in this browser for Phase 0 interviews.</p>
     <p class="note">Submissions stay in localStorage until the waitlist API exists. Demo tenant: Lumen Studio, Tbilisi.</p>
   </section>
-  <footer>AI Business Manager · not a payment system · Telegram is the only client channel in MVP</footer>
+  <footer>Cadence · not a payment system · Telegram is the only client channel in MVP</footer>
   <script>
     document.getElementById("waitlist-form").addEventListener("submit", (e) => {
       e.preventDefault();
       const data = Object.fromEntries(new FormData(e.target).entries());
-      const key = "abm-waitlist";
+      const key = "cadence-waitlist";
       const prev = JSON.parse(localStorage.getItem(key) || "[]");
       prev.push({ ...data, at: new Date().toISOString() });
       localStorage.setItem(key, JSON.stringify(prev));

@@ -62,7 +62,7 @@ jooq {
                 excludes = "flyway_schema_history"
             }
             target {
-                packageName = "com.aibusinessmanager.platform.jooq"
+                packageName = "com.cadence.platform.jooq"
                 directory = layout.buildDirectory.dir("generated-sources/jooq").get().asFile.absolutePath
             }
         }
