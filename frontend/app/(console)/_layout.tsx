@@ -1,6 +1,6 @@
 import { Link, Slot, usePathname } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { MaterialIcon } from '@/components/ui/MaterialIcon';
 import { api, LUMEN_TENANT_ID, type MeView } from '@/src/api/client';
 import { setLocale, t, type AppLocale } from '@/src/i18n';
@@ -36,7 +36,7 @@ export default function ConsoleLayout() {
   const { theme, toggle } = useTheme();
 
   useEffect(() => {
-    const stored = typeof localStorage !== 'undefined' ? localStorage.getItem('abm.role') : null;
+    const stored = typeof localStorage !== 'undefined' ? localStorage.getItem('cadence.role') : null;
     if (stored === 'OWNER' || stored === 'MASTER') {
       setRole(stored);
     }
@@ -56,12 +56,12 @@ export default function ConsoleLayout() {
   const switchRole = (next: 'OWNER' | 'MASTER') => {
     setRole(next);
     if (typeof localStorage !== 'undefined') {
-      localStorage.setItem('abm.role', next);
-      localStorage.setItem('abm.tenantId', LUMEN_TENANT_ID);
+      localStorage.setItem('cadence.role', next);
+      localStorage.setItem('cadence.tenantId', LUMEN_TENANT_ID);
       if (next === 'MASTER') {
-        localStorage.setItem('abm.specialistId', '00000000-0000-4000-8000-000000000011');
+        localStorage.setItem('cadence.specialistId', '00000000-0000-4000-8000-000000000011');
       } else {
-        localStorage.removeItem('abm.specialistId');
+        localStorage.removeItem('cadence.specialistId');
       }
     }
     bump((n) => n + 1);
@@ -76,7 +76,10 @@ export default function ConsoleLayout() {
   return (
     <View style={[styles.root, desktop ? styles.row : null]}>
       <View style={[styles.nav, desktop ? styles.side : styles.bottom]}>
-        <Text style={styles.brand}>{t('app.name')}</Text>
+        <View style={styles.brandRow}>
+          <Image source={require('../../assets/images/android-icon-foreground.png')} style={styles.brandMark} />
+          <Text style={styles.brand}>{t('app.name')}</Text>
+        </View>
         {visibleNav.map((item) => {
           const active = path.startsWith(item.href);
           const labelKey = role === 'MASTER' && item.masterLabelKey ? item.masterLabelKey : item.key;
@@ -161,11 +164,12 @@ const styles = StyleSheet.create({
     flexDirection: 'column',
   },
   bottom: { flexDirection: 'row', flexWrap: 'wrap', gap: tokens.space.sm },
+  brandRow: { flexDirection: 'row', alignItems: 'center', gap: tokens.space.sm, marginBottom: tokens.space.xl },
+  brandMark: { width: 24, height: 24 },
   brand: {
     fontWeight: '700',
     fontSize: 17,
     color: tokens.color.ink,
-    marginBottom: tokens.space.xl,
     fontFamily: 'Plus Jakarta Sans',
   },
   link: {

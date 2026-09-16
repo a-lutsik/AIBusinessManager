@@ -1,6 +1,6 @@
 openapi: 3.0.3
 info:
-  title: AI Business Manager API
+  title: Cadence API
   version: 0.2.0
   description: Public booking vs authenticated console. Domain errors are application/problem+json with a machine `code`.
 paths:

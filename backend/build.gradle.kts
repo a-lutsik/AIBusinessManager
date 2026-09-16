@@ -3,7 +3,7 @@ plugins {
 }
 
 allprojects {
-    group = "com.aibusinessmanager"
+    group = "com.cadence"
     version = "0.1.0-SNAPSHOT"
 }
 

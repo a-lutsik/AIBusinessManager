@@ -1,0 +1,55 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap');
+
+/* ============================================================
+   Cadence — Atelier Intelligence overrides for Keycloak login
+   Parent theme: keycloak.v2 (PatternFly v5)
+   Palette: emerald #059669 / indigo #6366F1 / amber #F59E0B
+   Type: Plus Jakarta Sans (display) + Inter (text)
+   ============================================================ */
+
+:root {
+    --pf-v5-global--primary-color--100: #059669;
+    --pf-v5-global--primary-color--200: #047857;
+    --pf-v5-global--primary-color--300: #A7F3D0;
+    --pf-v5-global--link--Color: #059669;
+    --pf-v5-global--link--Color--hover: #047857;
+    --pf-v5-global--FontFamily--text: "Inter", "RedHatText", helvetica, arial, sans-serif;
+    --pf-v5-global--FontFamily--heading: "Plus Jakarta Sans", "RedHatDisplay", helvetica, arial, sans-serif;
+    --pf-v5-global--FontFamily--text--vf: "Inter", "RedHatTextVF", "RedHatText", helvetica, arial, sans-serif;
+    --pf-v5-global--FontFamily--heading--vf: "Plus Jakarta Sans", "RedHatDisplayVF", "RedHatDisplay", helvetica, arial, sans-serif;
+    --pf-v5-c-button--m-primary--BackgroundColor: #059669;
+    --pf-v5-c-button--m-primary--hover--BackgroundColor: #047857;
+    --keycloak-card-top-color: #059669;
+}
+
+.login-pf body {
+    background-color: #F9FBFA;
+}
+
+/* Cadence wordmark (realm display name rendered as text) */
+#kc-header-wrapper.pf-v5-c-brand {
+    font-family: "Plus Jakarta Sans", "Inter", sans-serif;
+    font-weight: 700;
+    font-size: 28px;
+    letter-spacing: -0.02em;
+    color: #059669;
+}
+
+/* Dark mode */
+.pf-v5-theme-dark {
+    --pf-v5-global--primary-color--100: #34D399;
+    --pf-v5-global--primary-color--200: #6EE7B7;
+    --pf-v5-global--link--Color: #34D399;
+    --pf-v5-global--link--Color--hover: #6EE7B7;
+    --pf-v5-c-button--m-primary--BackgroundColor: #34D399;
+    --pf-v5-c-button--m-primary--hover--BackgroundColor: #6EE7B7;
+    --pf-v5-c-button--m-primary--Color: #0F172A;
+}
+
+.pf-v5-theme-dark body {
+    background-color: #0F172A;
+}
+
+.pf-v5-theme-dark #kc-header-wrapper.pf-v5-c-brand {
+    color: #34D399;
+}
