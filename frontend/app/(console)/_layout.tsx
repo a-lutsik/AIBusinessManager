@@ -1,5 +1,5 @@
 import { Link, Slot, usePathname } from 'expo-router';
-import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { setLocale, t, type AppLocale } from '@/src/i18n';
 import { tokens } from '@/src/theme/tokens';
 import { useTheme } from '@/src/theme/ThemeContext';
@@ -47,7 +47,10 @@ export default function ConsoleLayout() {
   return (
     <View style={StyleSheet.flatten([styles.root, desktop ? styles.row : null])}>
       <View style={StyleSheet.flatten([styles.nav, desktop ? styles.side : styles.bottom])}>
-        <Text style={styles.brand}>{t('app.name')}</Text>
+        <View style={styles.brandRow}>
+          <Image source={require('../../assets/images/android-icon-foreground.png')} style={styles.brandMark} />
+          <Text style={styles.brand}>{t('app.name')}</Text>
+        </View>
         {NAV.filter((item) => role === 'OWNER' || !item.ownerOnly).map((item) => (
           <Link key={item.href} href={item.href as any} asChild>
             <Pressable style={StyleSheet.flatten([styles.link, path.startsWith(item.href) ? styles.active : null])}>
@@ -82,7 +85,9 @@ const styles = StyleSheet.create({
   nav: { backgroundColor: tokens.color.surface, padding: tokens.space.md, borderColor: tokens.color.line, borderRightWidth: 1 },
   side: { width: 220 },
   bottom: { flexDirection: 'row', flexWrap: 'wrap' },
-  brand: { fontWeight: '700', fontSize: 16, color: tokens.color.ink, marginBottom: tokens.space.md },
+  brandRow: { flexDirection: 'row', alignItems: 'center', gap: tokens.space.sm, marginBottom: tokens.space.md },
+  brandMark: { width: 28, height: 28 },
+  brand: { fontWeight: '700', fontSize: 16, color: tokens.color.ink },
   link: { paddingVertical: tokens.space.sm },
   active: { borderBottomWidth: 2, borderBottomColor: tokens.color.accent },
   linkText: { color: tokens.color.ink },

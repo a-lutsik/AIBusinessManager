@@ -6,11 +6,11 @@ export const tokens = {
     muted: '#57534e',
     canvas: '#f7f4ef',
     surface: '#ffffff',
-    accent: '#0f766e',
+    accent: '#12A468',
     line: '#e7e5e4',
     status: {
       pending: '#b45309',
-      confirmed: '#0f766e',
+      confirmed: '#12A468',
       completed: '#1d4ed8',
       noShow: '#be123c',
       cancelled: '#78716c',
@@ -21,7 +21,7 @@ export const tokens = {
     muted: '#a8a29e',
     canvas: '#1c1917',
     surface: '#292524',
-    accent: '#2dd4bf',
+    accent: '#3EE08A',
     line: '#44403c',
   },
   space: {
