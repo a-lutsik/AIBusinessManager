@@ -1,6 +1,6 @@
 import { useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { ScrollView, Text, View, useWindowDimensions } from 'react-native';
 import { EmptyState } from '@/components/ui/EmptyState';
 import {
   api,
@@ -10,7 +10,7 @@ import {
   type ServiceView,
 } from '@/src/api/client';
 import { t } from '@/src/i18n';
-import { tokens } from '@/src/theme/tokens';
+import { useThemeTokens } from '@/src/theme/tokens';
 import { formatMoney } from '@/src/utils/money';
 
 type EnrichedRow = {
@@ -29,14 +29,14 @@ type EnrichedRow = {
   afterOverride: number | null;
 };
 
-function enrichRow(row: MatrixRowView, servicesById: Map<string, ServiceView>): EnrichedRow {
+function enrichRow(row: MatrixRowView, servicesById: Map<string, ServiceView>, fallbackColor: string): EnrichedRow {
   const service = row.service ?? servicesById.get(row.serviceId);
   const name =
     row.name ??
     row.serviceName ??
     service?.name ??
     `${t('matrix.service')} ${String(row.serviceId).slice(0, 8)}`;
-  const color = row.color ?? service?.color ?? tokens.color.primary;
+  const color = row.color ?? service?.color ?? fallbackColor;
   return {
     key: row.id ?? row.serviceId,
     serviceId: row.serviceId,
@@ -55,6 +55,7 @@ function enrichRow(row: MatrixRowView, servicesById: Map<string, ServiceView>): 
 }
 
 export default function SpecialistMatrix() {
+  const { color, space, radius } = useThemeTokens();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { width } = useWindowDimensions();
   const compact = width < 900;
@@ -70,49 +71,77 @@ export default function SpecialistMatrix() {
   }, [id]);
 
   const servicesById = useMemo(() => new Map(services.map((s) => [s.id, s])), [services]);
-  const enriched = useMemo(() => rows.map((r) => enrichRow(r, servicesById)), [rows, servicesById]);
+  const enriched = useMemo(() => rows.map((r) => enrichRow(r, servicesById, color.primary)), [rows, servicesById, color.primary]);
   const currency = me?.currencyCode ?? 'GEL';
 
+  const th = { fontSize: 11, fontWeight: '700' as const, color: color.muted, textTransform: 'uppercase' as const, letterSpacing: 0.3 };
+  const td = { fontSize: 13, color: color.ink };
+  const colService = { flex: 2.2, minWidth: 160 };
+  const colOffered = { flex: 0.8, minWidth: 70 };
+  const colNum = { flex: 1, minWidth: 80 };
+  const colMoney = { flex: 1.1, minWidth: 90 };
+  const colBuf = { flex: 1, minWidth: 80 };
+
   return (
-    <ScrollView horizontal={compact} contentContainerStyle={styles.pad}>
+    <ScrollView horizontal={compact} contentContainerStyle={{ paddingBottom: space.xxl }}>
       <View style={{ minWidth: compact ? 720 : undefined, width: compact ? undefined : '100%' }}>
-        <Text style={styles.h1}>{t('matrix.title')}</Text>
-        <Text style={styles.lead}>{t('matrix.lead')}</Text>
+        <Text style={{ fontSize: 28, fontWeight: '700', marginBottom: space.sm, fontFamily: 'Plus Jakarta Sans', color: color.ink }}>
+          {t('matrix.title')}
+        </Text>
+        <Text style={{ color: color.muted, marginBottom: space.lg, maxWidth: 560 }}>{t('matrix.lead')}</Text>
         {enriched.length === 0 ? <EmptyState title={t('matrix.empty')} /> : null}
 
         {enriched.length > 0 ? (
-          <View style={styles.table}>
-            <View style={[styles.tr, styles.thead]}>
-              <Text style={[styles.th, styles.colService]}>{t('matrix.col.service')}</Text>
-              <Text style={[styles.th, styles.colOffered]}>{t('matrix.col.offered')}</Text>
-              <Text style={[styles.th, styles.colNum]}>{t('matrix.col.defaultDur')}</Text>
-              <Text style={[styles.th, styles.colNum]}>{t('matrix.col.overrideDur')}</Text>
-              <Text style={[styles.th, styles.colMoney]}>{t('matrix.col.defaultPrice')}</Text>
-              <Text style={[styles.th, styles.colMoney]}>{t('matrix.col.overridePrice')}</Text>
-              <Text style={[styles.th, styles.colBuf]}>{t('matrix.col.buffers')}</Text>
+          <View style={{ borderWidth: 1, borderColor: color.line, borderRadius: radius.card, overflow: 'hidden', backgroundColor: color.surface }}>
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'stretch',
+                borderBottomWidth: 1,
+                borderBottomColor: color.line,
+                paddingVertical: space.md,
+                paddingHorizontal: space.sm,
+                backgroundColor: color.mist,
+              }}
+            >
+              <Text style={[th, colService]}>{t('matrix.col.service')}</Text>
+              <Text style={[th, colOffered]}>{t('matrix.col.offered')}</Text>
+              <Text style={[th, colNum]}>{t('matrix.col.defaultDur')}</Text>
+              <Text style={[th, colNum]}>{t('matrix.col.overrideDur')}</Text>
+              <Text style={[th, colMoney]}>{t('matrix.col.defaultPrice')}</Text>
+              <Text style={[th, colMoney]}>{t('matrix.col.overridePrice')}</Text>
+              <Text style={[th, colBuf]}>{t('matrix.col.buffers')}</Text>
             </View>
             {enriched.map((r) => (
-              <View key={r.key} style={styles.tr}>
-                <View style={[styles.colService, styles.serviceCell]}>
-                  <View style={[styles.swatch, { backgroundColor: r.color }]} />
-                  <Text style={styles.serviceName} numberOfLines={2}>
+              <View
+                key={r.key}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'stretch',
+                  borderBottomWidth: 1,
+                  borderBottomColor: color.line,
+                  paddingVertical: space.md,
+                  paddingHorizontal: space.sm,
+                }}
+              >
+                <View style={[{ flexDirection: 'row', alignItems: 'center', gap: space.sm }, colService]}>
+                  <View style={{ width: 10, height: 10, borderRadius: radius.pill, backgroundColor: r.color }} />
+                  <Text style={{ fontWeight: '600', flexShrink: 1, color: color.ink }} numberOfLines={2}>
                     {r.name}
                   </Text>
                 </View>
-                <Text style={[styles.td, styles.colOffered, r.offered ? styles.on : styles.off]}>
+                <Text style={[td, colOffered, { color: r.offered ? color.primary : color.muted, fontWeight: r.offered ? '700' : '400' }]}>
                   {r.offered ? t('catalog.yes') : t('catalog.no')}
                 </Text>
-                <Text style={[styles.td, styles.colNum]}>{fmtNum(r.defaultDuration, 'min')}</Text>
-                <Text style={[styles.td, styles.colNum, r.durationOverride != null ? styles.override : null]}>
+                <Text style={[td, colNum]}>{fmtNum(r.defaultDuration, 'min')}</Text>
+                <Text style={[td, colNum, r.durationOverride != null ? { color: color.secondary, fontWeight: '700' } : null]}>
                   {fmtNum(r.durationOverride, 'min')}
                 </Text>
-                <Text style={[styles.td, styles.colMoney]}>
-                  {r.defaultPrice != null ? formatMoney(r.defaultPrice, currency) : '—'}
-                </Text>
-                <Text style={[styles.td, styles.colMoney, r.priceOverride != null ? styles.override : null]}>
+                <Text style={[td, colMoney]}>{r.defaultPrice != null ? formatMoney(r.defaultPrice, currency) : '—'}</Text>
+                <Text style={[td, colMoney, r.priceOverride != null ? { color: color.secondary, fontWeight: '700' } : null]}>
                   {r.priceOverride != null ? formatMoney(r.priceOverride, currency) : '—'}
                 </Text>
-                <Text style={[styles.td, styles.colBuf]}>
+                <Text style={[td, colBuf]}>
                   {fmtBuf(r.defaultBefore, r.defaultAfter)}
                   {r.beforeOverride != null || r.afterOverride != null
                     ? `\n→ ${fmtBuf(r.beforeOverride ?? r.defaultBefore, r.afterOverride ?? r.defaultAfter)}`
@@ -136,38 +165,3 @@ function fmtBuf(before: number | null, after: number | null): string {
   if (before == null && after == null) return '—';
   return `${before ?? 0}/${after ?? 0}`;
 }
-
-const styles = StyleSheet.create({
-  pad: { paddingBottom: tokens.space.xxl },
-  h1: { fontSize: 28, fontWeight: '700', marginBottom: tokens.space.sm, fontFamily: 'Plus Jakarta Sans', color: tokens.color.ink },
-  lead: { color: tokens.color.muted, marginBottom: tokens.space.lg, maxWidth: 560 },
-  table: {
-    borderWidth: 1,
-    borderColor: tokens.color.line,
-    borderRadius: tokens.radius.card,
-    overflow: 'hidden',
-    backgroundColor: tokens.color.surface,
-  },
-  tr: {
-    flexDirection: 'row',
-    alignItems: 'stretch',
-    borderBottomWidth: 1,
-    borderBottomColor: tokens.color.line,
-    paddingVertical: tokens.space.md,
-    paddingHorizontal: tokens.space.sm,
-  },
-  thead: { backgroundColor: tokens.color.mist, borderBottomWidth: 1 },
-  th: { fontSize: 11, fontWeight: '700', color: tokens.color.muted, textTransform: 'uppercase', letterSpacing: 0.3 },
-  td: { fontSize: 13, color: tokens.color.ink },
-  colService: { flex: 2.2, minWidth: 160 },
-  colOffered: { flex: 0.8, minWidth: 70 },
-  colNum: { flex: 1, minWidth: 80 },
-  colMoney: { flex: 1.1, minWidth: 90 },
-  colBuf: { flex: 1, minWidth: 80 },
-  serviceCell: { flexDirection: 'row', alignItems: 'center', gap: tokens.space.sm },
-  swatch: { width: 10, height: 10, borderRadius: tokens.radius.pill },
-  serviceName: { fontWeight: '600', flexShrink: 1 },
-  on: { color: tokens.color.primary, fontWeight: '700' },
-  off: { color: tokens.color.muted },
-  override: { color: tokens.color.secondary, fontWeight: '700' },
-});

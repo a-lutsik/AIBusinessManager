@@ -1,29 +1,29 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 import { t } from '@/src/i18n';
-import { tokens, trustColor } from '@/src/theme/tokens';
+import { trustColor, useThemeTokens } from '@/src/theme/tokens';
 
 type Props = {
   level?: string | null;
 };
 
 export function TrustBadge({ level }: Props) {
+  const { color, space, radius } = useThemeTokens();
   if (!level) return null;
-  const color = trustColor(level);
+  const badgeColor = trustColor(level, color);
   const label = t(`trust.${level}`) !== `trust.${level}` ? t(`trust.${level}`) : level;
   return (
-    <View style={[styles.badge, { backgroundColor: `${color}18`, borderColor: color }]}>
-      <Text style={[styles.text, { color }]}>{label}</Text>
+    <View
+      style={{
+        alignSelf: 'flex-start',
+        paddingHorizontal: space.sm + 2,
+        paddingVertical: 2,
+        borderRadius: radius.pill,
+        borderWidth: 1,
+        backgroundColor: `${badgeColor}18`,
+        borderColor: badgeColor,
+      }}
+    >
+      <Text style={{ fontSize: 12, fontWeight: '600', color: badgeColor }}>{label}</Text>
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  badge: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: tokens.space.sm + 2,
-    paddingVertical: 2,
-    borderRadius: tokens.radius.pill,
-    borderWidth: 1,
-  },
-  text: { fontSize: 12, fontWeight: '600' },
-});

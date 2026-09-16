@@ -1,5 +1,5 @@
 {
-  "app.name": "AuraDesk",
+  "app.name": "Cadence",
   "home.title": "Console",
   "home.subtitle": "Today, calendar, clients, and AI drafts.",
   "home.localeHint": "Interface: English",
@@ -13,6 +13,7 @@
   "nav.ai": "AI manager",
   "nav.book": "Public booking",
   "shell.debug": "Debug / locale",
+  "shell.search": "Search",
   "empty.calendar": "No visits in this range. Book a free slot on the public page or create one here.",
   "empty.clients": "No clients yet. The first public booking creates a profile automatically.",
   "empty.tasks": "No manual-send tasks.",
@@ -98,6 +99,7 @@
   "action.cancel": "Cancel",
   "action.done": "Done",
   "action.dismiss": "Dismiss",
+  "action.open": "Open",
   "calendar.day": "Day",
   "calendar.week": "Week",
   "calendar.allMasters": "All specialists",

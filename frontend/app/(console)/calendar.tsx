@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, ScrollView, Text, View } from 'react-native';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { TrustBadge } from '@/components/ui/TrustBadge';
@@ -11,11 +11,7 @@ import {
   type SpecialistView,
 } from '@/src/api/client';
 import { t } from '@/src/i18n';
-import { statusColor, tokens } from '@/src/theme/tokens';
-
-const DAY_START_HOUR = 8;
-const DAY_END_HOUR = 21;
-const PX_PER_MIN = 1.2;
+import { statusColor, useThemeTokens } from '@/src/theme/tokens';
 
 function startOfLocalDay(d: Date) {
   const x = new Date(d);
@@ -27,13 +23,6 @@ function addDays(d: Date, n: number) {
   const x = new Date(d);
   x.setDate(x.getDate() + n);
   return x;
-}
-
-function minutesFromDayStart(iso: string | undefined, day: Date): number | null {
-  if (!iso) return null;
-  const t0 = new Date(iso).getTime();
-  const base = startOfLocalDay(day).getTime();
-  return Math.round((t0 - base) / 60000);
 }
 
 function dayKey(d: Date) {
@@ -58,49 +47,8 @@ function trustFromDetail(raw: unknown, fallback?: string | null): string | null 
   return fallback;
 }
 
-type TimelineBlock = {
-  visit: AppointmentView;
-  top: number;
-  height: number;
-  bufferBefore: number;
-  bufferAfter: number;
-  bodyTop: number;
-  bodyHeight: number;
-};
-
-function layoutDay(visits: AppointmentView[], day: Date): TimelineBlock[] {
-  const dayStartMin = DAY_START_HOUR * 60;
-  const dayEndMin = DAY_END_HOUR * 60;
-  return visits
-    .map((visit) => {
-      const occStart = minutesFromDayStart(visit.occupiedStart ?? visit.serviceStart, day);
-      const occEnd = minutesFromDayStart(visit.occupiedEnd ?? visit.serviceEnd ?? visit.serviceStart, day);
-      const svcStart = minutesFromDayStart(visit.serviceStart, day);
-      const svcEnd = minutesFromDayStart(visit.serviceEnd ?? visit.serviceStart, day);
-      if (occStart == null || occEnd == null || svcStart == null || svcEnd == null) return null;
-      const clampedStart = Math.max(occStart, dayStartMin);
-      const clampedEnd = Math.min(occEnd, dayEndMin);
-      if (clampedEnd <= clampedStart) return null;
-      const top = (clampedStart - dayStartMin) * PX_PER_MIN;
-      const height = Math.max(24, (clampedEnd - clampedStart) * PX_PER_MIN);
-      const bodyTop = Math.max(0, (svcStart - clampedStart) * PX_PER_MIN);
-      const bodyHeight = Math.max(16, (Math.min(svcEnd, dayEndMin) - Math.max(svcStart, clampedStart)) * PX_PER_MIN);
-      const bufferBefore = Math.max(0, bodyTop);
-      const bufferAfter = Math.max(0, height - bodyTop - bodyHeight);
-      return { visit, top, height, bufferBefore, bufferAfter, bodyTop, bodyHeight };
-    })
-    .filter(Boolean) as TimelineBlock[];
-}
-
-function hoursLabels() {
-  const labels: string[] = [];
-  for (let h = DAY_START_HOUR; h <= DAY_END_HOUR; h++) {
-    labels.push(`${String(h).padStart(2, '0')}:00`);
-  }
-  return labels;
-}
-
 export default function CalendarScreen() {
+  const { color, space, radius } = useThemeTokens();
   const [mode, setMode] = useState<'day' | 'week'>('week');
   const [visits, setVisits] = useState<AppointmentView[]>([]);
   const [specialists, setSpecialists] = useState<SpecialistView[]>([]);
@@ -145,6 +93,7 @@ export default function CalendarScreen() {
 
   useEffect(() => {
     load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [range.from, range.to, filter]);
 
   const openVisit = async (summary: AppointmentView) => {
@@ -211,110 +160,119 @@ export default function CalendarScreen() {
     }
   };
 
-  const dayHeight = (DAY_END_HOUR - DAY_START_HOUR) * 60 * PX_PER_MIN;
-  const hours = hoursLabels();
+  const feedDays = useMemo(() => {
+    return days
+      .map((day) => {
+        const key = dayKey(day);
+        const dayVisits = visits
+          .filter((v) => v.serviceStart && dayKey(new Date(v.serviceStart)) === key)
+          .sort((a, b) => new Date(a.serviceStart!).getTime() - new Date(b.serviceStart!).getTime());
+        return { day, key, visits: dayVisits };
+      })
+      .filter((d) => d.visits.length > 0);
+  }, [days, visits]);
+
+  const pill = (active: boolean) => ({
+    paddingVertical: 6,
+    paddingHorizontal: space.md,
+    borderRadius: radius.pill,
+    backgroundColor: active ? color.primary : color.surface,
+    borderWidth: 1,
+    borderColor: active ? color.primary : color.line,
+  });
+  const pillText = (active: boolean) => ({ fontSize: 12, fontWeight: '700' as const, color: active ? '#FFFFFF' : color.muted });
 
   return (
-    <View style={styles.wrap}>
+    <View style={{ flex: 1, flexDirection: 'row', gap: space.lg }}>
       <View style={{ flex: 1 }}>
-        <Text style={styles.h1}>{t('nav.calendar')}</Text>
-        <View style={styles.row}>
-          <Pressable onPress={() => setMode('day')}>
-            <Text style={[styles.chip, mode === 'day' && styles.sel]}>{t('calendar.day')}</Text>
+        <Text style={{ fontSize: 28, fontWeight: '700', color: color.ink, fontFamily: 'Plus Jakarta Sans' }}>
+          {t('nav.calendar')}
+        </Text>
+        <View style={{ flexDirection: 'row', gap: space.sm, marginVertical: space.md, flexWrap: 'wrap' }}>
+          <Pressable onPress={() => setMode('day')} style={pill(mode === 'day')}>
+            <Text style={pillText(mode === 'day')}>{t('calendar.day')}</Text>
           </Pressable>
-          <Pressable onPress={() => setMode('week')}>
-            <Text style={[styles.chip, mode === 'week' && styles.sel]}>{t('calendar.week')}</Text>
+          <Pressable onPress={() => setMode('week')} style={pill(mode === 'week')}>
+            <Text style={pillText(mode === 'week')}>{t('calendar.week')}</Text>
           </Pressable>
-          <Pressable onPress={() => setFilter(null)}>
-            <Text style={[styles.chip, filter == null && styles.sel]}>{t('calendar.allMasters')}</Text>
+          <Pressable onPress={() => setFilter(null)} style={pill(filter == null)}>
+            <Text style={pillText(filter == null)}>{t('calendar.allMasters')}</Text>
           </Pressable>
           {specialists.map((s) => (
-            <Pressable key={s.id} onPress={() => setFilter(s.id)}>
-              <Text style={[styles.chip, filter === s.id && styles.sel]}>{s.displayName}</Text>
+            <Pressable key={s.id} onPress={() => setFilter(s.id)} style={pill(filter === s.id)}>
+              <Text style={pillText(filter === s.id)}>{s.displayName}</Text>
             </Pressable>
           ))}
         </View>
-        {error ? <Text style={styles.err}>{error}</Text> : null}
+        {error ? <Text style={{ color: color.status.noShow, marginBottom: space.sm }}>{error}</Text> : null}
 
-        {visits.length === 0 ? <EmptyState title={t('empty.calendar')} /> : null}
-
-        <ScrollView horizontal style={{ flexGrow: 0 }}>
-          <View style={styles.timelineRow}>
-            <View style={styles.gutter}>
-              <View style={{ height: 28 }} />
-              <View style={{ height: dayHeight, position: 'relative' }}>
-                {hours.map((label, i) => (
-                  <Text key={label} style={[styles.hourLabel, { top: i * 60 * PX_PER_MIN - 6 }]}>
-                    {label}
+        <ScrollView contentContainerStyle={{ paddingBottom: space.xxl }}>
+          {feedDays.length === 0 ? <EmptyState title={t('empty.calendar')} /> : null}
+          {feedDays.map(({ day, key, visits: dayVisits }) => (
+            <View key={key} style={{ marginBottom: space.lg }}>
+              <Text style={{ fontSize: 13, fontWeight: '700', color: color.muted, textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: space.sm }}>
+                {day.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}
+              </Text>
+              {dayVisits.map((v) => (
+                <Pressable
+                  key={v.id}
+                  onPress={() => openVisit(v)}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: space.md,
+                    backgroundColor: selected?.id === v.id ? `${color.primary}0F` : color.surface,
+                    padding: space.lg,
+                    borderRadius: radius.card,
+                    marginBottom: space.sm,
+                    borderLeftWidth: 4,
+                    borderWidth: 1,
+                    borderColor: selected?.id === v.id ? color.primary : color.line,
+                    borderLeftColor: statusColor(v.status, color),
+                  }}
+                >
+                  <Text style={{ width: 56, fontWeight: '700', color: color.ink, fontVariant: ['tabular-nums'] }}>
+                    {v.serviceStart ? new Date(v.serviceStart).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : ''}
                   </Text>
-                ))}
-              </View>
-            </View>
-            {days.map((day) => {
-              const key = dayKey(day);
-              const dayVisits = visits.filter((v) => {
-                if (!v.serviceStart) return false;
-                return dayKey(new Date(v.serviceStart)) === key;
-              });
-              const blocks = layoutDay(dayVisits, day);
-              return (
-                <View key={key} style={styles.dayCol}>
-                  <Text style={styles.dayHead}>
-                    {day.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })}
-                  </Text>
-                  <View style={[styles.dayCanvas, { height: dayHeight }]}>
-                    {hours.map((_, i) => (
-                      <View key={i} style={[styles.hourLine, { top: i * 60 * PX_PER_MIN }]} />
-                    ))}
-                    {blocks.map((b) => (
-                      <Pressable
-                        key={b.visit.id}
-                        onPress={() => openVisit(b.visit)}
-                        style={[
-                          styles.block,
-                          {
-                            top: b.top,
-                            height: b.height,
-                            borderLeftColor: statusColor(b.visit.status),
-                          },
-                        ]}
-                      >
-                        {b.bufferBefore > 2 ? (
-                          <View style={[styles.bufferZone, { height: b.bufferBefore }]} />
-                        ) : null}
-                        <View style={[styles.bodyZone, { minHeight: b.bodyHeight }]}>
-                          <Text style={styles.k} numberOfLines={1}>
-                            {b.visit.serviceNameSnapshot}
-                          </Text>
-                          <Text style={styles.blockMeta} numberOfLines={1}>
-                            {b.visit.clientDisplayName}
-                          </Text>
-                        </View>
-                        {b.bufferAfter > 2 ? (
-                          <View style={[styles.bufferZone, { height: b.bufferAfter }]} />
-                        ) : null}
-                      </Pressable>
-                    ))}
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontWeight: '700', color: color.ink }} numberOfLines={1}>
+                      {v.serviceNameSnapshot ?? '—'} · {v.clientDisplayName ?? '—'}
+                    </Text>
+                    <Text style={{ color: color.muted, marginTop: 2 }}>{t(`status.${v.status}`)}</Text>
                   </View>
-                </View>
-              );
-            })}
-          </View>
+                  <TrustBadge level={v.trustLevel} />
+                </Pressable>
+              ))}
+            </View>
+          ))}
         </ScrollView>
       </View>
 
       {selected ? (
-        <View style={styles.panel}>
-          <Text style={styles.h2}>{selected.serviceNameSnapshot}</Text>
-          <Text>{selected.clientDisplayName}</Text>
+        <View
+          style={{
+            width: 320,
+            backgroundColor: color.surface,
+            padding: space.lg,
+            borderRadius: radius.card,
+            borderWidth: 1,
+            borderColor: color.line,
+            gap: space.xs,
+            alignSelf: 'flex-start',
+          }}
+        >
+          <Text style={{ fontSize: 20, fontWeight: '600', color: color.ink, fontFamily: 'Plus Jakarta Sans', marginBottom: space.sm }}>
+            {selected.serviceNameSnapshot}
+          </Text>
+          <Text style={{ color: color.ink }}>{selected.clientDisplayName}</Text>
           <TrustBadge level={selectedTrust ?? selected.trustLevel} />
-          <Text style={styles.muted}>{t(`status.${selected.status}`)}</Text>
-          <Text style={styles.muted}>
+          <Text style={{ color: color.muted, marginTop: 4 }}>{t(`status.${selected.status}`)}</Text>
+          <Text style={{ color: color.muted, marginTop: 4 }}>
             {selected.serviceStart ? new Date(selected.serviceStart).toLocaleString() : ''}
           </Text>
-          {selected.clientPhone ? <Text style={styles.muted}>{selected.clientPhone}</Text> : null}
-          {selected.note ? <Text>{selected.note}</Text> : null}
-          <View style={styles.panelActions}>
+          {selected.clientPhone ? <Text style={{ color: color.muted, marginTop: 4 }}>{selected.clientPhone}</Text> : null}
+          {selected.note ? <Text style={{ color: color.ink, marginTop: 4 }}>{selected.note}</Text> : null}
+          <View style={{ marginTop: space.md, gap: space.sm }}>
             {actionsFor(selected.status).map((st) => (
               <Button
                 key={st}
@@ -337,10 +295,12 @@ export default function CalendarScreen() {
       ) : null}
 
       <Modal visible={slotOpen} transparent animationType="fade" onRequestClose={() => setSlotOpen(false)}>
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            <Text style={styles.h2}>{t('visit.pickSlot')}</Text>
-            {slotsBusy && slots.length === 0 ? <Text style={styles.muted}>…</Text> : null}
+        <View style={{ flex: 1, backgroundColor: 'rgba(15,23,42,0.4)', justifyContent: 'center', alignItems: 'center', padding: space.xl }}>
+          <View style={{ width: '100%', maxWidth: 420, backgroundColor: color.surface, borderRadius: radius.card, padding: space.xl, gap: space.sm }}>
+            <Text style={{ fontSize: 20, fontWeight: '600', color: color.ink, fontFamily: 'Plus Jakarta Sans', marginBottom: space.sm }}>
+              {t('visit.pickSlot')}
+            </Text>
+            {slotsBusy && slots.length === 0 ? <Text style={{ color: color.muted }}>…</Text> : null}
             {!slotsBusy && slots.length === 0 ? <EmptyState title={t('empty.slots')} /> : null}
             <ScrollView style={{ maxHeight: 320 }}>
               {slots.map((s) => (
@@ -350,7 +310,7 @@ export default function CalendarScreen() {
                   variant="ghost"
                   disabled={slotsBusy}
                   onPress={() => applyReschedule(s)}
-                  style={styles.slotBtn}
+                  style={{ alignSelf: 'stretch', marginBottom: space.xs }}
                 />
               ))}
             </ScrollView>
@@ -361,101 +321,3 @@ export default function CalendarScreen() {
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  wrap: { flex: 1, flexDirection: 'row', gap: tokens.space.lg },
-  h1: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: tokens.color.ink,
-    fontFamily: 'Plus Jakarta Sans',
-  },
-  h2: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: tokens.color.ink,
-    fontFamily: 'Plus Jakarta Sans',
-    marginBottom: tokens.space.sm,
-  },
-  row: {
-    flexDirection: 'row',
-    gap: tokens.space.md,
-    marginVertical: tokens.space.md,
-    flexWrap: 'wrap',
-  },
-  chip: { color: tokens.color.muted, fontWeight: '600' },
-  sel: { color: tokens.color.primary, textDecorationLine: 'underline' },
-  muted: { color: tokens.color.muted, marginTop: 4 },
-  err: { color: tokens.color.status.noShow, marginBottom: tokens.space.sm },
-  timelineRow: { flexDirection: 'row', paddingBottom: tokens.space.xl },
-  gutter: { width: 52 },
-  hourLabel: {
-    position: 'absolute',
-    left: 0,
-    fontSize: 11,
-    color: tokens.color.muted,
-    width: 48,
-  },
-  dayCol: { width: 160, marginRight: tokens.space.sm },
-  dayHead: {
-    height: 28,
-    fontWeight: '600',
-    color: tokens.color.ink,
-    fontSize: 13,
-    fontFamily: 'Plus Jakarta Sans',
-  },
-  dayCanvas: {
-    position: 'relative',
-    backgroundColor: tokens.color.surface,
-    borderWidth: 1,
-    borderColor: tokens.color.line,
-    borderRadius: tokens.radius.control,
-    overflow: 'hidden',
-  },
-  hourLine: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: tokens.color.line,
-  },
-  block: {
-    position: 'absolute',
-    left: 4,
-    right: 4,
-    backgroundColor: tokens.color.mist,
-    borderRadius: 6,
-    borderLeftWidth: 3,
-    overflow: 'hidden',
-  },
-  bufferZone: { backgroundColor: `${tokens.color.secondary}22` },
-  bodyZone: { paddingHorizontal: 6, paddingVertical: 2, justifyContent: 'center' },
-  k: { fontWeight: '700', fontSize: 12, color: tokens.color.ink },
-  blockMeta: { fontSize: 11, color: tokens.color.muted },
-  panel: {
-    width: 320,
-    backgroundColor: tokens.color.surface,
-    padding: tokens.space.lg,
-    borderRadius: tokens.radius.card,
-    borderWidth: 1,
-    borderColor: tokens.color.line,
-    gap: tokens.space.xs,
-  },
-  panelActions: { marginTop: tokens.space.md, gap: tokens.space.sm },
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(15,23,42,0.4)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: tokens.space.xl,
-  },
-  modalCard: {
-    width: '100%',
-    maxWidth: 420,
-    backgroundColor: tokens.color.surface,
-    borderRadius: tokens.radius.card,
-    padding: tokens.space.xl,
-    gap: tokens.space.sm,
-  },
-  slotBtn: { alignSelf: 'stretch', marginBottom: tokens.space.xs },
-});

@@ -1,9 +1,11 @@
 import { useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { Button } from '@/components/ui/Button';
+import { MaterialIcon } from '@/components/ui/MaterialIcon';
 import { api, API_BASE } from '@/src/api/client';
 import { currentLocale, setLocale, t, type AppLocale } from '@/src/i18n';
-import { tokens } from '@/src/theme/tokens';
+import { useThemeTokens } from '@/src/theme/tokens';
 
 const COUNTRIES = [
   { code: 'GE', dial: '+995' },
@@ -13,6 +15,7 @@ const COUNTRIES = [
 ];
 
 export default function PublicBookScreen() {
+  const { color, space, radius } = useThemeTokens();
   const { slug } = useLocalSearchParams<{ slug: string }>();
   const [tenant, setTenant] = useState<any>(null);
   const [services, setServices] = useState<any[]>([]);
@@ -80,98 +83,153 @@ export default function PublicBookScreen() {
     }
   };
 
+  const card = (selected: boolean) => ({
+    backgroundColor: color.surface,
+    padding: space.md,
+    borderRadius: radius.card,
+    marginBottom: space.sm,
+    borderWidth: selected ? 2 : 1,
+    borderColor: selected ? color.primary : color.line,
+  });
+  const chip = (selected: boolean) => ({
+    color: selected ? color.primary : color.muted,
+    fontWeight: '600' as const,
+    padding: 4,
+  });
+  const input = {
+    borderWidth: 1,
+    borderColor: color.line,
+    padding: space.md,
+    borderRadius: radius.control,
+    marginBottom: space.sm,
+    backgroundColor: color.surface,
+    color: color.ink,
+  };
+
   if (result) {
     const pending = result.status === 'PENDING';
     return (
-      <ScrollView style={styles.page}>
-        <Text style={styles.h1}>{pending ? t('book.pending') : t('book.success')}</Text>
-        <Text>{result.serviceName} · {result.serviceStart}</Text>
-        <Text style={styles.muted}>{t('book.saveLink')}: {result.managePath}</Text>
-        <Pressable
-          style={styles.btn}
+      <ScrollView style={{ flex: 1, backgroundColor: color.canvas, padding: space.xl }}>
+        <Text style={{ fontSize: 28, fontWeight: '700', color: color.ink, fontFamily: 'Plus Jakarta Sans' }}>
+          {pending ? t('book.pending') : t('book.success')}
+        </Text>
+        <Text style={{ color: color.ink, marginTop: space.sm }}>
+          {result.serviceName} · {result.serviceStart}
+        </Text>
+        <Text style={{ color: color.muted, marginVertical: space.md }}>
+          {t('book.saveLink')}: {result.managePath}
+        </Text>
+        <Button
+          label={t('book.addToCalendar')}
           onPress={() => {
             const url = `${API_BASE}/api/public/bookings/${result.id}/calendar.ics?token=${encodeURIComponent(result.accessToken)}`;
             if (typeof window !== 'undefined') {
               window.open(url, '_blank');
             }
           }}
-        >
-          <Text style={styles.btnText}>{t('book.addToCalendar')}</Text>
-        </Pressable>
+        />
       </ScrollView>
     );
   }
 
   return (
-    <ScrollView style={styles.page}>
-      <View style={styles.row}>
-        <Text style={styles.h1}>{tenant?.displayName ?? slug}</Text>
-        {(['en', 'ru', 'ka', 'uk', 'cs'] as AppLocale[]).map((loc) => (
-          <Pressable key={loc} onPress={() => { setLocale(loc); bump((n) => n + 1); }}>
-            <Text style={styles.chip}>{loc.toUpperCase()}</Text>
-          </Pressable>
-        ))}
+    <ScrollView style={{ flex: 1, backgroundColor: color.canvas, padding: space.xl }}>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, alignItems: 'center', justifyContent: 'space-between' }}>
+        <Text style={{ fontSize: 28, fontWeight: '700', color: color.ink, fontFamily: 'Plus Jakarta Sans' }}>
+          {tenant?.displayName ?? slug}
+        </Text>
+        <View style={{ flexDirection: 'row', gap: space.sm }}>
+          {(['en', 'ru', 'ka', 'uk', 'cs'] as AppLocale[]).map((loc) => (
+            <Pressable key={loc} onPress={() => { setLocale(loc); bump((n) => n + 1); }}>
+              <Text style={chip(currentLocale() === loc)}>{loc.toUpperCase()}</Text>
+            </Pressable>
+          ))}
+        </View>
       </View>
-      {error ? <Text style={styles.err}>{error}</Text> : null}
-      <Text style={styles.h2}>{t('book.service')}</Text>
+      {error ? <Text style={{ color: color.status.noShow, marginTop: space.sm }}>{error}</Text> : null}
+
+      <Text style={{ fontSize: 18, fontWeight: '600', marginTop: space.lg, marginBottom: space.sm, color: color.ink, fontFamily: 'Plus Jakarta Sans' }}>
+        {t('book.service')}
+      </Text>
       {services.map((s) => (
-        <Pressable key={s.id} onPress={() => setServiceId(s.id)} style={[styles.card, serviceId === s.id && styles.sel]}>
-          <Text>{s.name}</Text>
+        <Pressable key={s.id} onPress={() => setServiceId(s.id)} style={card(serviceId === s.id)}>
+          <Text style={{ color: color.ink }}>{s.name}</Text>
         </Pressable>
       ))}
+
       {serviceId ? (
         <>
-          <Text style={styles.h2}>{t('book.specialist')}</Text>
-          {specialists.length === 0 ? <Text style={styles.muted}>{t('empty.specialistsForService')}</Text> : null}
+          <Text style={{ fontSize: 18, fontWeight: '600', marginTop: space.lg, marginBottom: space.sm, color: color.ink, fontFamily: 'Plus Jakarta Sans' }}>
+            {t('book.specialist')}
+          </Text>
+          {specialists.length === 0 ? <Text style={{ color: color.muted, marginVertical: space.md }}>{t('empty.specialistsForService')}</Text> : null}
           {specialists.map((s) => (
-            <Pressable key={s.id} onPress={() => setSpecialistId(s.id)} style={[styles.card, specialistId === s.id && styles.sel]}>
-              <Text>{s.displayName}</Text>
+            <Pressable key={s.id} onPress={() => setSpecialistId(s.id)} style={card(specialistId === s.id)}>
+              <Text style={{ color: color.ink }}>{s.displayName}</Text>
             </Pressable>
           ))}
         </>
       ) : null}
+
       {specialistId ? (
         <>
-          <Text style={styles.h2}>{t('book.slot')}</Text>
-          {slots.length === 0 ? <Text style={styles.muted}>{t('empty.slots')}</Text> : null}
+          <Text style={{ fontSize: 18, fontWeight: '600', marginTop: space.lg, marginBottom: space.sm, color: color.ink, fontFamily: 'Plus Jakarta Sans' }}>
+            {t('book.slot')}
+          </Text>
+          {slots.length === 0 ? <Text style={{ color: color.muted, marginVertical: space.md }}>{t('empty.slots')}</Text> : null}
           {slots.map((s) => (
-            <Pressable key={s} onPress={() => setSlot(s)} style={[styles.card, slot === s && styles.sel]}>
-              <Text>{new Date(s).toLocaleString()}</Text>
+            <Pressable key={s} onPress={() => setSlot(s)} style={card(slot === s)}>
+              <Text style={{ color: color.ink }}>{new Date(s).toLocaleString()}</Text>
             </Pressable>
           ))}
         </>
       ) : null}
+
       {slot ? (
         <>
-          <Text style={styles.h2}>{t('book.contact')}</Text>
-          <View style={styles.row}>
+          <Text style={{ fontSize: 18, fontWeight: '600', marginTop: space.lg, marginBottom: space.sm, color: color.ink, fontFamily: 'Plus Jakarta Sans' }}>
+            {t('book.contact')}
+          </Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginBottom: space.sm }}>
             {COUNTRIES.map((c) => (
               <Pressable key={c.code} onPress={() => setCountry(c.code)}>
-                <Text style={[styles.chip, country === c.code && styles.sel]}>{c.code} {c.dial}</Text>
+                <Text style={chip(country === c.code)}>
+                  {c.code} {c.dial}
+                </Text>
               </Pressable>
             ))}
           </View>
-          <TextInput value={name} onChangeText={setName} placeholder={t('book.name')} style={styles.input} />
-          <TextInput value={phone} onChangeText={setPhone} placeholder={`${t('book.phone')} (${country})`} style={styles.input} />
-          <Pressable onPress={() => setConsent(!consent)}><Text>{consent ? '☑' : '☐'} {t('book.consent')}</Text></Pressable>
-          <Pressable style={styles.btn} onPress={submit}><Text style={styles.btnText}>{t('book.submit')}</Text></Pressable>
+          <TextInput value={name} onChangeText={setName} placeholder={t('book.name')} placeholderTextColor={color.muted} style={input} />
+          <TextInput
+            value={phone}
+            onChangeText={setPhone}
+            placeholder={`${t('book.phone')} (${country})`}
+            placeholderTextColor={color.muted}
+            style={input}
+          />
+          <Pressable
+            onPress={() => setConsent(!consent)}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm, marginVertical: space.sm }}
+          >
+            <View
+              style={{
+                width: 20,
+                height: 20,
+                borderRadius: 4,
+                borderWidth: 1,
+                borderColor: consent ? color.primary : color.line,
+                backgroundColor: consent ? color.primary : color.surface,
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              {consent ? <MaterialIcon name="check" size={14} color="#FFFFFF" /> : null}
+            </View>
+            <Text style={{ color: color.ink, flexShrink: 1 }}>{t('book.consent')}</Text>
+          </Pressable>
+          <Button label={t('book.submit')} onPress={submit} style={{ marginTop: space.md, alignSelf: 'stretch' }} />
         </>
       ) : null}
     </ScrollView>
   );
 }
-
-const styles = StyleSheet.create({
-  page: { flex: 1, backgroundColor: tokens.color.canvas, padding: tokens.space.xl },
-  h1: { fontSize: 28, fontWeight: '700', color: tokens.color.ink },
-  h2: { fontSize: 18, fontWeight: '600', marginTop: tokens.space.lg, marginBottom: tokens.space.sm },
-  row: { flexDirection: 'row', flexWrap: 'wrap', gap: tokens.space.sm, alignItems: 'center', justifyContent: 'space-between' },
-  card: { backgroundColor: tokens.color.surface, padding: tokens.space.md, borderRadius: tokens.radius.control, marginBottom: tokens.space.sm },
-  sel: { borderWidth: 2, borderColor: tokens.color.accent },
-  input: { borderWidth: 1, borderColor: tokens.color.line, padding: tokens.space.md, borderRadius: tokens.radius.control, marginBottom: tokens.space.sm, backgroundColor: tokens.color.surface },
-  btn: { marginTop: tokens.space.md, backgroundColor: tokens.color.accent, padding: tokens.space.md, borderRadius: tokens.radius.control },
-  btnText: { color: '#ecfdf5', textAlign: 'center', fontWeight: '600' },
-  muted: { color: tokens.color.muted, marginVertical: tokens.space.md },
-  err: { color: tokens.color.status.noShow },
-  chip: { color: tokens.color.accent, fontWeight: '600', padding: 4 },
-});

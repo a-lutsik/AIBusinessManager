@@ -1,10 +1,10 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, Switch, Text, TextInput, View } from 'react-native';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { api, LUMEN_TENANT_ID, type BookingRulesView } from '@/src/api/client';
 import { t } from '@/src/i18n';
-import { tokens } from '@/src/theme/tokens';
+import { useThemeTokens } from '@/src/theme/tokens';
 
 const SLOT_STEPS = [15, 30, 60] as const;
 const WEEK_STARTS = [
@@ -25,6 +25,7 @@ const DEFAULT_RULES: BookingRulesView = {
 };
 
 export default function RulesScreen() {
+  const { color, space, radius } = useThemeTokens();
   const [draft, setDraft] = useState<BookingRulesView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -67,198 +68,172 @@ export default function RulesScreen() {
     }
   };
 
-  if (loading || !draft) {
-    return (
-      <ScrollView>
-        <Text style={styles.h1}>{t('nav.rules')}</Text>
-        <EmptyState title={t('rules.loading')} />
-      </ScrollView>
-    );
-  }
-
-  return (
-    <ScrollView contentContainerStyle={styles.pad}>
-      <Text style={styles.h1}>{t('nav.rules')}</Text>
-      <Text style={styles.lead}>{t('rules.lead')}</Text>
-      {error ? <Text style={styles.err}>{error}</Text> : null}
-      {saved ? <Text style={styles.ok}>{t('rules.saved')}</Text> : null}
-
-      <Field label={t('rules.slotStep')}>
-        <View style={styles.segment}>
-          {SLOT_STEPS.map((step) => {
-            const active = draft.slotStepMinutes === step;
-            return (
-              <Pressable
-                key={step}
-                onPress={() => patch('slotStepMinutes', step)}
-                style={[styles.segBtn, active ? styles.segActive : null]}
-              >
-                <Text style={[styles.segText, active ? styles.segTextActive : null]}>{step} min</Text>
-              </Pressable>
-            );
-          })}
-        </View>
-      </Field>
-
-      <Field label={t('rules.minNotice')}>
-        <NumberInput value={draft.minNoticeMinutes} onChange={(n) => patch('minNoticeMinutes', n)} suffix="min" />
-      </Field>
-
-      <Field label={t('rules.horizon')}>
-        <NumberInput value={draft.horizonDays} onChange={(n) => patch('horizonDays', n)} suffix="days" />
-      </Field>
-
-      <Field label={t('rules.lateCancel')}>
-        <NumberInput
-          value={draft.lateCancellationHours}
-          onChange={(n) => patch('lateCancellationHours', n)}
-          suffix="h"
-        />
-      </Field>
-
-      <Toggle
-        label={t('rules.clientReschedule')}
-        value={draft.clientRescheduleAllowed}
-        onChange={(v) => patch('clientRescheduleAllowed', v)}
-      />
-      <Toggle
-        label={t('rules.newClientConfirm')}
-        value={draft.newClientRequiresConfirmation}
-        onChange={(v) => patch('newClientRequiresConfirmation', v)}
-      />
-      <Toggle
-        label={t('rules.deductNoShow')}
-        value={draft.deductPackageOnNoShow}
-        onChange={(v) => patch('deductPackageOnNoShow', v)}
-      />
-
-      <Field label={t('rules.weekStarts')}>
-        <View style={styles.segment}>
-          {WEEK_STARTS.map((opt) => {
-            const active = draft.weekStartsOn === opt.value;
-            return (
-              <Pressable
-                key={opt.value}
-                onPress={() => patch('weekStartsOn', opt.value)}
-                style={[styles.segBtn, active ? styles.segActive : null]}
-              >
-                <Text style={[styles.segText, active ? styles.segTextActive : null]}>{t(opt.labelKey)}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
-      </Field>
-
-      <Field label={t('rules.timeFormat')}>
-        <View style={styles.segment}>
-          <Pressable
-            onPress={() => patch('timeFormat24h', true)}
-            style={[styles.segBtn, draft.timeFormat24h ? styles.segActive : null]}
-          >
-            <Text style={[styles.segText, draft.timeFormat24h ? styles.segTextActive : null]}>24h</Text>
-          </Pressable>
-          <Pressable
-            onPress={() => patch('timeFormat24h', false)}
-            style={[styles.segBtn, !draft.timeFormat24h ? styles.segActive : null]}
-          >
-            <Text style={[styles.segText, !draft.timeFormat24h ? styles.segTextActive : null]}>12h</Text>
-          </Pressable>
-        </View>
-      </Field>
-
-      <Button label={t('action.save')} onPress={save} style={styles.save} />
-    </ScrollView>
-  );
-}
-
-function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <View style={styles.field}>
-      <Text style={styles.label}>{label}</Text>
+  const Field = ({ label, children }: { label: string; children: ReactNode }) => (
+    <View style={{ marginBottom: space.lg }}>
+      <Text style={{ color: color.ink, fontWeight: '600', marginBottom: space.sm }}>{label}</Text>
       {children}
     </View>
   );
-}
 
-function Toggle({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <View style={styles.toggleRow}>
-      <Text style={styles.toggleLabel}>{label}</Text>
+  const Toggle = ({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) => (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: space.md,
+        marginBottom: space.lg,
+      }}
+    >
+      <Text style={{ flex: 1, color: color.ink, fontWeight: '600' }}>{label}</Text>
       <Switch
         value={value}
         onValueChange={onChange}
-        trackColor={{ false: tokens.color.line, true: `${tokens.color.primary}88` }}
-        thumbColor={value ? tokens.color.primary : tokens.color.mist}
+        trackColor={{ false: color.line, true: `${color.primary}88` }}
+        thumbColor={value ? color.primary : color.mist}
       />
     </View>
   );
-}
 
-function NumberInput({
-  value,
-  onChange,
-  suffix,
-}: {
-  value: number;
-  onChange: (n: number) => void;
-  suffix?: string;
-}) {
-  return (
-    <View style={styles.numRow}>
+  const Segment = <V,>({ options, value, onChange }: { options: { value: V; label: string }[]; value: V; onChange: (v: V) => void }) => (
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>
+      {options.map((opt) => {
+        const active = value === opt.value;
+        return (
+          <Pressable
+            key={String(opt.value)}
+            onPress={() => onChange(opt.value)}
+            style={{
+              paddingVertical: space.sm,
+              paddingHorizontal: space.md,
+              borderRadius: radius.control,
+              borderWidth: 1,
+              borderColor: active ? color.primary : color.line,
+              backgroundColor: active ? `${color.primary}14` : color.surface,
+            }}
+          >
+            <Text style={{ color: active ? color.primary : color.muted, fontWeight: active ? '700' : '500' }}>{opt.label}</Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+
+  const NumberInput = ({ value, onChange, suffix }: { value: number; onChange: (n: number) => void; suffix?: string }) => (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
       <TextInput
         keyboardType="number-pad"
-        style={styles.input}
+        style={{
+          borderWidth: 1,
+          borderColor: color.line,
+          padding: space.md,
+          borderRadius: radius.control,
+          backgroundColor: color.surface,
+          minWidth: 120,
+          color: color.ink,
+        }}
         value={String(value)}
         onChangeText={(text) => {
           const n = Number(text.replace(/[^\d]/g, ''));
           onChange(Number.isFinite(n) ? n : 0);
         }}
       />
-      {suffix ? <Text style={styles.suffix}>{suffix}</Text> : null}
+      {suffix ? <Text style={{ color: color.muted }}>{suffix}</Text> : null}
     </View>
   );
-}
 
-const styles = StyleSheet.create({
-  pad: { paddingBottom: tokens.space.xxl },
-  h1: { fontSize: 28, fontWeight: '700', marginBottom: tokens.space.sm, fontFamily: 'Plus Jakarta Sans', color: tokens.color.ink },
-  lead: { color: tokens.color.muted, marginBottom: tokens.space.lg, maxWidth: 520 },
-  field: { marginBottom: tokens.space.lg },
-  label: { color: tokens.color.ink, fontWeight: '600', marginBottom: tokens.space.sm },
-  input: {
+  if (loading || !draft) {
+    return (
+      <ScrollView>
+        <Text style={{ fontSize: 28, fontWeight: '700', marginBottom: space.sm, fontFamily: 'Plus Jakarta Sans', color: color.ink }}>
+          {t('nav.rules')}
+        </Text>
+        <EmptyState title={t('rules.loading')} />
+      </ScrollView>
+    );
+  }
+
+  const card = {
+    backgroundColor: color.surface,
+    padding: space.lg,
+    borderRadius: radius.card,
     borderWidth: 1,
-    borderColor: tokens.color.line,
-    padding: tokens.space.md,
-    borderRadius: tokens.radius.control,
-    backgroundColor: tokens.color.surface,
-    minWidth: 120,
-    color: tokens.color.ink,
-  },
-  numRow: { flexDirection: 'row', alignItems: 'center', gap: tokens.space.sm },
-  suffix: { color: tokens.color.muted },
-  segment: { flexDirection: 'row', flexWrap: 'wrap', gap: tokens.space.sm },
-  segBtn: {
-    paddingVertical: tokens.space.sm,
-    paddingHorizontal: tokens.space.md,
-    borderRadius: tokens.radius.control,
-    borderWidth: 1,
-    borderColor: tokens.color.line,
-    backgroundColor: tokens.color.surface,
-  },
-  segActive: { borderColor: tokens.color.primary, backgroundColor: `${tokens.color.primary}14` },
-  segText: { color: tokens.color.muted, fontWeight: '500' },
-  segTextActive: { color: tokens.color.primary, fontWeight: '700' },
-  toggleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: tokens.space.md,
-    marginBottom: tokens.space.lg,
-    paddingVertical: tokens.space.sm,
-    maxWidth: 520,
-  },
-  toggleLabel: { flex: 1, color: tokens.color.ink, fontWeight: '600' },
-  save: { marginTop: tokens.space.md },
-  err: { color: tokens.color.status.noShow, marginBottom: tokens.space.sm },
-  ok: { color: tokens.color.primary, marginBottom: tokens.space.sm, fontWeight: '600' },
-});
+    borderColor: color.line,
+    marginBottom: space.lg,
+    maxWidth: 560,
+  };
+
+  return (
+    <ScrollView contentContainerStyle={{ paddingBottom: space.xxl }}>
+      <Text style={{ fontSize: 28, fontWeight: '700', marginBottom: space.sm, fontFamily: 'Plus Jakarta Sans', color: color.ink }}>
+        {t('nav.rules')}
+      </Text>
+      <Text style={{ color: color.muted, marginBottom: space.lg, maxWidth: 520 }}>{t('rules.lead')}</Text>
+      {error ? <Text style={{ color: color.status.noShow, marginBottom: space.sm }}>{error}</Text> : null}
+      {saved ? <Text style={{ color: color.primary, marginBottom: space.sm, fontWeight: '600' }}>{t('rules.saved')}</Text> : null}
+
+      <View style={card}>
+        <Field label={t('rules.slotStep')}>
+          <Segment
+            options={SLOT_STEPS.map((step) => ({ value: step, label: `${step} min` }))}
+            value={draft.slotStepMinutes}
+            onChange={(v) => patch('slotStepMinutes', v)}
+          />
+        </Field>
+        <Field label={t('rules.minNotice')}>
+          <NumberInput value={draft.minNoticeMinutes} onChange={(n) => patch('minNoticeMinutes', n)} suffix="min" />
+        </Field>
+        <Field label={t('rules.horizon')}>
+          <NumberInput value={draft.horizonDays} onChange={(n) => patch('horizonDays', n)} suffix="days" />
+        </Field>
+        <Field label={t('rules.lateCancel')}>
+          <NumberInput value={draft.lateCancellationHours} onChange={(n) => patch('lateCancellationHours', n)} suffix="h" />
+        </Field>
+      </View>
+
+      <View style={card}>
+        <Toggle
+          label={t('rules.clientReschedule')}
+          value={draft.clientRescheduleAllowed}
+          onChange={(v) => patch('clientRescheduleAllowed', v)}
+        />
+        <Toggle
+          label={t('rules.newClientConfirm')}
+          value={draft.newClientRequiresConfirmation}
+          onChange={(v) => patch('newClientRequiresConfirmation', v)}
+        />
+        <View style={{ marginBottom: 0 }}>
+          <Toggle
+            label={t('rules.deductNoShow')}
+            value={draft.deductPackageOnNoShow}
+            onChange={(v) => patch('deductPackageOnNoShow', v)}
+          />
+        </View>
+      </View>
+
+      <View style={card}>
+        <Field label={t('rules.weekStarts')}>
+          <Segment
+            options={WEEK_STARTS.map((opt) => ({ value: opt.value, label: t(opt.labelKey) }))}
+            value={draft.weekStartsOn}
+            onChange={(v) => patch('weekStartsOn', v)}
+          />
+        </Field>
+        <View style={{ marginBottom: 0 }}>
+          <Field label={t('rules.timeFormat')}>
+            <Segment
+              options={[
+                { value: true, label: '24h' },
+                { value: false, label: '12h' },
+              ]}
+              value={draft.timeFormat24h}
+              onChange={(v) => patch('timeFormat24h', v)}
+            />
+          </Field>
+        </View>
+      </View>
+
+      <Button label={t('action.save')} onPress={save} style={{ marginTop: space.md }} />
+    </ScrollView>
+  );
+}

@@ -1,5 +1,6 @@
+import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, Text, View, useWindowDimensions } from 'react-native';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { MetricCard } from '@/components/ui/MetricCard';
@@ -13,14 +14,24 @@ import {
   type MetricDefinitionView,
 } from '@/src/api/client';
 import { t } from '@/src/i18n';
-import { statusColor, tokens } from '@/src/theme/tokens';
+import { statusColor, useThemeTokens } from '@/src/theme/tokens';
 
 function readRole(): 'OWNER' | 'MASTER' {
   const stored = typeof localStorage !== 'undefined' ? localStorage.getItem('abm.role') : null;
   return stored === 'MASTER' ? 'MASTER' : 'OWNER';
 }
 
+const SIGNAL_ROUTES: Record<string, string> = {
+  OPEN_RULES: '/rules',
+  OPEN_CLIENTS: '/clients',
+  OPEN_SERVICES: '/services',
+};
+
 export default function DashboardScreen() {
+  const router = useRouter();
+  const { color, space, radius } = useThemeTokens();
+  const { width } = useWindowDimensions();
+  const twoCol = width >= 960;
   const [data, setData] = useState<DashboardView | null>(null);
   const [defs, setDefs] = useState<Record<string, MetricDefinitionView>>({});
   const [error, setError] = useState<string | null>(null);
@@ -63,6 +74,7 @@ export default function DashboardScreen() {
 
   useEffect(() => {
     load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const isOwner = role === 'OWNER';
@@ -71,51 +83,116 @@ export default function DashboardScreen() {
   const metrics = data?.metrics ?? [];
   const signals = data?.signals ?? [];
 
-  return (
-    <ScrollView contentContainerStyle={styles.pad}>
-      <Text style={styles.h1}>{isOwner ? t('nav.dashboard') : t('nav.today')}</Text>
-      {error ? <Text style={styles.err}>{error}</Text> : null}
-
-      <Text style={styles.h2}>{t('dashboard.today')}</Text>
+  const todayColumn = (
+    <View style={{ flex: twoCol ? 1 : undefined }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: space.md }}>
+        <Text style={{ fontSize: 18, fontWeight: '600', color: color.ink, fontFamily: 'Plus Jakarta Sans' }}>
+          {t('dashboard.today')}
+        </Text>
+        <Button label={`${t('nav.calendar')} →`} variant="ghost" onPress={() => router.push('/calendar')} />
+      </View>
       {today.length === 0 ? <EmptyState title={t('empty.calendar')} /> : null}
       {today.map((v) => (
-        <View key={v.id} style={[styles.visit, { borderLeftColor: statusColor(v.status) }]}>
-          <View style={styles.visitTop}>
-            <Text style={styles.k}>
+        <View
+          key={v.id}
+          style={{
+            backgroundColor: color.surface,
+            padding: space.lg,
+            borderRadius: radius.card,
+            marginBottom: space.sm,
+            borderLeftWidth: 4,
+            borderWidth: 1,
+            borderColor: color.line,
+            borderLeftColor: statusColor(v.status, color),
+          }}
+        >
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: space.sm, alignItems: 'center' }}>
+            <Text style={{ fontWeight: '700', color: color.ink, flexShrink: 1 }}>
               {v.serviceNameSnapshot ?? '—'} · {v.clientDisplayName ?? '—'}
             </Text>
             <TrustBadge level={v.trustLevel} />
           </View>
-          <Text style={styles.muted}>
+          <Text style={{ color: color.muted, marginTop: 4 }}>
             {t(`status.${v.status}`)} ·{' '}
             {v.serviceStart ? new Date(v.serviceStart).toLocaleString() : ''}
           </Text>
         </View>
       ))}
+    </View>
+  );
+
+  const sideColumn = isOwner ? (
+    <View style={{ flex: twoCol ? 1 : undefined }}>
+      <Text style={{ fontSize: 18, fontWeight: '600', marginBottom: space.md, color: color.ink, fontFamily: 'Plus Jakarta Sans' }}>
+        {t('dashboard.tasks')}
+      </Text>
+      {tasks.length === 0 ? <EmptyState title={t('empty.tasks')} /> : null}
+      {tasks.map((task) => (
+        <View
+          key={task.id}
+          style={{ backgroundColor: color.surface, padding: space.lg, borderRadius: radius.card, marginBottom: space.sm, borderWidth: 1, borderColor: color.line }}
+        >
+          <Text style={{ fontWeight: '700', color: color.ink }}>{task.title}</Text>
+          {task.body ? <Text style={{ marginTop: 4, color: color.ink }}>{task.body}</Text> : null}
+          <Button
+            label={t('action.done')}
+            onPress={() =>
+              api
+                .completeTask(LUMEN_TENANT_ID, task.id)
+                .then(load)
+                .catch((e) => setError(String(e.message ?? e)))
+            }
+            style={{ marginTop: space.md }}
+          />
+        </View>
+      ))}
+
+      <Text style={{ fontSize: 18, fontWeight: '600', marginTop: space.xl, marginBottom: space.md, color: color.ink, fontFamily: 'Plus Jakarta Sans' }}>
+        {t('dashboard.signals')}
+      </Text>
+      {signals.length === 0 ? <EmptyState title={t('empty.signals')} /> : null}
+      {signals.map((s) => {
+        const route = s.actionType ? SIGNAL_ROUTES[s.actionType] : undefined;
+        return (
+          <SignalCard
+            key={s.id ?? s.key + s.title}
+            title={s.title}
+            evidence={s.evidence}
+            suggestedAction={s.suggestedAction}
+            severity={s.severity}
+            actionLabel={route ? `${t('action.open')} ${t(NAV_LABEL[route] ?? '')}` : undefined}
+            onAction={route ? () => router.push(route as any) : undefined}
+            onDismiss={
+              s.id
+                ? () =>
+                    api
+                      .dismissSignal(LUMEN_TENANT_ID, s.id!)
+                      .then((row) => {
+                        if (row == null) return;
+                        load();
+                      })
+                      .catch((e) => setError(String(e.message ?? e)))
+                : undefined
+            }
+          />
+        );
+      })}
+    </View>
+  ) : null;
+
+  return (
+    <ScrollView contentContainerStyle={{ paddingBottom: space.xxl }}>
+      <Text style={{ fontSize: 28, fontWeight: '700', color: color.ink, marginBottom: space.md, fontFamily: 'Plus Jakarta Sans' }}>
+        {isOwner ? t('nav.dashboard') : t('nav.today')}
+      </Text>
+      {error ? <Text style={{ color: color.status.noShow, marginBottom: space.md }}>{error}</Text> : null}
 
       {isOwner ? (
         <>
-          <Text style={styles.h2}>{t('dashboard.tasks')}</Text>
-          {tasks.length === 0 ? <EmptyState title={t('empty.tasks')} /> : null}
-          {tasks.map((task) => (
-            <View key={task.id} style={styles.card}>
-              <Text style={styles.k}>{task.title}</Text>
-              {task.body ? <Text style={styles.body}>{task.body}</Text> : null}
-              <Button
-                label={t('action.done')}
-                onPress={() =>
-                  api
-                    .completeTask(LUMEN_TENANT_ID, task.id)
-                    .then(load)
-                    .catch((e) => setError(String(e.message ?? e)))
-                }
-                style={styles.taskBtn}
-              />
-            </View>
-          ))}
-
-          <Text style={styles.h2}>{t('dashboard.growth')}</Text>
-          <View style={styles.grid}>
+          <Text style={{ fontSize: 18, fontWeight: '600', marginBottom: space.md, color: color.ink, fontFamily: 'Plus Jakarta Sans' }}>
+            {t('dashboard.growth')}
+          </Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.md, marginBottom: space.xl }}>
             {metrics.map((m) => {
               const def = defs[m.key];
               return (
@@ -135,75 +212,19 @@ export default function DashboardScreen() {
             })}
           </View>
           {metrics.length === 0 ? <EmptyState title={t('empty.metrics')} /> : null}
-
-          <Text style={styles.h2}>{t('dashboard.signals')}</Text>
-          {signals.length === 0 ? <EmptyState title={t('empty.signals')} /> : null}
-          {signals.map((s) => (
-            <SignalCard
-              key={s.id ?? s.key + s.title}
-              title={s.title}
-              evidence={s.evidence}
-              suggestedAction={s.suggestedAction}
-              severity={s.severity}
-              onDismiss={
-                s.id
-                  ? () =>
-                      api
-                        .dismissSignal(LUMEN_TENANT_ID, s.id!)
-                        .then((row) => {
-                          if (row == null) return;
-                          load();
-                        })
-                        .catch((e) => setError(String(e.message ?? e)))
-                  : undefined
-              }
-            />
-          ))}
         </>
       ) : null}
+
+      <View style={{ flexDirection: twoCol ? 'row' : 'column', gap: space.xl }}>
+        {todayColumn}
+        {sideColumn}
+      </View>
     </ScrollView>
   );
 }
 
-const styles = StyleSheet.create({
-  pad: { paddingBottom: tokens.space.xxl },
-  h1: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: tokens.color.ink,
-    marginBottom: tokens.space.md,
-    fontFamily: 'Plus Jakarta Sans',
-  },
-  h2: {
-    fontSize: 18,
-    fontWeight: '600',
-    marginTop: tokens.space.xl,
-    marginBottom: tokens.space.md,
-    color: tokens.color.ink,
-    fontFamily: 'Plus Jakarta Sans',
-  },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: tokens.space.md, marginBottom: tokens.space.sm },
-  card: {
-    backgroundColor: tokens.color.surface,
-    padding: tokens.space.lg,
-    borderRadius: tokens.radius.card,
-    marginBottom: tokens.space.sm,
-    borderWidth: 1,
-    borderColor: tokens.color.line,
-  },
-  visit: {
-    backgroundColor: tokens.color.surface,
-    padding: tokens.space.lg,
-    borderRadius: tokens.radius.card,
-    marginBottom: tokens.space.sm,
-    borderLeftWidth: 4,
-    borderWidth: 1,
-    borderColor: tokens.color.line,
-  },
-  visitTop: { flexDirection: 'row', justifyContent: 'space-between', gap: tokens.space.sm, alignItems: 'center' },
-  k: { fontWeight: '700', color: tokens.color.ink, flexShrink: 1 },
-  body: { marginTop: 4, color: tokens.color.ink },
-  muted: { color: tokens.color.muted, marginTop: 4 },
-  err: { color: tokens.color.status.noShow, marginBottom: tokens.space.md },
-  taskBtn: { marginTop: tokens.space.md },
-});
+const NAV_LABEL: Record<string, string> = {
+  '/rules': 'nav.rules',
+  '/clients': 'nav.clients',
+  '/services': 'nav.services',
+};

@@ -1,15 +1,19 @@
 {
   "realm": "abm",
   "enabled": true,
-  "displayName": "AuraDesk",
-  "displayNameHtml": "AuraDesk",
-  "loginTheme": "auradesk",
+  "displayName": "Cadence",
+  "displayNameHtml": "Cadence",
+  "loginTheme": "cadence",
   "registrationAllowed": false,
   "loginWithEmailAllowed": true,
   "duplicateEmailsAllowed": false,
   "resetPasswordAllowed": true,
+  "rememberMe": true,
   "editUsernameAllowed": false,
   "sslRequired": "external",
+  "internationalizationEnabled": true,
+  "supportedLocales": ["ru", "en"],
+  "defaultLocale": "ru",
   "roles": {
     "realm": [
       {

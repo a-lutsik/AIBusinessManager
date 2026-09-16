@@ -1,7 +1,7 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 import { Button } from '@/components/ui/Button';
 import { t } from '@/src/i18n';
-import { tokens } from '@/src/theme/tokens';
+import { useThemeTokens } from '@/src/theme/tokens';
 
 type Props = {
   title: string;
@@ -22,38 +22,36 @@ export function SignalCard({
   onAction,
   actionLabel,
 }: Props) {
+  const { color, space, radius } = useThemeTokens();
   const accent =
-    severity === 'critical' ? tokens.color.status.noShow : severity === 'warn' ? tokens.color.tertiary : tokens.color.secondary;
+    severity === 'critical' ? color.status.noShow : severity === 'warn' ? color.tertiary : color.secondary;
 
   return (
-    <View style={[styles.card, { borderLeftColor: accent }]}>
-      <Text style={styles.title}>{title}</Text>
-      {evidence ? <Text style={styles.evidence}>{evidence}</Text> : null}
-      {suggestedAction ? <Text style={styles.action}>{suggestedAction}</Text> : null}
+    <View
+      style={{
+        backgroundColor: color.surface,
+        padding: space.lg,
+        borderRadius: radius.card,
+        marginBottom: space.sm,
+        borderWidth: 1,
+        borderColor: color.line,
+        gap: 4,
+      }}
+    >
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
+        <View style={{ width: 8, height: 8, borderRadius: radius.pill, backgroundColor: accent }} />
+        <Text style={{ fontWeight: '700', color: color.ink, fontFamily: 'Plus Jakarta Sans', flexShrink: 1 }}>
+          {title}
+        </Text>
+      </View>
+      {evidence ? <Text style={{ color: color.muted, fontSize: 13 }}>{evidence}</Text> : null}
+      {suggestedAction ? <Text style={{ color: color.ink, fontSize: 14 }}>{suggestedAction}</Text> : null}
       {(onAction || onDismiss) && (
-        <View style={styles.row}>
-          {onAction ? <Button label={actionLabel ?? 'Act'} variant="ai" onPress={onAction} /> : null}
-          {onDismiss ? (
-            <Button label={t('action.dismiss')} variant="ghost" onPress={onDismiss} />
-          ) : null}
+        <View style={{ flexDirection: 'row', gap: space.sm, marginTop: space.md, flexWrap: 'wrap' }}>
+          {onAction ? <Button label={actionLabel ?? t('action.open')} variant="ai" onPress={onAction} /> : null}
+          {onDismiss ? <Button label={t('action.dismiss')} variant="ghost" onPress={onDismiss} /> : null}
         </View>
       )}
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  card: {
-    backgroundColor: tokens.color.surface,
-    padding: tokens.space.lg,
-    borderRadius: tokens.radius.card,
-    marginBottom: tokens.space.sm,
-    borderWidth: 1,
-    borderColor: tokens.color.line,
-    borderLeftWidth: 4,
-  },
-  title: { fontWeight: '700', color: tokens.color.ink, fontFamily: 'Plus Jakarta Sans', marginBottom: 4 },
-  evidence: { color: tokens.color.muted, fontSize: 13, marginBottom: 4 },
-  action: { color: tokens.color.ink, fontSize: 14 },
-  row: { flexDirection: 'row', gap: tokens.space.sm, marginTop: tokens.space.md, flexWrap: 'wrap' },
-});

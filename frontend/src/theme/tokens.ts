@@ -1,6 +1,8 @@
+import { useTheme } from './ThemeContext';
+
 export type ThemeName = 'light' | 'dark';
 
-/** Atelier Intelligence palette (Stitch design): emerald + indigo + amber on slate. */
+/** Cadence palette: emerald + indigo + amber on slate. */
 export const tokens = {
   color: {
     primary: '#059669',
@@ -40,6 +42,19 @@ export const tokens = {
     accent: '#34D399',
     ai: '#818CF8',
     line: '#334155',
+    status: {
+      pending: '#FBBF24',
+      confirmed: '#34D399',
+      completed: '#818CF8',
+      noShow: '#F87171',
+      cancelled: '#94A3B8',
+    },
+    trust: {
+      NEW: '#818CF8',
+      HIGH: '#34D399',
+      NORMAL: '#94A3B8',
+      LOW: '#F87171',
+    },
   },
   space: {
     xs: 4,
@@ -60,24 +75,38 @@ export const tokens = {
   },
 } as const;
 
-export function statusColor(status: string): string {
+type WidenPalette<T> = { [K in keyof T]: T[K] extends object ? WidenPalette<T[K]> : string };
+export type Palette = WidenPalette<typeof tokens.color>;
+
+/** Theme-aware palette + shared scale tokens. Prefer this over the static `tokens` export in any component that should respect the dark-mode toggle. */
+export function useThemeTokens() {
+  const { theme } = useTheme();
+  return {
+    color: theme === 'dark' ? tokens.dark : tokens.color,
+    space: tokens.space,
+    radius: tokens.radius,
+    rail: tokens.rail,
+  };
+}
+
+export function statusColor(status: string, palette: Palette = tokens.color): string {
   switch (status) {
     case 'PENDING':
-      return tokens.color.status.pending;
+      return palette.status.pending;
     case 'CONFIRMED':
-      return tokens.color.status.confirmed;
+      return palette.status.confirmed;
     case 'COMPLETED':
-      return tokens.color.status.completed;
+      return palette.status.completed;
     case 'NO_SHOW':
-      return tokens.color.status.noShow;
+      return palette.status.noShow;
     default:
-      return tokens.color.status.cancelled;
+      return palette.status.cancelled;
   }
 }
 
-export function trustColor(level: string): string {
-  const key = level as keyof typeof tokens.color.trust;
-  return tokens.color.trust[key] ?? tokens.color.muted;
+export function trustColor(level: string, palette: Palette = tokens.color): string {
+  const key = level as keyof typeof palette.trust;
+  return palette.trust[key] ?? palette.muted;
 }
 
 export type Tokens = typeof tokens;

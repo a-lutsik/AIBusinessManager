@@ -1,5 +1,5 @@
 {
-  "app.name": "AuraDesk",
+  "app.name": "Cadence",
   "home.title": "Кабинет",
   "home.subtitle": "Сегодня, календарь, клиенты и черновики AI.",
   "home.localeHint": "Интерфейс: русский",
@@ -13,6 +13,7 @@
   "nav.ai": "AI-менеджер",
   "nav.book": "Публичная запись",
   "shell.debug": "Отладка / язык",
+  "shell.search": "Поиск",
   "empty.calendar": "В этом диапазоне нет визитов. Свободный слот можно занять в публичной записи.",
   "empty.clients": "Клиентов пока нет. Первая публичная запись создаст профиль сама.",
   "empty.tasks": "Нет задач на ручную отправку.",
@@ -98,6 +99,7 @@
   "action.cancel": "Отменить",
   "action.done": "Готово",
   "action.dismiss": "Скрыть",
+  "action.open": "Открыть",
   "calendar.day": "День",
   "calendar.week": "Неделя",
   "calendar.allMasters": "Все мастера",

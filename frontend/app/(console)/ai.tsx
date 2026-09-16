@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ScrollView, Text, TextInput, View } from 'react-native';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import {
@@ -10,7 +10,7 @@ import {
   type ConversationHistoryView,
 } from '@/src/api/client';
 import { currentLocale, t } from '@/src/i18n';
-import { tokens } from '@/src/theme/tokens';
+import { useThemeTokens } from '@/src/theme/tokens';
 
 type LogRow =
   | { kind: 'user'; content: string }
@@ -49,6 +49,7 @@ function applyHistory(
 }
 
 export default function AiScreen() {
+  const { color, space, radius } = useThemeTokens();
   const [message, setMessage] = useState('');
   const [log, setLog] = useState<LogRow[]>([]);
   const [openDrafts, setOpenDrafts] = useState<AiDraftAction[]>([]);
@@ -158,10 +159,20 @@ export default function AiScreen() {
   };
 
   const renderDraftCard = (d: AiDraftAction) => (
-    <View key={d.id} style={styles.draft}>
-      <Text style={styles.draftTitle}>{draftSummary(d)}</Text>
-      {d.toolName ? <Text style={styles.draftMeta}>{d.toolName}</Text> : null}
-      <View style={styles.draftActions}>
+    <View
+      key={d.id}
+      style={{
+        marginTop: space.md,
+        padding: space.md,
+        borderRadius: radius.control,
+        backgroundColor: `${color.ai}12`,
+        borderWidth: 1,
+        borderColor: `${color.ai}44`,
+      }}
+    >
+      <Text style={{ fontWeight: '600', color: color.ink, fontFamily: 'Plus Jakarta Sans' }}>{draftSummary(d)}</Text>
+      {d.toolName ? <Text style={{ color: color.muted, fontSize: 12, marginTop: 4 }}>{d.toolName}</Text> : null}
+      <View style={{ flexDirection: 'row', gap: space.sm, marginTop: space.md, flexWrap: 'wrap' }}>
         <Button label={t('action.confirm')} variant="ai" onPress={() => confirm(d.id)} />
         <Button label={t('ai.reject')} variant="ghost" onPress={() => reject(d.id)} />
       </View>
@@ -170,13 +181,17 @@ export default function AiScreen() {
 
   return (
     <View style={{ flex: 1 }}>
-      <Text style={styles.h1}>{t('nav.ai')}</Text>
-      {error ? <Text style={styles.err}>{error}</Text> : null}
-      {historyNote ? <Text style={styles.muted}>{historyNote}</Text> : null}
+      <Text style={{ fontSize: 28, fontWeight: '700', marginBottom: space.md, color: color.ink, fontFamily: 'Plus Jakarta Sans' }}>
+        {t('nav.ai')}
+      </Text>
+      {error ? <Text style={{ color: color.status.noShow, marginBottom: space.sm }}>{error}</Text> : null}
+      {historyNote ? <Text style={{ color: color.muted, marginBottom: space.sm, fontSize: 13 }}>{historyNote}</Text> : null}
 
       {openDrafts.length > 0 ? (
-        <View style={styles.openDrafts}>
-          <Text style={styles.h2}>{t('ai.openDrafts')}</Text>
+        <View style={{ marginBottom: space.md }}>
+          <Text style={{ fontSize: 16, fontWeight: '600', marginBottom: space.sm, color: color.ink, fontFamily: 'Plus Jakarta Sans' }}>
+            {t('ai.openDrafts')}
+          </Text>
           {openDrafts.map(renderDraftCard)}
         </View>
       ) : null}
@@ -186,21 +201,45 @@ export default function AiScreen() {
         {log.map((row, i) => {
           if (row.kind === 'user') {
             return (
-              <View key={i} style={[styles.card, styles.userCard]}>
-                <Text style={styles.bubble}>{row.content}</Text>
+              <View
+                key={i}
+                style={{
+                  backgroundColor: color.mist,
+                  padding: space.md,
+                  marginBottom: space.sm,
+                  borderRadius: radius.card,
+                  borderWidth: 1,
+                  borderColor: color.line,
+                  alignSelf: 'flex-end',
+                  maxWidth: '80%',
+                }}
+              >
+                <Text style={{ color: color.ink, lineHeight: 22 }}>{row.content}</Text>
               </View>
             );
           }
           if (row.kind === 'system') {
             return (
-              <Text key={i} style={styles.system}>
+              <Text key={i} style={{ color: color.muted, fontSize: 13, marginBottom: space.sm, fontStyle: 'italic' }}>
                 {row.content}
               </Text>
             );
           }
           return (
-            <View key={i} style={styles.card}>
-              {row.reply ? <Text style={styles.bubble}>{row.reply}</Text> : null}
+            <View
+              key={i}
+              style={{
+                backgroundColor: color.surface,
+                padding: space.md,
+                marginBottom: space.sm,
+                borderRadius: radius.card,
+                borderWidth: 1,
+                borderColor: color.line,
+                alignSelf: 'flex-start',
+                maxWidth: '80%',
+              }}
+            >
+              {row.reply ? <Text style={{ color: color.ink, lineHeight: 22 }}>{row.reply}</Text> : null}
               {row.drafts.map(renderDraftCard)}
             </View>
           );
@@ -211,61 +250,19 @@ export default function AiScreen() {
         value={message}
         onChangeText={setMessage}
         placeholder={t('ai.placeholder')}
-        style={styles.input}
+        placeholderTextColor={color.muted}
+        style={{
+          borderWidth: 1,
+          borderColor: color.line,
+          padding: space.md,
+          borderRadius: radius.control,
+          backgroundColor: color.surface,
+          marginVertical: space.sm,
+          color: color.ink,
+        }}
         onSubmitEditing={send}
       />
       <Button label={t('ai.send')} variant="ai" onPress={send} disabled={busy} />
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  h1: {
-    fontSize: 28,
-    fontWeight: '700',
-    marginBottom: tokens.space.md,
-    color: tokens.color.ink,
-    fontFamily: 'Plus Jakarta Sans',
-  },
-  h2: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: tokens.space.sm,
-    color: tokens.color.ink,
-    fontFamily: 'Plus Jakarta Sans',
-  },
-  openDrafts: { marginBottom: tokens.space.md },
-  card: {
-    backgroundColor: tokens.color.surface,
-    padding: tokens.space.md,
-    marginBottom: tokens.space.sm,
-    borderRadius: tokens.radius.card,
-    borderWidth: 1,
-    borderColor: tokens.color.line,
-  },
-  userCard: { backgroundColor: tokens.color.mist },
-  bubble: { color: tokens.color.ink, lineHeight: 22 },
-  draft: {
-    marginTop: tokens.space.md,
-    padding: tokens.space.md,
-    borderRadius: tokens.radius.control,
-    backgroundColor: `${tokens.color.ai}12`,
-    borderWidth: 1,
-    borderColor: `${tokens.color.ai}44`,
-  },
-  draftTitle: { fontWeight: '600', color: tokens.color.ink, fontFamily: 'Plus Jakarta Sans' },
-  draftMeta: { color: tokens.color.muted, fontSize: 12, marginTop: 4 },
-  draftActions: { flexDirection: 'row', gap: tokens.space.sm, marginTop: tokens.space.md, flexWrap: 'wrap' },
-  input: {
-    borderWidth: 1,
-    borderColor: tokens.color.line,
-    padding: tokens.space.md,
-    borderRadius: tokens.radius.control,
-    backgroundColor: tokens.color.surface,
-    marginVertical: tokens.space.sm,
-    color: tokens.color.ink,
-  },
-  err: { color: tokens.color.status.noShow, marginBottom: tokens.space.sm },
-  muted: { color: tokens.color.muted, marginBottom: tokens.space.sm, fontSize: 13 },
-  system: { color: tokens.color.muted, fontSize: 13, marginBottom: tokens.space.sm, fontStyle: 'italic' },
-});

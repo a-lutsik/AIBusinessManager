@@ -1,6 +1,6 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 import { t } from '@/src/i18n';
-import { tokens } from '@/src/theme/tokens';
+import { useThemeTokens } from '@/src/theme/tokens';
 
 type Props = {
   label: string;
@@ -14,6 +14,7 @@ type Props = {
 };
 
 export function MetricCard({ label, value, explanation, insufficientData, deltaMoM, unit, windowLabel }: Props) {
+  const { color, space, radius } = useThemeTokens();
   const display =
     insufficientData || value == null || value === ''
       ? t('metric.pending')
@@ -22,17 +23,51 @@ export function MetricCard({ label, value, explanation, insufficientData, deltaM
         : String(value);
 
   return (
-    <View style={styles.card}>
-      <Text style={styles.label}>{humanizeKey(label)}</Text>
-      <Text style={[styles.value, insufficientData ? styles.pending : null]}>{display}</Text>
+    <View
+      style={{
+        backgroundColor: color.surface,
+        paddingVertical: space.lg,
+        paddingHorizontal: space.lg,
+        borderRadius: radius.card,
+        minWidth: 160,
+        flexGrow: 1,
+        flexBasis: 160,
+        borderWidth: 1,
+        borderColor: color.line,
+        gap: 4,
+      }}
+    >
+      <Text
+        style={{
+          fontSize: 11,
+          fontWeight: '700',
+          letterSpacing: 0.04 * 11,
+          textTransform: 'uppercase',
+          color: color.muted,
+        }}
+      >
+        {humanizeKey(label)}
+      </Text>
+      <Text
+        style={{
+          fontSize: 24,
+          fontWeight: '700',
+          color: insufficientData ? color.muted : color.ink,
+          fontFamily: 'Plus Jakarta Sans',
+        }}
+      >
+        {display}
+      </Text>
       {deltaMoM != null && !insufficientData ? (
-        <Text style={[styles.delta, deltaMoM >= 0 ? styles.up : styles.down]}>
+        <Text style={{ fontSize: 12, fontWeight: '600', color: deltaMoM >= 0 ? color.primary : color.status.noShow }}>
           {deltaMoM >= 0 ? '+' : ''}
           {(deltaMoM * 100).toFixed(1)}% MoM
         </Text>
       ) : null}
-      {windowLabel ? <Text style={styles.window}>{windowLabel}</Text> : null}
-      {explanation ? <Text style={styles.explanation}>{explanation}</Text> : null}
+      {windowLabel ? <Text style={{ fontSize: 11, color: color.muted }}>{windowLabel}</Text> : null}
+      {explanation ? (
+        <Text style={{ marginTop: space.xs, fontSize: 12, color: color.muted, lineHeight: 16 }}>{explanation}</Text>
+      ) : null}
     </View>
   );
 }
@@ -54,24 +89,3 @@ function formatMetricValue(value: number, unit?: string | null): string {
   if (Number.isInteger(value)) return String(value);
   return value.toFixed(2);
 }
-
-const styles = StyleSheet.create({
-  card: {
-    backgroundColor: tokens.color.surface,
-    padding: tokens.space.lg,
-    borderRadius: tokens.radius.card,
-    minWidth: 200,
-    flexGrow: 1,
-    flexBasis: 200,
-    borderWidth: 1,
-    borderColor: tokens.color.line,
-  },
-  label: { fontSize: 13, fontWeight: '600', color: tokens.color.muted, marginBottom: 4 },
-  value: { fontSize: 22, fontWeight: '700', color: tokens.color.primary, fontFamily: 'Plus Jakarta Sans' },
-  pending: { color: tokens.color.muted, fontSize: 15, fontWeight: '500' },
-  delta: { marginTop: 4, fontSize: 12, fontWeight: '600' },
-  up: { color: tokens.color.primary },
-  down: { color: tokens.color.status.noShow },
-  window: { marginTop: 4, fontSize: 11, color: tokens.color.muted },
-  explanation: { marginTop: tokens.space.sm, fontSize: 12, color: tokens.color.muted, lineHeight: 16 },
-});

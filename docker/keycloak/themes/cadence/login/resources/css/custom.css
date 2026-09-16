@@ -1,0 +1,380 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap');
+
+/* ============================================================
+   Cadence — Keycloak login theme
+   Parent theme: keycloak.v2 (PatternFly v5)
+   Palette: emerald #059669 / indigo #6366F1 / amber #F59E0B
+   Type: Plus Jakarta Sans (display) + Inter (text)
+   ============================================================ */
+
+:root {
+    --cadence-canvas: #F9FBFA;
+    --cadence-surface: #FFFFFF;
+    --cadence-ink: #0F172A;
+    --cadence-muted: #64748B;
+    --cadence-line: #E2E8F0;
+    --cadence-primary: #059669;
+    --cadence-primary-dark: #047857;
+    --cadence-secondary: #6366F1;
+    --cadence-danger: #DC2626;
+
+    --pf-v5-global--primary-color--100: var(--cadence-primary);
+    --pf-v5-global--primary-color--200: var(--cadence-primary-dark);
+    --pf-v5-global--link--Color: var(--cadence-primary);
+    --pf-v5-global--link--Color--hover: var(--cadence-primary-dark);
+    --pf-v5-global--FontFamily--text: "Inter", "RedHatText", helvetica, arial, sans-serif;
+    --pf-v5-global--FontFamily--heading: "Plus Jakarta Sans", "RedHatDisplay", helvetica, arial, sans-serif;
+    --pf-v5-c-button--m-primary--BackgroundColor: var(--cadence-primary);
+    --pf-v5-c-button--m-primary--hover--BackgroundColor: var(--cadence-primary-dark);
+}
+
+html.pf-v5-theme-dark {
+    --cadence-canvas: #0F172A;
+    --cadence-surface: #1E293B;
+    --cadence-ink: #F8FAFC;
+    --cadence-muted: #94A3B8;
+    --cadence-line: #334155;
+    --cadence-primary: #34D399;
+    --cadence-primary-dark: #6EE7B7;
+    --cadence-secondary: #818CF8;
+    --cadence-danger: #F87171;
+
+    --pf-v5-global--primary-color--100: var(--cadence-primary);
+    --pf-v5-global--primary-color--200: var(--cadence-primary-dark);
+    --pf-v5-global--link--Color: var(--cadence-primary);
+    --pf-v5-global--link--Color--hover: var(--cadence-primary-dark);
+    --pf-v5-c-button--m-primary--BackgroundColor: var(--cadence-primary);
+    --pf-v5-c-button--m-primary--hover--BackgroundColor: var(--cadence-primary-dark);
+    --pf-v5-c-button--m-primary--Color: #0F172A;
+}
+
+body.cadence-shell {
+    margin: 0;
+    background: var(--cadence-canvas);
+    color: var(--cadence-ink);
+    font-family: "Inter", "RedHatText", helvetica, arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+}
+
+.cadence-layout {
+    display: flex;
+    min-height: 100vh;
+}
+
+/* ---------- Hero panel ---------- */
+
+.cadence-hero {
+    flex: 0 0 42%;
+    max-width: 560px;
+    min-width: 320px;
+    background: linear-gradient(160deg, var(--cadence-primary) 0%, var(--cadence-primary-dark) 100%);
+    color: #FFFFFF;
+    padding: 48px 44px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 32px;
+}
+
+.cadence-hero-brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.cadence-hero-mark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.18);
+    color: #FFFFFF;
+    flex-shrink: 0;
+}
+
+.cadence-hero-wordmark {
+    font-family: "Plus Jakarta Sans", sans-serif;
+    font-weight: 700;
+    font-size: 20px;
+    letter-spacing: -0.01em;
+    line-height: 1.1;
+}
+
+.cadence-hero-tagline {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    opacity: 0.82;
+    text-transform: uppercase;
+}
+
+.cadence-hero-copy h2 {
+    font-family: "Plus Jakarta Sans", sans-serif;
+    font-weight: 700;
+    font-size: 30px;
+    line-height: 1.2;
+    margin: 0 0 12px;
+}
+
+.cadence-hero-copy p {
+    font-size: 15px;
+    line-height: 1.55;
+    opacity: 0.92;
+    margin: 0;
+    max-width: 40ch;
+}
+
+.cadence-hero-foot {
+    font-size: 12px;
+    opacity: 0.75;
+}
+
+/* ---------- Form column ---------- */
+
+.cadence-form-col {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 24px 32px 40px;
+}
+
+.cadence-topbar {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 12px;
+    margin-bottom: 24px;
+}
+
+.cadence-locale-pills {
+    display: inline-flex;
+    background: var(--cadence-surface);
+    border: 1px solid var(--cadence-line);
+    border-radius: 999px;
+    padding: 3px;
+    gap: 2px;
+}
+
+.cadence-locale-pill {
+    display: inline-block;
+    padding: 5px 12px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: var(--cadence-muted);
+    text-decoration: none;
+}
+
+.cadence-locale-pill.is-active {
+    background: var(--cadence-primary);
+    color: #FFFFFF;
+}
+
+.cadence-theme-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 999px;
+    border: 1px solid var(--cadence-line);
+    background: var(--cadence-surface);
+    color: var(--cadence-ink);
+    cursor: pointer;
+}
+
+.cadence-form-card {
+    flex: 1;
+    width: 100%;
+    max-width: 420px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+.cadence-form-header h1,
+.cadence-form-header #kc-page-title {
+    font-family: "Plus Jakarta Sans", sans-serif;
+    font-weight: 700;
+    font-size: 26px;
+    color: var(--cadence-ink);
+    margin: 0 0 24px;
+}
+
+.cadence-form-footer {
+    margin-top: 32px;
+    padding-top: 16px;
+    border-top: 1px solid var(--cadence-line);
+}
+
+.cadence-footer-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 12px;
+    color: var(--cadence-muted);
+}
+
+.cadence-footer-links {
+    display: inline-flex;
+    gap: 16px;
+}
+
+/* ---------- Form controls ---------- */
+
+.cadence-form-body .pf-v5-c-form__label-text,
+.cadence-form-body .pf-v5-c-form__label {
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--cadence-ink);
+}
+
+.cadence-form-body .pf-v5-c-form-control {
+    border: 1px solid var(--cadence-line);
+    border-radius: 10px;
+    background: var(--cadence-surface);
+    min-height: 44px;
+    transition: border-color 0.15s ease;
+}
+
+.cadence-form-body .pf-v5-c-form-control:focus-within {
+    border-color: var(--cadence-primary);
+}
+
+.cadence-form-body .pf-v5-c-form-control input {
+    background: transparent;
+    color: var(--cadence-ink);
+    font-size: 14px;
+}
+
+/* icon affordance for the two identity/password fields, no template fork needed */
+.cadence-form-body span.pf-v5-c-form-control:has(#username),
+.cadence-form-body span.pf-v5-c-form-control:has(#password) {
+    padding-left: 38px;
+    position: relative;
+}
+
+.cadence-form-body span.pf-v5-c-form-control:has(#username)::before,
+.cadence-form-body span.pf-v5-c-form-control:has(#password)::before {
+    content: '';
+    position: absolute;
+    left: 12px;
+    top: 50%;
+    width: 16px;
+    height: 16px;
+    transform: translateY(-50%);
+    background-color: var(--cadence-muted);
+    -webkit-mask-repeat: no-repeat;
+    mask-repeat: no-repeat;
+    -webkit-mask-size: contain;
+    mask-size: contain;
+}
+
+.cadence-form-body span.pf-v5-c-form-control:has(#username)::before {
+    -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2'%3E%3Cpath d='M4 4h16v16H4z'/%3E%3Cpath d='m4 6 8 7 8-7'/%3E%3C/svg%3E");
+    mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2'%3E%3Cpath d='M4 4h16v16H4z'/%3E%3Cpath d='m4 6 8 7 8-7'/%3E%3C/svg%3E");
+}
+
+.cadence-form-body span.pf-v5-c-form-control:has(#password)::before {
+    -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2'%3E%3Crect x='4' y='11' width='16' height='9' rx='2'/%3E%3Cpath d='M8 11V7a4 4 0 1 1 8 0v4'/%3E%3C/svg%3E");
+    mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2'%3E%3Crect x='4' y='11' width='16' height='9' rx='2'/%3E%3Cpath d='M8 11V7a4 4 0 1 1 8 0v4'/%3E%3C/svg%3E");
+}
+
+.cadence-form-body .pf-v5-c-check__label {
+    font-size: 13px;
+    color: var(--cadence-ink);
+}
+
+.cadence-form-body .pf-v5-c-check__input {
+    accent-color: var(--cadence-primary);
+}
+
+.cadence-form-body .pf-v5-c-button.pf-m-primary {
+    border-radius: 10px;
+    font-weight: 600;
+    font-family: "Plus Jakarta Sans", sans-serif;
+    min-height: 44px;
+    background-color: var(--cadence-primary);
+    border-color: var(--cadence-primary);
+}
+
+.cadence-form-body .pf-v5-c-button.pf-m-primary:hover,
+.cadence-form-body .pf-v5-c-button.pf-m-primary:focus {
+    background-color: var(--cadence-primary-dark);
+    border-color: var(--cadence-primary-dark);
+}
+
+html.pf-v5-theme-dark .cadence-form-body .pf-v5-c-button.pf-m-primary {
+    color: #0F172A;
+}
+
+.cadence-form-body .pf-v5-c-button.pf-m-secondary {
+    border-radius: 10px;
+    font-weight: 600;
+    color: var(--cadence-ink);
+    border-color: var(--cadence-line);
+}
+
+.cadence-form-body a {
+    color: var(--cadence-primary);
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.cadence-form-body .pf-v5-c-alert {
+    border-radius: 10px;
+    align-items: flex-start;
+}
+
+/* ---------- OTP boxes ---------- */
+
+.cadence-otp-boxes {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
+.cadence-otp-box {
+    width: 44px;
+    height: 52px;
+    text-align: center;
+    font-size: 20px;
+    font-weight: 700;
+    border: 1px solid var(--cadence-line);
+    border-radius: 10px;
+    background: var(--cadence-surface);
+    color: var(--cadence-ink);
+}
+
+.cadence-otp-box:focus {
+    outline: none;
+    border-color: var(--cadence-primary);
+}
+
+/* ---------- Responsive: stack on narrow viewports ---------- */
+
+@media (max-width: 860px) {
+    .cadence-layout {
+        flex-direction: column;
+    }
+
+    .cadence-hero {
+        max-width: none;
+        min-width: 0;
+        padding: 32px 24px;
+        gap: 20px;
+    }
+
+    .cadence-hero-copy h2 {
+        font-size: 22px;
+    }
+
+    .cadence-form-col {
+        padding: 20px 20px 32px;
+    }
+}
