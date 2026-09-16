@@ -7,7 +7,10 @@ import com.aibusinessmanager.catalog.api.SpecialistView;
 import com.aibusinessmanager.catalog.api.WeeklyInterval;
 import com.aibusinessmanager.growth.api.GrowthService;
 import com.aibusinessmanager.growth.api.GrowthSignalView;
+import com.aibusinessmanager.growth.api.MetricDefinitionView;
+import com.aibusinessmanager.growth.api.MetricDefinitions;
 import com.aibusinessmanager.growth.api.MetricView;
+import com.aibusinessmanager.platform.error.DomainException;
 import com.aibusinessmanager.platform.persistence.TenantAwareDsl;
 import com.aibusinessmanager.platform.tenancy.TenantContext;
 import com.aibusinessmanager.platform.tenant.TenantDirectory;
@@ -20,6 +23,8 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -59,36 +64,138 @@ public class GrowthServiceImpl implements GrowthService {
     @Override
     @Transactional(readOnly = true)
     public List<MetricView> currentMetrics(UUID specialistId) {
-        var stored = dsl.selectFrom(METRIC_SNAPSHOT)
+        var rows = dsl.selectFrom(METRIC_SNAPSHOT)
                 .where(TenantAwareDsl.tenantEquals(METRIC_SNAPSHOT.TENANT_ID)
                         .and(specialistId == null
                                 ? METRIC_SNAPSHOT.SPECIALIST_ID.isNull()
                                 : METRIC_SNAPSHOT.SPECIALIST_ID.eq(specialistId)))
                 .orderBy(METRIC_SNAPSHOT.CREATED_AT.desc())
-                .limit(6)
-                .fetch(r -> new MetricView(
-                        r.get(METRIC_SNAPSHOT.METRIC_KEY),
-                        r.get(METRIC_SNAPSHOT.VALUE_NUMERIC),
-                        r.get(METRIC_SNAPSHOT.SAMPLE_SIZE),
-                        Boolean.TRUE.equals(r.get(METRIC_SNAPSHOT.INSUFFICIENT_DATA)),
-                        r.get(METRIC_SNAPSHOT.EXPLANATION),
-                        r.get(METRIC_SNAPSHOT.SPECIALIST_ID)
-                ));
-        if (!stored.isEmpty()) {
-            return stored;
+                .limit(200)
+                .fetch();
+        if (rows.isEmpty()) {
+            return placeholders(specialistId);
         }
-        return List.of(
-                placeholder("SLOT_UTILIZATION", specialistId),
-                placeholder("REPEAT_RATE", specialistId),
-                placeholder("RETURN_INTERVAL", specialistId),
-                placeholder("NO_SHOW_RATE", specialistId),
-                placeholder("REVENUE_PER_HOUR", specialistId),
-                placeholder("CHURN_RISK", specialistId)
-        );
+        Map<String, org.jooq.Record> latestByKey = new LinkedHashMap<>();
+        for (org.jooq.Record r : rows) {
+            String key = r.get(METRIC_SNAPSHOT.METRIC_KEY);
+            latestByKey.putIfAbsent(key, r);
+        }
+        List<MetricView> result = new ArrayList<>();
+        for (org.jooq.Record r : latestByKey.values()) {
+            LocalDate windowStart = r.get(METRIC_SNAPSHOT.WINDOW_START);
+            LocalDate windowEnd = r.get(METRIC_SNAPSHOT.WINDOW_END);
+            String key = r.get(METRIC_SNAPSHOT.METRIC_KEY);
+            Double value = r.get(METRIC_SNAPSHOT.VALUE_NUMERIC);
+            Double delta = deltaMoM(key, specialistId, windowStart, windowEnd, value);
+            List<MetricView.SpecialistBreakdown> breakdown = specialistId == null
+                    ? breakdownFor(key, windowStart, windowEnd)
+                    : List.of();
+            result.add(new MetricView(
+                    key,
+                    value,
+                    r.get(METRIC_SNAPSHOT.SAMPLE_SIZE),
+                    Boolean.TRUE.equals(r.get(METRIC_SNAPSHOT.INSUFFICIENT_DATA)),
+                    r.get(METRIC_SNAPSHOT.EXPLANATION),
+                    r.get(METRIC_SNAPSHOT.SPECIALIST_ID),
+                    windowStart,
+                    windowEnd,
+                    MetricDefinitions.unitFor(key),
+                    delta,
+                    breakdown
+            ));
+        }
+        return result;
     }
 
-    private static MetricView placeholder(String key, UUID specialistId) {
-        return new MetricView(key, null, 0, true, "Will appear after Metrics Core recalculation", specialistId);
+    private List<MetricView> placeholders(UUID specialistId) {
+        return MetricDefinitions.all().stream()
+                .map(d -> MetricView.basic(d.key(), null, 0, true, "Will appear after Metrics Core recalculation", specialistId))
+                .toList();
+    }
+
+    private Double deltaMoM(
+            String key,
+            UUID specialistId,
+            LocalDate windowStart,
+            LocalDate windowEnd,
+            Double currentValue
+    ) {
+        if (windowStart == null || windowEnd == null || currentValue == null) {
+            return null;
+        }
+        long days = java.time.temporal.ChronoUnit.DAYS.between(windowStart, windowEnd) + 1;
+        LocalDate priorEnd = windowStart.minusDays(1);
+        LocalDate priorStart = priorEnd.minusDays(days - 1);
+        Double prior = dsl.select(METRIC_SNAPSHOT.VALUE_NUMERIC)
+                .from(METRIC_SNAPSHOT)
+                .where(TenantAwareDsl.tenantEquals(METRIC_SNAPSHOT.TENANT_ID)
+                        .and(METRIC_SNAPSHOT.METRIC_KEY.eq(key))
+                        .and(specialistId == null
+                                ? METRIC_SNAPSHOT.SPECIALIST_ID.isNull()
+                                : METRIC_SNAPSHOT.SPECIALIST_ID.eq(specialistId))
+                        .and(METRIC_SNAPSHOT.WINDOW_START.eq(priorStart))
+                        .and(METRIC_SNAPSHOT.WINDOW_END.eq(priorEnd))
+                        .and(METRIC_SNAPSHOT.INSUFFICIENT_DATA.isFalse())
+                        .and(METRIC_SNAPSHOT.VALUE_NUMERIC.isNotNull()))
+                .orderBy(METRIC_SNAPSHOT.CREATED_AT.desc())
+                .limit(1)
+                .fetchOne(METRIC_SNAPSHOT.VALUE_NUMERIC);
+        if (prior == null || prior == 0.0) {
+            prior = dsl.select(METRIC_SNAPSHOT.VALUE_NUMERIC)
+                    .from(METRIC_SNAPSHOT)
+                    .where(TenantAwareDsl.tenantEquals(METRIC_SNAPSHOT.TENANT_ID)
+                            .and(METRIC_SNAPSHOT.METRIC_KEY.eq(key))
+                            .and(specialistId == null
+                                    ? METRIC_SNAPSHOT.SPECIALIST_ID.isNull()
+                                    : METRIC_SNAPSHOT.SPECIALIST_ID.eq(specialistId))
+                            .and(METRIC_SNAPSHOT.WINDOW_END.lt(windowStart))
+                            .and(METRIC_SNAPSHOT.INSUFFICIENT_DATA.isFalse())
+                            .and(METRIC_SNAPSHOT.VALUE_NUMERIC.isNotNull()))
+                    .orderBy(METRIC_SNAPSHOT.WINDOW_END.desc(), METRIC_SNAPSHOT.CREATED_AT.desc())
+                    .limit(1)
+                    .fetchOne(METRIC_SNAPSHOT.VALUE_NUMERIC);
+        }
+        if (prior == null || prior == 0.0) {
+            return null;
+        }
+        return (currentValue - prior) / prior;
+    }
+
+    private List<MetricView.SpecialistBreakdown> breakdownFor(
+            String key,
+            LocalDate windowStart,
+            LocalDate windowEnd
+    ) {
+        Map<UUID, SpecialistView> specialists = catalogService.listSpecialists(false).stream()
+                .collect(Collectors.toMap(SpecialistView::id, s -> s, (a, b) -> a));
+        var rows = dsl.selectFrom(METRIC_SNAPSHOT)
+                .where(TenantAwareDsl.tenantEquals(METRIC_SNAPSHOT.TENANT_ID)
+                        .and(METRIC_SNAPSHOT.METRIC_KEY.eq(key))
+                        .and(METRIC_SNAPSHOT.SPECIALIST_ID.isNotNull())
+                        .and(windowStart == null ? METRIC_SNAPSHOT.WINDOW_START.isNotNull() : METRIC_SNAPSHOT.WINDOW_START.eq(windowStart))
+                        .and(windowEnd == null ? METRIC_SNAPSHOT.WINDOW_END.isNotNull() : METRIC_SNAPSHOT.WINDOW_END.eq(windowEnd)))
+                .orderBy(METRIC_SNAPSHOT.CREATED_AT.desc())
+                .fetch();
+        Map<UUID, org.jooq.Record> latest = new LinkedHashMap<>();
+        for (org.jooq.Record r : rows) {
+            latest.putIfAbsent(r.get(METRIC_SNAPSHOT.SPECIALIST_ID), r);
+        }
+        return latest.entrySet().stream()
+                .sorted(Comparator.comparing(e -> {
+                    SpecialistView s = specialists.get(e.getKey());
+                    return s == null ? e.getKey().toString() : s.displayName();
+                }))
+                .map(e -> {
+                    SpecialistView s = specialists.get(e.getKey());
+                    org.jooq.Record r = e.getValue();
+                    return new MetricView.SpecialistBreakdown(
+                            e.getKey(),
+                            s == null ? e.getKey().toString() : s.displayName(),
+                            r.get(METRIC_SNAPSHOT.VALUE_NUMERIC),
+                            Boolean.TRUE.equals(r.get(METRIC_SNAPSHOT.INSUFFICIENT_DATA))
+                    );
+                })
+                .toList();
     }
 
     @Override
@@ -105,39 +212,92 @@ public class GrowthServiceImpl implements GrowthService {
         List<WeeklyInterval> weekly = weeklyBySpecialist.values().stream()
                 .flatMap(List::stream)
                 .toList();
-        List<MetricView> tenantMetrics = metricsCalculator.compute(visits, weekly, zone, windowStart, windowEnd, null);
+        List<MetricView> tenantMetrics = metricsCalculator.compute(visits, weekly, zone, windowStart, windowEnd, null)
+                .stream()
+                .map(m -> m.withWindow(windowStart, windowEnd))
+                .toList();
         persist(tenantMetrics, windowStart, windowEnd);
         for (SpecialistView specialist : specialists) {
             List<AppointmentView> subset = visits.stream().filter(v -> v.specialistId().equals(specialist.id())).toList();
             List<WeeklyInterval> sw = weeklyBySpecialist.getOrDefault(specialist.id(), List.of());
-            persist(metricsCalculator.compute(subset, sw, zone, windowStart, windowEnd, specialist.id()), windowStart, windowEnd);
+            persist(
+                    metricsCalculator.compute(subset, sw, zone, windowStart, windowEnd, specialist.id()).stream()
+                            .map(m -> m.withWindow(windowStart, windowEnd))
+                            .toList(),
+                    windowStart,
+                    windowEnd
+            );
         }
         persistSignals(tenantMetrics, visits);
-        return tenantMetrics;
+        return currentMetrics(null);
     }
 
     @Override
     @Transactional(readOnly = true)
     public List<GrowthSignalView> signals() {
         List<GrowthSignalView> stored = dsl.selectFrom(GROWTH_SIGNAL)
-                .where(TenantAwareDsl.tenantEquals(GROWTH_SIGNAL.TENANT_ID))
+                .where(TenantAwareDsl.tenantEquals(GROWTH_SIGNAL.TENANT_ID)
+                        .and(GROWTH_SIGNAL.DISMISSED_AT.isNull()))
                 .orderBy(GROWTH_SIGNAL.CREATED_AT.desc())
                 .limit(20)
-                .fetch(r -> new GrowthSignalView(
-                        r.get(GROWTH_SIGNAL.SIGNAL_KEY),
-                        r.get(GROWTH_SIGNAL.TITLE),
-                        r.get(GROWTH_SIGNAL.EVIDENCE),
-                        r.get(GROWTH_SIGNAL.SUGGESTED_ACTION)
-                ));
+                .fetch(this::toSignal);
         if (!stored.isEmpty()) {
             return stored;
         }
         return List.of(new GrowthSignalView(
+                null,
                 "METRICS_PENDING",
                 "Metrics not calculated yet",
                 "Run the monthly metrics job to populate signals",
-                "Open the dashboard after seed/recalculate"
+                "Open the dashboard after seed/recalculate",
+                "INFO",
+                "OPEN_METRICS",
+                null,
+                Instant.now(),
+                null
         ));
+    }
+
+    @Override
+    public List<MetricDefinitionView> definitions() {
+        return MetricDefinitions.all();
+    }
+
+    @Override
+    @Transactional
+    public GrowthSignalView dismissSignal(UUID signalId) {
+        var row = dsl.selectFrom(GROWTH_SIGNAL)
+                .where(TenantAwareDsl.tenantEquals(GROWTH_SIGNAL.TENANT_ID).and(GROWTH_SIGNAL.ID.eq(signalId)))
+                .orderBy(GROWTH_SIGNAL.CREATED_AT.desc())
+                .limit(1)
+                .fetchOptional()
+                .orElseThrow(() -> DomainException.notFound("SIGNAL_NOT_FOUND", "Signal not found"));
+        Instant now = Instant.now();
+        dsl.update(GROWTH_SIGNAL)
+                .set(GROWTH_SIGNAL.DISMISSED_AT, Utc.toLocal(now))
+                .where(TenantAwareDsl.tenantEquals(GROWTH_SIGNAL.TENANT_ID)
+                        .and(GROWTH_SIGNAL.ID.eq(signalId))
+                        .and(GROWTH_SIGNAL.CREATED_AT.eq(row.get(GROWTH_SIGNAL.CREATED_AT))))
+                .execute();
+        return toSignal(row).withDismissed(now);
+    }
+
+    private GrowthSignalView toSignal(org.jooq.Record r) {
+        Instant dismissed = r.get(GROWTH_SIGNAL.DISMISSED_AT) == null
+                ? null
+                : Utc.toInstant(r.get(GROWTH_SIGNAL.DISMISSED_AT));
+        return new GrowthSignalView(
+                r.get(GROWTH_SIGNAL.ID),
+                r.get(GROWTH_SIGNAL.SIGNAL_KEY),
+                r.get(GROWTH_SIGNAL.TITLE),
+                r.get(GROWTH_SIGNAL.EVIDENCE),
+                r.get(GROWTH_SIGNAL.SUGGESTED_ACTION),
+                r.get(GROWTH_SIGNAL.SEVERITY) == null ? "INFO" : r.get(GROWTH_SIGNAL.SEVERITY),
+                r.get(GROWTH_SIGNAL.ACTION_TYPE),
+                r.get(GROWTH_SIGNAL.ACTION_PAYLOAD),
+                Utc.toInstant(r.get(GROWTH_SIGNAL.CREATED_AT)),
+                dismissed
+        );
     }
 
     private void persist(List<MetricView> metrics, LocalDate from, LocalDate to) {
@@ -163,18 +323,30 @@ public class GrowthServiceImpl implements GrowthService {
         metrics.stream().filter(m -> "NO_SHOW_RATE".equals(m.key()) && m.value() != null && m.value() > 0.15)
                 .findFirst()
                 .ifPresent(m -> generated.add(new GrowthSignalView(
+                        UUID.randomUUID(),
                         "NO_SHOW_SPIKE",
                         "No-show rate is elevated",
                         m.explanation(),
-                        "Tighten Trust for new clients and send the 24h reminder"
+                        "Tighten Trust for new clients and send the 24h reminder",
+                        "WARNING",
+                        "OPEN_RULES",
+                        "{\"focus\":\"newClientRequiresConfirmation\"}",
+                        Instant.now(),
+                        null
                 )));
         metrics.stream().filter(m -> "SLOT_UTILIZATION".equals(m.key()) && m.value() != null && m.value() < 0.4)
                 .findFirst()
                 .ifPresent(m -> generated.add(new GrowthSignalView(
+                        UUID.randomUUID(),
                         "UTILIZATION_GAP",
                         "Low slot utilization",
                         m.explanation(),
-                        "Open a reactivation campaign for clients past their usual interval"
+                        "Open a reactivation campaign for clients past their usual interval",
+                        "WARNING",
+                        "OPEN_CLIENTS",
+                        null,
+                        Instant.now(),
+                        null
                 )));
         long lowValue = visits.stream()
                 .filter(v -> v.status().name().equals("COMPLETED") && v.durationSnapshot() > 0)
@@ -182,20 +354,29 @@ public class GrowthServiceImpl implements GrowthService {
                 .count();
         if (lowValue > 0) {
             generated.add(new GrowthSignalView(
+                    UUID.randomUUID(),
                     "LOW_VALUE_SERVICES",
                     "Some completed services earn little per hour",
                     lowValue + " completed visits are below 40 GEL-equivalent per hour",
-                    "Review price or duration on those offerings"
+                    "Review price or duration on those offerings",
+                    "INFO",
+                    "OPEN_SERVICES",
+                    null,
+                    Instant.now(),
+                    null
             ));
         }
         for (GrowthSignalView signal : generated) {
             dsl.insertInto(GROWTH_SIGNAL)
-                    .set(GROWTH_SIGNAL.ID, UUID.randomUUID())
+                    .set(GROWTH_SIGNAL.ID, signal.id())
                     .set(GROWTH_SIGNAL.TENANT_ID, TenantContext.require())
                     .set(GROWTH_SIGNAL.SIGNAL_KEY, signal.key())
                     .set(GROWTH_SIGNAL.TITLE, signal.title())
                     .set(GROWTH_SIGNAL.EVIDENCE, signal.evidence())
                     .set(GROWTH_SIGNAL.SUGGESTED_ACTION, signal.suggestedAction())
+                    .set(GROWTH_SIGNAL.SEVERITY, signal.severity())
+                    .set(GROWTH_SIGNAL.ACTION_TYPE, signal.actionType())
+                    .set(GROWTH_SIGNAL.ACTION_PAYLOAD, signal.actionPayload())
                     .set(GROWTH_SIGNAL.CREATED_AT, Utc.toLocal(Instant.now()))
                     .execute();
         }

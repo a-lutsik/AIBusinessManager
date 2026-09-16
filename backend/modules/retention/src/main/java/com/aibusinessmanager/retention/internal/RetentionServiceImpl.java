@@ -45,15 +45,21 @@ public class RetentionServiceImpl implements RetentionService {
     @Override
     @Transactional
     public TrustView assess(UUID clientId) {
-        TrustView computed = compute(clientId);
+        TrustView computed = computeInternal(clientId);
         persist(computed);
         return computed;
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public TrustView compute(UUID clientId) {
+        return computeInternal(clientId);
+    }
+
+    @Override
     @Transactional
     public TrustView override(UUID clientId, String level, String reason) {
-        TrustView computed = compute(clientId);
+        TrustView computed = computeInternal(clientId);
         persist(computed);
         dsl.update(TRUST_STATE)
                 .set(TRUST_STATE.OVERRIDE_LEVEL, level)
@@ -61,13 +67,13 @@ public class RetentionServiceImpl implements RetentionService {
                 .set(TRUST_STATE.UPDATED_AT, Utc.toLocal(Instant.now()))
                 .where(TenantAwareDsl.tenantEquals(TRUST_STATE.TENANT_ID).and(TRUST_STATE.CLIENT_ID.eq(clientId)))
                 .execute();
-        return compute(clientId);
+        return computeInternal(clientId);
     }
 
     @Override
     @Transactional
     public boolean requiresConfirmation(UUID clientId) {
-        TrustView trust = compute(clientId);
+        TrustView trust = computeInternal(clientId);
         BookingRulesView rules = catalogService.rules();
         if (trust.isLow()) {
             return true;
@@ -75,7 +81,7 @@ public class RetentionServiceImpl implements RetentionService {
         return trust.isNew() && rules.newClientRequiresConfirmation();
     }
 
-    private TrustView compute(UUID clientId) {
+    private TrustView computeInternal(UUID clientId) {
         ClientView client = crmService.findById(clientId)
                 .orElseThrow(() -> DomainException.notFound("CLIENT_NOT_FOUND", "Client not found"));
         BookingRulesView rules = catalogService.rules();
@@ -149,6 +155,24 @@ public class RetentionServiceImpl implements RetentionService {
                 .set(PACKAGE_LEDGER.CREATED_AT, Utc.toLocal(Instant.now()))
                 .execute();
         return new PackageView(id, clientId, name, sessions, sessions, valueMinor);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<PackageView> packagesForClient(UUID clientId) {
+        return dsl.selectFrom(SERVICE_PACKAGE)
+                .where(TenantAwareDsl.tenantEquals(SERVICE_PACKAGE.TENANT_ID)
+                        .and(SERVICE_PACKAGE.CLIENT_ID.eq(clientId))
+                        .and(SERVICE_PACKAGE.REMAINING_SESSIONS.gt(0)))
+                .orderBy(SERVICE_PACKAGE.CREATED_AT.desc())
+                .fetch(r -> new PackageView(
+                        r.get(SERVICE_PACKAGE.ID),
+                        r.get(SERVICE_PACKAGE.CLIENT_ID),
+                        r.get(SERVICE_PACKAGE.NAME),
+                        r.get(SERVICE_PACKAGE.REMAINING_SESSIONS),
+                        r.get(SERVICE_PACKAGE.TOTAL_SESSIONS),
+                        r.get(SERVICE_PACKAGE.VALUE_MINOR)
+                ));
     }
 
     @Override

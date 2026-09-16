@@ -26,6 +26,9 @@ public interface CatalogService {
 
     List<MasterServiceView> listMatrix(UUID specialistId);
 
+    /** All catalog services joined with matrix overrides for a specialist. */
+    List<MatrixRowView> listMatrixRows(UUID specialistId);
+
     MasterServiceView upsertMatrix(MasterServiceView row);
 
     Optional<Offering> offering(UUID specialistId, UUID serviceId);

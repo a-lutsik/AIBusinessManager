@@ -122,7 +122,7 @@ export default function PublicBookScreen() {
       {serviceId ? (
         <>
           <Text style={styles.h2}>{t('book.specialist')}</Text>
-          {specialists.length === 0 ? <Text style={styles.muted}>{t('empty.specialists')}</Text> : null}
+          {specialists.length === 0 ? <Text style={styles.muted}>{t('empty.specialistsForService')}</Text> : null}
           {specialists.map((s) => (
             <Pressable key={s.id} onPress={() => setSpecialistId(s.id)} style={[styles.card, specialistId === s.id && styles.sel]}>
               <Text>{s.displayName}</Text>

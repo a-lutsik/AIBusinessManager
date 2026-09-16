@@ -68,10 +68,10 @@ final class MetricsCalculator {
                 .mapToLong(v -> Duration.between(v.serviceStart(), v.serviceEnd()).toMinutes())
                 .sum();
         if (available == 0) {
-            return new MetricView("SLOT_UTILIZATION", null, 0, true, "No working minutes in the window", specialistId);
+            return MetricView.basic("SLOT_UTILIZATION", null, 0, true, "No working minutes in the window", specialistId);
         }
         double value = booked / (double) available;
-        return new MetricView(
+        return MetricView.basic(
                 "SLOT_UTILIZATION",
                 value,
                 (int) available,
@@ -87,11 +87,11 @@ final class MetricsCalculator {
                 .collect(Collectors.groupingBy(AppointmentView::clientId, Collectors.counting()));
         long clients = completed.size();
         if (clients < 10) {
-            return new MetricView("REPEAT_RATE", null, (int) clients, true, "Need at least 10 clients with a completed visit", specialistId);
+            return MetricView.basic("REPEAT_RATE", null, (int) clients, true, "Need at least 10 clients with a completed visit", specialistId);
         }
         long repeats = completed.values().stream().filter(c -> c >= 2).count();
         double value = repeats / (double) clients;
-        return new MetricView("REPEAT_RATE", value, (int) clients, false, repeats + " returning clients / " + clients + " clients with a completed visit", specialistId);
+        return MetricView.basic("REPEAT_RATE", value, (int) clients, false, repeats + " returning clients / " + clients + " clients with a completed visit", specialistId);
     }
 
     private MetricView returnInterval(List<AppointmentView> visits, UUID specialistId) {
@@ -111,10 +111,10 @@ final class MetricsCalculator {
             personalMedians.add(median(gaps));
         }
         if (personalMedians.size() < 3) {
-            return new MetricView("RETURN_INTERVAL", null, personalMedians.size(), true, "Need clients with at least two completed visits", specialistId);
+            return MetricView.basic("RETURN_INTERVAL", null, personalMedians.size(), true, "Need clients with at least two completed visits", specialistId);
         }
         double value = median(personalMedians);
-        return new MetricView("RETURN_INTERVAL", value, personalMedians.size(), false, "Median of per-client median return intervals: " + value + " days", specialistId);
+        return MetricView.basic("RETURN_INTERVAL", value, personalMedians.size(), false, "Median of per-client median return intervals: " + value + " days", specialistId);
     }
 
     private MetricView noShowRate(List<AppointmentView> visits, UUID specialistId) {
@@ -123,22 +123,22 @@ final class MetricsCalculator {
                 .count();
         long noShows = visits.stream().filter(v -> v.status() == AppointmentStatus.NO_SHOW).count();
         if (arrived < 5) {
-            return new MetricView("NO_SHOW_RATE", null, (int) arrived, true, "Not enough visits that reached start time", specialistId);
+            return MetricView.basic("NO_SHOW_RATE", null, (int) arrived, true, "Not enough visits that reached start time", specialistId);
         }
         double value = noShows / (double) arrived;
-        return new MetricView("NO_SHOW_RATE", value, (int) arrived, false, noShows + " no-shows / " + arrived + " visits that reached start time", specialistId);
+        return MetricView.basic("NO_SHOW_RATE", value, (int) arrived, false, noShows + " no-shows / " + arrived + " visits that reached start time", specialistId);
     }
 
     private MetricView revenuePerHour(List<AppointmentView> visits, UUID specialistId) {
         List<AppointmentView> completed = visits.stream().filter(v -> v.status() == AppointmentStatus.COMPLETED).toList();
         long minutes = completed.stream().mapToLong(v -> v.durationSnapshot()).sum();
         if (minutes == 0) {
-            return new MetricView("REVENUE_PER_HOUR", null, 0, true, "No completed service minutes", specialistId);
+            return MetricView.basic("REVENUE_PER_HOUR", null, 0, true, "No completed service minutes", specialistId);
         }
         long valueMinor = completed.stream().mapToLong(v -> v.priceSnapshot() - v.discountAmount()).sum();
         double hours = minutes / 60.0;
         double value = valueMinor / hours;
-        return new MetricView("REVENUE_PER_HOUR", value, completed.size(), false, "Completed value " + valueMinor + " minor units / " + hours + " worked hours", specialistId);
+        return MetricView.basic("REVENUE_PER_HOUR", value, completed.size(), false, "Completed value " + valueMinor + " minor units / " + hours + " worked hours", specialistId);
     }
 
     private MetricView churnRisk(List<AppointmentView> visits, UUID specialistId, Instant now) {
@@ -168,10 +168,10 @@ final class MetricsCalculator {
             }
         }
         if (considered < 5) {
-            return new MetricView("CHURN_RISK", null, (int) considered, true, "Not enough completed-client history", specialistId);
+            return MetricView.basic("CHURN_RISK", null, (int) considered, true, "Not enough completed-client history", specialistId);
         }
         double value = high / (double) considered;
-        return new MetricView("CHURN_RISK", value, (int) considered, false, high + " clients beyond 2× their typical return interval", specialistId);
+        return MetricView.basic("CHURN_RISK", value, (int) considered, false, high + " clients beyond 2× their typical return interval", specialistId);
     }
 
     private long median(List<Long> values) {

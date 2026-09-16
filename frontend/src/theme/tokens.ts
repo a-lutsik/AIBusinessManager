@@ -1,28 +1,45 @@
 export type ThemeName = 'light' | 'dark';
 
+/** Atelier Intelligence palette (Stitch design): emerald + indigo + amber on slate. */
 export const tokens = {
   color: {
-    ink: '#1c1917',
-    muted: '#57534e',
-    canvas: '#f7f4ef',
-    surface: '#ffffff',
-    accent: '#0f766e',
-    line: '#e7e5e4',
+    primary: '#059669',
+    secondary: '#6366F1',
+    tertiary: '#F59E0B',
+    ink: '#0F172A',
+    muted: '#64748B',
+    canvas: '#F9FBFA',
+    surface: '#FFFFFF',
+    mist: '#F1F5F4',
+    accent: '#059669',
+    ai: '#6366F1',
+    line: '#E2E8F0',
     status: {
-      pending: '#b45309',
-      confirmed: '#0f766e',
-      completed: '#1d4ed8',
-      noShow: '#be123c',
-      cancelled: '#78716c',
+      pending: '#F59E0B',
+      confirmed: '#059669',
+      completed: '#6366F1',
+      noShow: '#DC2626',
+      cancelled: '#94A3B8',
+    },
+    trust: {
+      NEW: '#6366F1',
+      HIGH: '#059669',
+      NORMAL: '#64748B',
+      LOW: '#DC2626',
     },
   },
   dark: {
-    ink: '#f5f5f4',
-    muted: '#a8a29e',
-    canvas: '#1c1917',
-    surface: '#292524',
-    accent: '#2dd4bf',
-    line: '#44403c',
+    primary: '#34D399',
+    secondary: '#818CF8',
+    tertiary: '#FBBF24',
+    ink: '#F8FAFC',
+    muted: '#94A3B8',
+    canvas: '#0F172A',
+    surface: '#1E293B',
+    mist: '#1E293B',
+    accent: '#34D399',
+    ai: '#818CF8',
+    line: '#334155',
   },
   space: {
     xs: 4,
@@ -34,6 +51,12 @@ export const tokens = {
   },
   radius: {
     control: 8,
+    card: 16,
+    pill: 9999,
+  },
+  rail: {
+    min: 256,
+    max: 280,
   },
 } as const;
 
@@ -50,6 +73,11 @@ export function statusColor(status: string): string {
     default:
       return tokens.color.status.cancelled;
   }
+}
+
+export function trustColor(level: string): string {
+  const key = level as keyof typeof tokens.color.trust;
+  return tokens.color.trust[key] ?? tokens.color.muted;
 }
 
 export type Tokens = typeof tokens;

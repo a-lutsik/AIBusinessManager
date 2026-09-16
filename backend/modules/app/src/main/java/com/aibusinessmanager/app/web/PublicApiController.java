@@ -152,6 +152,19 @@ public class PublicApiController {
         return view;
     }
 
+    @PostMapping("/bookings/{id}/reschedule")
+    public AppointmentView reschedule(
+            @PathVariable UUID id,
+            @RequestParam String token,
+            @RequestParam Instant start
+    ) {
+        AppointmentView view = bookingService.rescheduleByAccessToken(token, start);
+        if (!view.id().equals(id)) {
+            throw DomainException.forbidden("TOKEN_INVALID", "Token does not match this visit");
+        }
+        return view;
+    }
+
     @GetMapping("/bookings/{id}/calendar.ics")
     public ResponseEntity<String> ics(@PathVariable UUID id, @RequestParam String token) {
         AppointmentView view = bookingService.findByAccessToken(token)

@@ -40,3 +40,9 @@ yarn-error.log
 
 # Generated (rebuilt by jooqCodegen)
 backend/modules/platform/build/generated-sources/
+
+# Playwright MCP browser artifacts
+.playwright-mcp/
+
+# Downloaded reference/design assets
+*.zip

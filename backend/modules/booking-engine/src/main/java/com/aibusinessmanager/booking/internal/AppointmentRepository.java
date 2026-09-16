@@ -164,6 +164,7 @@ class AppointmentRepository {
                 r.get(APPOINTMENT.NOTE),
                 r.get(APPOINTMENT.SOURCE),
                 r.get(APPOINTMENT.ENTERED_NAME),
+                null,
                 null
         );
     }

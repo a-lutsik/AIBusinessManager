@@ -352,6 +352,10 @@ CREATE TABLE growth_signal (
     title               VARCHAR(256) NOT NULL,
     evidence            VARCHAR(1024) NOT NULL,
     suggested_action    VARCHAR(1024) NOT NULL,
+    severity            VARCHAR(16) NOT NULL DEFAULT 'INFO',
+    action_type         VARCHAR(64),
+    action_payload      VARCHAR(2048),
+    dismissed_at        TIMESTAMP,
     created_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT growth_signal_pk PRIMARY KEY (id, created_at),
     CONSTRAINT growth_signal_tenant_fk FOREIGN KEY (tenant_id) REFERENCES tenant (id)

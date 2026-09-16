@@ -14,4 +14,8 @@ public interface GrowthService {
     List<MetricView> recalculate(LocalDate windowStart, LocalDate windowEnd);
 
     List<GrowthSignalView> signals();
+
+    List<MetricDefinitionView> definitions();
+
+    GrowthSignalView dismissSignal(UUID signalId);
 }
