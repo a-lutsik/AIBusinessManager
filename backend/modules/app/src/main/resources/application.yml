@@ -1,10 +1,10 @@
 spring:
   application:
-    name: ai-business-manager
+    name: cadence
   datasource:
-    url: jdbc:postgresql://localhost:5433/aibusinessmanager
-    username: abm
-    password: abm
+    url: jdbc:postgresql://localhost:5433/cadence
+    username: cadence
+    password: cadence
   flyway:
     enabled: true
     locations: classpath:db/migration
@@ -19,7 +19,7 @@ spring:
 app:
   security:
     oauth2-enabled: false
-    issuer-uri: http://localhost:8081/realms/abm
+    issuer-uri: http://localhost:8081/realms/cadence
   seed:
     enabled: true
   outbox:
@@ -56,4 +56,4 @@ server:
 logging:
   level:
     org.jooq: INFO
-    com.aibusinessmanager: INFO
+    com.cadence: INFO

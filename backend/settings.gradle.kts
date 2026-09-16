@@ -1,4 +1,4 @@
-rootProject.name = "ai-business-manager"
+rootProject.name = "cadence"
 
 include(
     "modules:platform",

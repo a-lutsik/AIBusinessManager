@@ -17,8 +17,8 @@ async function request<T>(path: string, init: RequestInit = {}, tenantId?: strin
   if (tenantId) {
     headers['X-Tenant-Id'] = tenantId;
   }
-  const role = globalThis.localStorage?.getItem('abm.role');
-  const specialistId = globalThis.localStorage?.getItem('abm.specialistId');
+  const role = globalThis.localStorage?.getItem('cadence.role');
+  const specialistId = globalThis.localStorage?.getItem('cadence.specialistId');
   if (role) {
     headers['X-Actor-Role'] = role;
   }

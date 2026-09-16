@@ -33,12 +33,12 @@ export default function ConsoleLayout() {
   const switchRole = (next: 'OWNER' | 'MASTER') => {
     setRole(next);
     if (typeof localStorage !== 'undefined') {
-      localStorage.setItem('abm.role', next);
-      localStorage.setItem('abm.tenantId', LUMEN_TENANT_ID);
+      localStorage.setItem('cadence.role', next);
+      localStorage.setItem('cadence.tenantId', LUMEN_TENANT_ID);
       if (next === 'MASTER') {
-        localStorage.setItem('abm.specialistId', '00000000-0000-4000-8000-000000000011');
+        localStorage.setItem('cadence.specialistId', '00000000-0000-4000-8000-000000000011');
       } else {
-        localStorage.removeItem('abm.specialistId');
+        localStorage.removeItem('cadence.specialistId');
       }
     }
     bump((n) => n + 1);

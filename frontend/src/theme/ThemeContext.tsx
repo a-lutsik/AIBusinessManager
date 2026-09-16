@@ -14,7 +14,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<ThemeName>('light');
 
   useEffect(() => {
-    const stored = Platform.OS === 'web' ? globalThis.localStorage?.getItem('abm.theme') : null;
+    const stored = Platform.OS === 'web' ? globalThis.localStorage?.getItem('cadence.theme') : null;
     if (stored === 'dark' || stored === 'light') {
       setTheme(stored);
     }
@@ -23,7 +23,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (Platform.OS === 'web' && typeof document !== 'undefined') {
       document.documentElement.setAttribute('data-theme', theme);
-      globalThis.localStorage?.setItem('abm.theme', theme);
+      globalThis.localStorage?.setItem('cadence.theme', theme);
     }
   }, [theme]);
 

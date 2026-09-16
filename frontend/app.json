@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "AI Business Manager",
-    "slug": "ai-business-manager",
+    "name": "Cadence",
+    "slug": "cadence",
     "version": "0.1.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "abm",
+    "scheme": "cadence",
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true
