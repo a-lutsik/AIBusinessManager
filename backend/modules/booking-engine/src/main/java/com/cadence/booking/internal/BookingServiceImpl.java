@@ -207,6 +207,7 @@ public class BookingServiceImpl implements BookingService {
                 command.note(),
                 command.source() == null ? "CONSOLE" : command.source(),
                 enteredName,
+                null,
                 null
         );
         appointments.insert(row);
@@ -351,7 +352,8 @@ public class BookingServiceImpl implements BookingService {
                 current.note(),
                 current.source(),
                 current.clientDisplayName(),
-                current.clientPhone()
+                current.clientPhone(),
+                current.trustLevel()
         );
         appointments.updateStatusAndTimes(updated);
         appointments.insertEvent(appointmentId, "RESCHEDULED", "{\"from\":\"" + current.serviceStart() + "\",\"to\":\"" + newStart + "\"}");
@@ -380,6 +382,21 @@ public class BookingServiceImpl implements BookingService {
         try (var ignored = TenantContext.open(tenantId)) {
             AppointmentStatus target = byClient ? AppointmentStatus.CANCELLED_BY_CLIENT : AppointmentStatus.CANCELLED_BY_BUSINESS;
             return transition(view.id(), target, view.note());
+        }
+    }
+
+    @Override
+    @Transactional
+    public AppointmentView rescheduleByAccessToken(String rawToken, Instant newStart) {
+        AppointmentView view = findByAccessToken(rawToken)
+                .orElseThrow(() -> DomainException.notFound("TOKEN_INVALID", "Booking link is invalid"));
+        UUID tenantId = appointments.tenantIdByTokenHash(BookingTokens.hash(rawToken)).orElseThrow();
+        try (var ignored = TenantContext.open(tenantId)) {
+            BookingRulesView rules = catalogService.rules();
+            if (!rules.clientRescheduleAllowed()) {
+                throw DomainException.forbidden("RESCHEDULE_DISABLED", "Client reschedule is disabled for this business");
+            }
+            return reschedule(view.id(), newStart);
         }
     }
 
@@ -424,8 +441,14 @@ public class BookingServiceImpl implements BookingService {
 
     private AppointmentView enrich(AppointmentView row) {
         ClientView client = crmService.findById(row.clientId()).orElse(null);
+        String trustLevel = null;
+        try {
+            trustLevel = retentionService.compute(row.clientId()).effectiveLevel();
+        } catch (Exception ignored) {
+            // Trust is best-effort on calendar/detail enrichment
+        }
         if (client == null) {
-            return row;
+            return trustLevel == null ? row : row.withTrustLevel(trustLevel);
         }
         return new AppointmentView(
                 row.id(),
@@ -449,7 +472,8 @@ public class BookingServiceImpl implements BookingService {
                 row.note(),
                 row.source(),
                 client.displayName(),
-                client.normalizedPhone()
+                client.normalizedPhone(),
+                trustLevel
         );
     }
 
@@ -476,7 +500,8 @@ public class BookingServiceImpl implements BookingService {
                 note,
                 current.source(),
                 current.clientDisplayName(),
-                current.clientPhone()
+                current.clientPhone(),
+                current.trustLevel()
         );
     }
 

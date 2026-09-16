@@ -8,4 +8,5 @@ dependencies {
     api(project(":modules:platform"))
     testImplementation(platform(libs.spring.boot.dependencies))
     testImplementation("org.junit.jupiter:junit-jupiter")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }

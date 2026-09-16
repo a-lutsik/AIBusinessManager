@@ -2,6 +2,7 @@ package com.cadence.ai.internal;
 
 import com.cadence.ai.api.AiAssistantService;
 import com.cadence.ai.api.ChatResponse;
+import com.cadence.ai.api.ConversationHistoryView;
 import com.cadence.booking.api.AppointmentView;
 import com.cadence.booking.api.BookingService;
 import com.cadence.booking.api.CreateBookingCommand;
@@ -138,6 +139,68 @@ public class AiAssistantServiceImpl implements AiAssistantService {
                 null
         );
         return new ChatResponse("Draft applied through Booking Engine.", List.of(), rec.conversationId());
+    }
+
+    @Override
+    @Transactional
+    public ChatResponse rejectDraft(UUID draftId) {
+        AiStore.DraftRecord rec = aiStore.requireDraft(draftId);
+        if (!"PENDING".equals(rec.status())) {
+            throw DomainException.conflict("DRAFT_NOT_PENDING", "Draft already handled");
+        }
+        aiStore.markRejected(draftId);
+        auditLogger.record(
+                ActorContext.current().map(ActorContext.Actor::actorId).orElse("owner"),
+                "OWNER",
+                "ai.draft.reject",
+                "ai_draft",
+                draftId,
+                rec.payload(),
+                "{\"status\":\"REJECTED\"}",
+                "ai",
+                null
+        );
+        return new ChatResponse("Draft rejected.", List.of(), rec.conversationId());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public ConversationHistoryView conversation(UUID conversationId) {
+        assertOwner();
+        List<ConversationHistoryView.MessageView> messages = new ArrayList<>();
+        for (AiStore.PromptRecord prompt : aiStore.listPrompts(conversationId)) {
+            messages.add(new ConversationHistoryView.MessageView(
+                    prompt.createdAt(), "user", prompt.prompt(), prompt.provider(), prompt.model()
+            ));
+            if (prompt.response() != null && !prompt.response().isBlank()) {
+                messages.add(new ConversationHistoryView.MessageView(
+                        prompt.createdAt(), "assistant", prompt.response(), prompt.provider(), prompt.model()
+                ));
+            }
+        }
+        List<ChatResponse.DraftAction> drafts = aiStore.listDrafts(conversationId, null).stream()
+                .map(this::toDraftAction)
+                .toList();
+        return new ConversationHistoryView(conversationId, messages, drafts);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<ChatResponse.DraftAction> listDrafts(String status) {
+        assertOwner();
+        return aiStore.listDrafts(null, status).stream().map(this::toDraftAction).toList();
+    }
+
+    private ChatResponse.DraftAction toDraftAction(AiStore.DraftRecord rec) {
+        String summary = rec.toolName() + " (" + rec.status() + ")";
+        return new ChatResponse.DraftAction(rec.id(), rec.toolName(), summary, rec.payload(), rec.status());
+    }
+
+    private void assertOwner() {
+        ActorContext.Actor actor = ActorContext.current().orElse(null);
+        if (actor != null && actor.isMaster()) {
+            throw DomainException.forbidden("FORBIDDEN_RESOURCE", "AI assistant is owner-only");
+        }
     }
 
     private String collectFacts(UUID convo) {

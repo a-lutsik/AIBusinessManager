@@ -4,10 +4,12 @@ import com.cadence.platform.error.DomainException;
 import com.cadence.platform.persistence.TenantAwareDsl;
 import com.cadence.platform.tenancy.TenantContext;
 import com.cadence.platform.time.Utc;
+import org.jooq.Condition;
 import org.jooq.DSLContext;
 import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 import static com.cadence.platform.jooq.Tables.AI_DRAFT;
@@ -61,7 +63,8 @@ public class JooqAiStore implements AiStore {
                         r.get(AI_DRAFT.CONVERSATION_ID),
                         r.get(AI_DRAFT.TOOL_NAME),
                         r.get(AI_DRAFT.PAYLOAD),
-                        r.get(AI_DRAFT.STATUS)
+                        r.get(AI_DRAFT.STATUS),
+                        Utc.toInstant(r.get(AI_DRAFT.CREATED_AT))
                 ))
                 .orElseThrow(() -> DomainException.notFound("DRAFT_NOT_FOUND", "Draft not found"));
     }
@@ -73,5 +76,54 @@ public class JooqAiStore implements AiStore {
                 .set(AI_DRAFT.CONFIRMED_AT, Utc.toLocal(Instant.now()))
                 .where(TenantAwareDsl.tenantEquals(AI_DRAFT.TENANT_ID).and(AI_DRAFT.ID.eq(draftId)))
                 .execute();
+    }
+
+    @Override
+    public void markRejected(UUID draftId) {
+        dsl.update(AI_DRAFT)
+                .set(AI_DRAFT.STATUS, "REJECTED")
+                .where(TenantAwareDsl.tenantEquals(AI_DRAFT.TENANT_ID).and(AI_DRAFT.ID.eq(draftId)))
+                .execute();
+    }
+
+    @Override
+    public List<DraftRecord> listDrafts(UUID conversationId, String status) {
+        Condition condition = TenantAwareDsl.tenantEquals(AI_DRAFT.TENANT_ID);
+        if (conversationId != null) {
+            condition = condition.and(AI_DRAFT.CONVERSATION_ID.eq(conversationId));
+        }
+        if (status != null && !status.isBlank()) {
+            condition = condition.and(AI_DRAFT.STATUS.eq(status));
+        }
+        return dsl.selectFrom(AI_DRAFT)
+                .where(condition)
+                .orderBy(AI_DRAFT.CREATED_AT.desc())
+                .limit(100)
+                .fetch(r -> new DraftRecord(
+                        r.get(AI_DRAFT.ID),
+                        r.get(AI_DRAFT.CONVERSATION_ID),
+                        r.get(AI_DRAFT.TOOL_NAME),
+                        r.get(AI_DRAFT.PAYLOAD),
+                        r.get(AI_DRAFT.STATUS),
+                        Utc.toInstant(r.get(AI_DRAFT.CREATED_AT))
+                ));
+    }
+
+    @Override
+    public List<PromptRecord> listPrompts(UUID conversationId) {
+        return dsl.selectFrom(AI_PROMPT_LOG)
+                .where(TenantAwareDsl.tenantEquals(AI_PROMPT_LOG.TENANT_ID)
+                        .and(AI_PROMPT_LOG.CONVERSATION_ID.eq(conversationId)))
+                .orderBy(AI_PROMPT_LOG.CREATED_AT.asc())
+                .limit(200)
+                .fetch(r -> new PromptRecord(
+                        r.get(AI_PROMPT_LOG.ID),
+                        r.get(AI_PROMPT_LOG.CONVERSATION_ID),
+                        r.get(AI_PROMPT_LOG.PROVIDER),
+                        r.get(AI_PROMPT_LOG.MODEL),
+                        r.get(AI_PROMPT_LOG.PROMPT),
+                        r.get(AI_PROMPT_LOG.RESPONSE),
+                        Utc.toInstant(r.get(AI_PROMPT_LOG.CREATED_AT))
+                ));
     }
 }

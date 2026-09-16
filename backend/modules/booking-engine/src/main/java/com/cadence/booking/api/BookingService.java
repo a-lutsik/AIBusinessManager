@@ -29,6 +29,8 @@ public interface BookingService {
 
     AppointmentView cancelByAccessToken(String rawToken, boolean byClient);
 
+    AppointmentView rescheduleByAccessToken(String rawToken, Instant newStart);
+
     String ics(UUID appointmentId);
 
     String icsByAccessToken(String rawToken);

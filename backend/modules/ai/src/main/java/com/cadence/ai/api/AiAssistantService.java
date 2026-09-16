@@ -11,4 +11,10 @@ public interface AiAssistantService {
     ChatResponse chat(UUID conversationId, String userLocale, String message);
 
     ChatResponse confirmDraft(UUID draftId);
+
+    ChatResponse rejectDraft(UUID draftId);
+
+    ConversationHistoryView conversation(UUID conversationId);
+
+    List<ChatResponse.DraftAction> listDrafts(String status);
 }

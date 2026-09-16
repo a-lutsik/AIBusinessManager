@@ -2,6 +2,10 @@ package com.cadence.app.web;
 
 import com.cadence.ai.api.AiAssistantService;
 import com.cadence.ai.api.ChatResponse;
+import com.cadence.ai.api.ConversationHistoryView;
+import com.cadence.app.web.dto.AppointmentDetailView;
+import com.cadence.app.web.dto.DashboardView;
+import com.cadence.app.web.dto.MasterTodayView;
 import com.cadence.booking.api.AppointmentStatus;
 import com.cadence.booking.api.AppointmentView;
 import com.cadence.booking.api.BookingService;
@@ -9,6 +13,7 @@ import com.cadence.booking.api.CreateBookingCommand;
 import com.cadence.catalog.api.BookingRulesView;
 import com.cadence.catalog.api.CatalogService;
 import com.cadence.catalog.api.MasterServiceView;
+import com.cadence.catalog.api.MatrixRowView;
 import com.cadence.catalog.api.ScheduleExceptionView;
 import com.cadence.catalog.api.ServiceView;
 import com.cadence.catalog.api.SpecialistView;
@@ -16,9 +21,12 @@ import com.cadence.catalog.api.WeeklyInterval;
 import com.cadence.crm.api.ClientView;
 import com.cadence.crm.api.CrmService;
 import com.cadence.growth.api.GrowthService;
+import com.cadence.growth.api.GrowthSignalView;
+import com.cadence.growth.api.MetricDefinitionView;
 import com.cadence.growth.api.MetricView;
 import com.cadence.notification.api.OwnerTaskService;
 import com.cadence.notification.api.OwnerTaskView;
+import com.cadence.platform.error.DomainException;
 import com.cadence.platform.tenancy.ActorContext;
 import com.cadence.platform.tenancy.TenantContext;
 import com.cadence.platform.tenant.TenantDirectory;
@@ -35,6 +43,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -101,18 +111,45 @@ public class AppApiController {
     }
 
     @GetMapping("/dashboard")
-    public Map<String, Object> dashboard() {
-        Instant from = Instant.now().minusSeconds(3600);
-        Instant to = Instant.now().plusSeconds(86400);
+    public DashboardView dashboard() {
+        Instant now = Instant.now();
+        Instant from = now.minusSeconds(3600);
+        Instant to = now.plusSeconds(86400);
         List<AppointmentView> today = bookingService.calendar(from, to, null);
-        List<MetricView> metrics = growthService.currentMetrics(null);
-        List<OwnerTaskView> tasks = ownerTaskService.listOpen();
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("today", today);
-        body.put("metrics", metrics);
-        body.put("tasks", tasks);
-        body.put("signals", growthService.signals());
-        return body;
+        ActorContext.Actor actor = ActorContext.current().orElse(null);
+        boolean master = actor != null && actor.isMaster();
+        return new DashboardView(
+                now,
+                today,
+                master ? List.of() : growthService.currentMetrics(null),
+                master ? List.of() : ownerTaskService.listOpen(),
+                master ? List.of() : growthService.signals()
+        );
+    }
+
+    @GetMapping("/masters/me/today")
+    public MasterTodayView masterToday() {
+        ActorContext.Actor actor = ActorContext.require();
+        if (!actor.isMaster() || actor.specialistId() == null) {
+            throw DomainException.forbidden("FORBIDDEN_RESOURCE", "Master today is available only for MASTER actors");
+        }
+        UUID specialistId = actor.specialistId();
+        var tenant = tenants.requireById(TenantContext.require());
+        ZoneId zone = ZoneId.of(tenant.getTimezone());
+        LocalDate day = LocalDate.now(zone);
+        Instant from = day.atStartOfDay(zone).toInstant();
+        Instant to = day.plusDays(1).atStartOfDay(zone).toInstant();
+        List<AppointmentView> appointments = bookingService.calendar(from, to, specialistId);
+        List<MasterTodayView.Item> items = new ArrayList<>();
+        for (AppointmentView appointment : appointments) {
+            TrustView trust = retentionService.assess(appointment.clientId());
+            items.add(new MasterTodayView.Item(
+                    appointment,
+                    trust,
+                    retentionService.packagesForClient(appointment.clientId())
+            ));
+        }
+        return new MasterTodayView(Instant.now(), day, specialistId, items);
     }
 
     @GetMapping("/services")
@@ -142,8 +179,8 @@ public class AppApiController {
     }
 
     @GetMapping("/specialists/{id}/matrix")
-    public List<MasterServiceView> matrix(@PathVariable UUID id) {
-        return catalogService.listMatrix(id);
+    public List<MatrixRowView> matrix(@PathVariable UUID id) {
+        return catalogService.listMatrixRows(id);
     }
 
     @PutMapping("/specialists/{id}/matrix")
@@ -202,8 +239,10 @@ public class AppApiController {
     }
 
     @GetMapping("/appointments/{id}")
-    public AppointmentView appointment(@PathVariable UUID id) {
-        return bookingService.find(id).orElseThrow();
+    public AppointmentDetailView appointment(@PathVariable UUID id) {
+        AppointmentView view = bookingService.find(id).orElseThrow();
+        TrustView trust = retentionService.assess(view.clientId());
+        return new AppointmentDetailView(view, trust);
     }
 
     @PostMapping("/appointments")
@@ -290,11 +329,29 @@ public class AppApiController {
         return growthService.currentMetrics(null);
     }
 
+    @GetMapping("/metrics/definitions")
+    public List<MetricDefinitionView> metricDefinitions() {
+        assertOwner();
+        return growthService.definitions();
+    }
+
     @PostMapping("/metrics/recalculate")
     public List<MetricView> recalculate() {
         assertOwner();
         LocalDate end = LocalDate.now();
         return growthService.recalculate(end.minusDays(90), end);
+    }
+
+    @GetMapping("/signals")
+    public List<GrowthSignalView> signals() {
+        assertOwner();
+        return growthService.signals();
+    }
+
+    @PostMapping("/signals/{id}/dismiss")
+    public GrowthSignalView dismissSignal(@PathVariable UUID id) {
+        assertOwner();
+        return growthService.dismissSignal(id);
     }
 
     @PostMapping("/ai/chat")
@@ -304,16 +361,34 @@ public class AppApiController {
         return aiAssistantService.chat(convo, body.getOrDefault("locale", "en"), body.getOrDefault("message", ""));
     }
 
+    @GetMapping("/ai/conversations/{id}")
+    public ConversationHistoryView conversation(@PathVariable UUID id) {
+        assertOwner();
+        return aiAssistantService.conversation(id);
+    }
+
+    @GetMapping("/ai/drafts")
+    public List<ChatResponse.DraftAction> drafts(@RequestParam(required = false) String status) {
+        assertOwner();
+        return aiAssistantService.listDrafts(status);
+    }
+
     @PostMapping("/ai/drafts/{id}/confirm")
     public ChatResponse confirm(@PathVariable UUID id) {
         assertOwner();
         return aiAssistantService.confirmDraft(id);
     }
 
+    @PostMapping("/ai/drafts/{id}/reject")
+    public ChatResponse reject(@PathVariable UUID id) {
+        assertOwner();
+        return aiAssistantService.rejectDraft(id);
+    }
+
     private void assertOwner() {
         ActorContext.Actor actor = ActorContext.current().orElse(null);
         if (actor != null && actor.isMaster()) {
-            throw com.cadence.platform.error.DomainException.forbidden(
+            throw DomainException.forbidden(
                     "FORBIDDEN_RESOURCE", "Owner-only endpoint"
             );
         }

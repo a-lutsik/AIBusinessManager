@@ -266,7 +266,13 @@ ALTER TABLE appointment
 
 ### Источник дизайна
 
-Канонический макет — Figma-файл `mSKjWyCN7jV1Pjewe1t8A1` («Atelier — AI Business Manager», исходное название до переименования проекта в Cadence). Три страницы:
+Канонический бренд продукта — **Cadence** (проект переименован из «AI Business Manager»; рабочее название «AuraDesk» не используется).
+
+Визуал: Figma-файл `mSKjWyCN7jV1Pjewe1t8A1` («Atelier — AI Business Manager», исходное название до переименования) **и** Stitch Atelier Intelligence (палитра emerald/indigo/amber/slate, плотность карточек, Trust badges, AI draft cards) — рядом, как visual source. Функции и IA — этот PRODUCT_PLAN, не макет 1:1.
+
+Фаза 1: календарь без drag-and-drop; перенос визита — через диалог выбора слота. Публичный визит — короткий ref (последние 6 символов UUID), без выдуманных `#LM-` кодов.
+
+Три страницы Figma:
 
 - Design System — foundations, компоненты, документация токенов.
 - Console — экраны кабинета владельца и мастера.

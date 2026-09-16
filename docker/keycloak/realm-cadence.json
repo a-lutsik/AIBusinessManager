@@ -2,6 +2,8 @@
   "realm": "cadence",
   "enabled": true,
   "displayName": "Cadence",
+  "displayNameHtml": "Cadence",
+  "loginTheme": "cadence",
   "registrationAllowed": false,
   "loginWithEmailAllowed": true,
   "duplicateEmailsAllowed": false,
@@ -10,8 +12,14 @@
   "sslRequired": "external",
   "roles": {
     "realm": [
-      { "name": "OWNER", "description": "Tenant owner" },
-      { "name": "MASTER", "description": "Specialist / master" }
+      {
+        "name": "OWNER",
+        "description": "Tenant owner"
+      },
+      {
+        "name": "MASTER",
+        "description": "Specialist / master"
+      }
     ]
   },
   "clients": [
@@ -22,8 +30,14 @@
       "publicClient": true,
       "directAccessGrantsEnabled": true,
       "standardFlowEnabled": true,
-      "redirectUris": ["http://localhost:8080/*", "http://localhost:8081/*", "http://localhost:8082/*"],
-      "webOrigins": ["+"],
+      "redirectUris": [
+        "http://localhost:8080/*",
+        "http://localhost:8081/*",
+        "http://localhost:8082/*"
+      ],
+      "webOrigins": [
+        "+"
+      ],
       "protocol": "openid-connect",
       "attributes": {
         "pkce.code.challenge.method": "S256"
@@ -93,7 +107,9 @@
       "firstName": "Lumen",
       "lastName": "Owner",
       "attributes": {
-        "tenant_id": ["00000000-0000-4000-8000-000000000001"]
+        "tenant_id": [
+          "00000000-0000-4000-8000-000000000001"
+        ]
       },
       "credentials": [
         {
@@ -102,7 +118,9 @@
           "temporary": false
         }
       ],
-      "realmRoles": ["OWNER"]
+      "realmRoles": [
+        "OWNER"
+      ]
     },
     {
       "username": "nino@lumen.studio",
@@ -111,8 +129,12 @@
       "firstName": "Nino",
       "lastName": "Beridze",
       "attributes": {
-        "tenant_id": ["00000000-0000-4000-8000-000000000001"],
-        "specialist_id": ["00000000-0000-4000-8000-000000000011"]
+        "tenant_id": [
+          "00000000-0000-4000-8000-000000000001"
+        ],
+        "specialist_id": [
+          "00000000-0000-4000-8000-000000000011"
+        ]
       },
       "credentials": [
         {
@@ -121,7 +143,9 @@
           "temporary": false
         }
       ],
-      "realmRoles": ["MASTER"]
+      "realmRoles": [
+        "MASTER"
+      ]
     }
   ]
 }

@@ -25,6 +25,17 @@ public record AppointmentView(
         String note,
         String source,
         String clientDisplayName,
-        String clientPhone
+        String clientPhone,
+        String trustLevel
 ) {
+    public AppointmentView withTrustLevel(String level) {
+        return new AppointmentView(
+                id, specialistId, serviceId, clientId, status,
+                serviceStart, serviceEnd, occupiedStart, occupiedEnd,
+                serviceNameSnapshot, priceSnapshot, durationSnapshot,
+                bufferBeforeSnapshot, bufferAfterSnapshot, currencyCode,
+                discountAmount, amountReceived, enteredName, note, source,
+                clientDisplayName, clientPhone, level
+        );
+    }
 }

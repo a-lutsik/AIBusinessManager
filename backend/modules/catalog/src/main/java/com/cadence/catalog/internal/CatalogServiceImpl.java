@@ -3,6 +3,7 @@ package com.cadence.catalog.internal;
 import com.cadence.catalog.api.BookingRulesView;
 import com.cadence.catalog.api.CatalogService;
 import com.cadence.catalog.api.MasterServiceView;
+import com.cadence.catalog.api.MatrixRowView;
 import com.cadence.catalog.api.Offering;
 import com.cadence.catalog.api.ScheduleExceptionView;
 import com.cadence.catalog.api.ServiceView;
@@ -13,9 +14,13 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 public class CatalogServiceImpl implements CatalogService {
@@ -104,6 +109,35 @@ public class CatalogServiceImpl implements CatalogService {
     @Transactional(readOnly = true)
     public List<MasterServiceView> listMatrix(UUID specialistId) {
         return repository.listMatrix(specialistId);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<MatrixRowView> listMatrixRows(UUID specialistId) {
+        List<ServiceView> services = repository.listServices(false);
+        Map<UUID, MasterServiceView> byService = repository.listMatrix(specialistId).stream()
+                .collect(Collectors.toMap(MasterServiceView::serviceId, Function.identity(), (a, b) -> a));
+        List<MatrixRowView> rows = new ArrayList<>();
+        for (ServiceView service : services) {
+            MasterServiceView matrix = byService.get(service.id());
+            rows.add(new MatrixRowView(
+                    matrix == null ? null : matrix.id(),
+                    specialistId,
+                    service.id(),
+                    service.name(),
+                    service.color(),
+                    matrix != null && matrix.offered(),
+                    service.durationMinutes(),
+                    service.priceMinor(),
+                    service.bufferBeforeMinutes(),
+                    service.bufferAfterMinutes(),
+                    matrix == null ? null : matrix.durationMinutesOverride(),
+                    matrix == null ? null : matrix.priceMinorOverride(),
+                    matrix == null ? null : matrix.bufferBeforeMinutesOverride(),
+                    matrix == null ? null : matrix.bufferAfterMinutesOverride()
+            ));
+        }
+        return rows;
     }
 
     @Override

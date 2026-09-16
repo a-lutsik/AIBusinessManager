@@ -3,33 +3,64 @@
 @tailwind utilities;
 
 :root {
-  --color-ink: #1c1917;
-  --color-muted: #57534e;
-  --color-canvas: #f7f4ef;
-  --color-surface: #ffffff;
-  --color-accent: #0f766e;
-  --color-line: #e7e5e4;
-  --color-status-pending: #b45309;
-  --color-status-confirmed: #0f766e;
-  --color-status-completed: #1d4ed8;
-  --color-status-noshow: #be123c;
-  --color-status-cancelled: #78716c;
-  --font-sans: "Noto Sans", "Avenir Next", system-ui, sans-serif;
-  --font-display: "Noto Sans", "Avenir Next", system-ui, sans-serif;
+  --color-primary: #059669;
+  --color-secondary: #6366F1;
+  --color-tertiary: #F59E0B;
+  --color-ink: #0F172A;
+  --color-muted: #64748B;
+  --color-canvas: #F9FBFA;
+  --color-surface: #FFFFFF;
+  --color-mist: #F1F5F4;
+  --color-accent: #059669;
+  --color-ai: #6366F1;
+  --color-line: #E2E8F0;
+  --color-status-pending: #F59E0B;
+  --color-status-confirmed: #059669;
+  --color-status-completed: #6366F1;
+  --color-status-noshow: #DC2626;
+  --color-status-cancelled: #94A3B8;
+  --font-sans: "Inter", "Noto Sans", system-ui, sans-serif;
+  --font-display: "Plus Jakarta Sans", "Inter", "Noto Sans", system-ui, sans-serif;
   --radius-control: 0.5rem;
+  --radius-card: 1rem;
+  --radius-pill: 9999px;
 }
 
 [data-theme="dark"] {
-  --color-ink: #f5f5f4;
-  --color-muted: #a8a29e;
-  --color-canvas: #1c1917;
-  --color-surface: #292524;
-  --color-accent: #2dd4bf;
-  --color-line: #44403c;
+  --color-primary: #34D399;
+  --color-secondary: #818CF8;
+  --color-tertiary: #FBBF24;
+  --color-ink: #F8FAFC;
+  --color-muted: #94A3B8;
+  --color-canvas: #0F172A;
+  --color-surface: #1E293B;
+  --color-mist: #1E293B;
+  --color-accent: #34D399;
+  --color-ai: #818CF8;
+  --color-line: #334155;
 }
 
-html, body, #root {
+html,
+body,
+#root {
   background: var(--color-canvas);
   color: var(--color-ink);
-  font-family: "Noto Sans", var(--font-sans);
+  font-family: var(--font-sans);
+}
+
+.material-symbols-outlined {
+  font-family: "Material Symbols Outlined";
+  font-weight: normal;
+  font-style: normal;
+  font-size: 22px;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  font-feature-settings: "liga";
+  -webkit-font-smoothing: antialiased;
+  font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24;
 }
