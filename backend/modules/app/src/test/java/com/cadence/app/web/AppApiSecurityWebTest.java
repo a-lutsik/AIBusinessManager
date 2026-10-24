@@ -2,6 +2,8 @@ package com.cadence.app.web;
 
 import com.cadence.ai.api.AiAssistantService;
 import com.cadence.app.config.SecurityConfig;
+import com.cadence.app.ratelimit.ClientIpResolver;
+import com.cadence.app.ratelimit.PublicRateLimiter;
 import com.cadence.app.seed.DemoIds;
 import com.cadence.app.usecase.ClientMergeService;
 import com.cadence.booking.api.BookingService;
@@ -60,6 +62,11 @@ class AppApiSecurityWebTest {
     OwnerTaskService ownerTaskService;
     @MockitoBean
     ClientMergeService clientMergeService;
+    // WebMvcTest picks up the MVC interceptor of the public rate limit (RateLimitWebConfig); it is not exercised here.
+    @MockitoBean
+    PublicRateLimiter publicRateLimiter;
+    @MockitoBean
+    ClientIpResolver clientIpResolver;
 
     @BeforeEach
     void tenantsExist() {

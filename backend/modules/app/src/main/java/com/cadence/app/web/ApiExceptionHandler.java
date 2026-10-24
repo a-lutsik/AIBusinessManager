@@ -1,9 +1,11 @@
 package com.cadence.app.web;
 
+import com.cadence.app.ratelimit.RateLimitedException;
 import com.cadence.platform.error.DomainException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ProblemDetail;
@@ -24,6 +26,15 @@ public class ApiExceptionHandler {
         return problem(ex.status(), ex.code(), ex.getMessage());
     }
 
+    @ExceptionHandler(RateLimitedException.class)
+    public ResponseEntity<ProblemDetail> onRateLimited(RateLimitedException ex) {
+        HttpStatus http = HttpStatus.valueOf(ex.status());
+        return ResponseEntity.status(http)
+                .header(HttpHeaders.RETRY_AFTER, Long.toString(ex.retryAfterSeconds()))
+                .contentType(MediaType.APPLICATION_PROBLEM_JSON)
+                .body(problemBody(http, ex.code(), ex.getMessage()));
+    }
+
     @ExceptionHandler(NoSuchElementException.class)
     public ResponseEntity<ProblemDetail> onMissing(NoSuchElementException ex) {
         return problem(404, "NOT_FOUND", ex.getMessage() == null ? "Not found" : ex.getMessage());
@@ -41,12 +52,16 @@ public class ApiExceptionHandler {
 
     private static ResponseEntity<ProblemDetail> problem(int status, String code, String detail) {
         HttpStatus http = HttpStatus.valueOf(status);
+        return ResponseEntity.status(http)
+                .contentType(MediaType.APPLICATION_PROBLEM_JSON)
+                .body(problemBody(http, code, detail));
+    }
+
+    private static ProblemDetail problemBody(HttpStatus http, String code, String detail) {
         ProblemDetail body = ProblemDetail.forStatusAndDetail(http, detail);
         body.setTitle(code);
         body.setType(URI.create("https://cadence.dev/problems/" + code));
         body.setProperty("code", code);
-        return ResponseEntity.status(http)
-                .contentType(MediaType.APPLICATION_PROBLEM_JSON)
-                .body(body);
+        return body;
     }
 }

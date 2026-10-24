@@ -23,22 +23,50 @@ import { Platform } from 'react-native';
 import { setAuthBridge } from '@/src/api/authBridge';
 import { AUTH_MODE, OIDC_CLIENT_ID, OIDC_ISSUER, OIDC_SCOPES, type AuthMode } from './config';
 import { clearRefreshToken, loadRefreshToken, saveRefreshToken } from './tokenStorage';
-
-// Closes the sign-in popup on web once the browser lands on the redirect route.
-WebBrowser.maybeCompleteAuthSession();
+import {
+  clearPendingSignIn,
+  currentReturnPath,
+  readCallbackParams,
+  savePendingSignIn,
+  stripCallbackQuery,
+  takePendingSignIn,
+} from './webRedirect';
+import { t } from '@/src/i18n';
 
 export type AuthStatus = 'loading' | 'unauthenticated' | 'authenticated';
 
 export type AuthContextValue = {
   mode: AuthMode;
   status: AuthStatus;
-  /** True while the browser/popup sign-in is in progress. */
+  /** True while the browser sign-in is in progress. */
   signingIn: boolean;
   /** Last sign-in failure message, if any. */
   error: string | null;
   signIn: () => Promise<void>;
   signOut: () => Promise<void>;
+  /**
+   * Web only: finishes the redirect sign-in on the `/auth` callback route (verifies `state`, exchanges the
+   * code once, strips the query). Resolves to `missing` when the URL carries no authorization response.
+   */
+  completeRedirect: () => Promise<RedirectResult>;
 };
+
+export type RedirectFailure =
+  /** The URL has no authorization response at all. */
+  | { ok: false; reason: 'missing' }
+  /** Keycloak answered with `error` / `error_description`. */
+  | { ok: false; reason: 'provider'; detail: string }
+  /** `state` is absent, or does not match the one stored before the redirect. */
+  | { ok: false; reason: 'state' }
+  /** The token endpoint rejected the code, or the response had no code. */
+  | { ok: false; reason: 'exchange'; detail: string };
+
+export type RedirectResult = { ok: true; returnTo: string } | RedirectFailure;
+
+/** One run per callback URL: React StrictMode / re-renders must never exchange the same code twice. */
+const redirectRuns = new Map<string, Promise<RedirectResult>>();
+/** Outcome of this page load's callback, still answerable after the query string has been stripped. */
+let lastRedirectRun: Promise<RedirectResult> | null = null;
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
@@ -81,6 +109,7 @@ function DevHeadersAuthProvider({ children }: { children: ReactNode }) {
       error: null,
       signIn: async () => undefined,
       signOut: async () => undefined,
+      completeRedirect: async () => ({ ok: true, returnTo: '/' }),
     }),
     []
   );
@@ -91,6 +120,14 @@ function OidcAuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>('loading');
   const [signingIn, setSigningIn] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Captured on first render: child effects (the /auth route) strip the callback query before this provider's effects run.
+  const [startedOnCallback] = useState(
+    () =>
+      Platform.OS === 'web' &&
+      typeof window !== 'undefined' &&
+      window.location.pathname.startsWith('/auth') &&
+      readCallbackParams() !== null
+  );
 
   const tokensRef = useRef<Tokens | null>(null);
   const discoveryRef = useRef<DiscoveryDocument | null>(null);
@@ -116,7 +153,7 @@ function OidcAuthProvider({ children }: { children: ReactNode }) {
     return discoveryRef.current;
   }, []);
 
-  /** Prepares an auth request (PKCE verifier + URL) ahead of the click so the web popup is not blocked. */
+  /** Prepares an auth request (PKCE verifier + URL) ahead of the click so the sign-in starts without a network wait. */
   const prepareRequest = useCallback(async (): Promise<AuthRequest> => {
     const discovery = await getDiscovery();
     const request = new AuthRequest({
@@ -230,11 +267,9 @@ function OidcAuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     mounted.current = true;
     let cancelled = false;
-    const onRedirectRoute =
-      Platform.OS === 'web' && typeof window !== 'undefined' && window.location.pathname.startsWith('/auth');
     (async () => {
-      if (onRedirectRoute) {
-        // This is the sign-in popup landing page; the opener owns the session.
+      if (startedOnCallback) {
+        // The /auth callback route calls completeRedirect(), which establishes the session; restoring a stale one would race it.
         return;
       }
       const stored = await loadRefreshToken();
@@ -254,7 +289,7 @@ function OidcAuthProvider({ children }: { children: ReactNode }) {
       mounted.current = false;
       clearTimer();
     };
-  }, [refresh, dropSession]);
+  }, [refresh, dropSession, startedOnCallback]);
 
   // Warm up discovery + PKCE request while the sign-in screen is shown.
   useEffect(() => {
@@ -264,30 +299,57 @@ function OidcAuthProvider({ children }: { children: ReactNode }) {
     });
   }, [status, prepareRequest]);
 
+  /** Exchanges an authorization code for tokens and starts the session (shared by native and web). */
+  const exchangeAndApply = useCallback(
+    async (code: string, codeVerifier: string | undefined) => {
+      const discovery = await getDiscovery();
+      const res = await exchangeCodeAsync(
+        {
+          clientId: OIDC_CLIENT_ID,
+          code,
+          redirectUri: getRedirectUri(),
+          extraParams: codeVerifier ? { code_verifier: codeVerifier } : undefined,
+        },
+        discovery
+      );
+      await applyTokens(toTokens(res));
+    },
+    [applyTokens, getDiscovery, getRedirectUri]
+  );
+
   const signIn = useCallback(async () => {
     if (signingIn) return;
     setError(null);
     setSigningIn(true);
+    let leavingPage = false;
     try {
       const discovery = await getDiscovery();
       const request = requestRef.current ?? (await prepareRequest());
       requestRef.current = null;
+      if (Platform.OS === 'web') {
+        // Full-page redirect: persist what the /auth callback needs, then leave. No popup involved.
+        if (!request.url || !request.codeVerifier) {
+          throw new Error('Authorization request is not ready');
+        }
+        const saved = savePendingSignIn({
+          state: request.state,
+          codeVerifier: request.codeVerifier,
+          returnTo: currentReturnPath(),
+        });
+        if (!saved) {
+          throw new Error(t('auth.callback.storageUnavailable'));
+        }
+        leavingPage = true;
+        window.location.assign(request.url);
+        return;
+      }
       const result = await request.promptAsync(discovery);
       if (result.type === 'success') {
         const code = result.params.code;
         if (!code) {
           throw new Error('Authorization code missing in response');
         }
-        const res = await exchangeCodeAsync(
-          {
-            clientId: OIDC_CLIENT_ID,
-            code,
-            redirectUri: getRedirectUri(),
-            extraParams: request.codeVerifier ? { code_verifier: request.codeVerifier } : undefined,
-          },
-          discovery
-        );
-        await applyTokens(toTokens(res));
+        await exchangeAndApply(code, request.codeVerifier);
       } else if (result.type === 'error') {
         throw new Error(result.error?.message ?? result.errorCode ?? 'Sign-in failed');
       } else {
@@ -298,9 +360,64 @@ function OidcAuthProvider({ children }: { children: ReactNode }) {
       setError(e instanceof Error ? e.message : String(e));
       prepareRequest().catch(() => undefined);
     } finally {
-      if (mounted.current) setSigningIn(false);
+      // While the page is navigating away the button stays in its waiting state.
+      if (mounted.current && !leavingPage) setSigningIn(false);
     }
-  }, [applyTokens, getDiscovery, getRedirectUri, prepareRequest, signingIn]);
+  }, [exchangeAndApply, getDiscovery, prepareRequest, signingIn]);
+
+  // Coming back to a cached page (bfcache) after the Keycloak redirect must not leave the button stuck.
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) setSigningIn(false);
+    };
+    window.addEventListener('pageshow', onPageShow);
+    return () => window.removeEventListener('pageshow', onPageShow);
+  }, []);
+
+  const completeRedirect = useCallback((): Promise<RedirectResult> => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') {
+      return Promise.resolve({ ok: false, reason: 'missing' });
+    }
+    const params = readCallbackParams();
+    if (!params) {
+      return lastRedirectRun ?? Promise.resolve({ ok: false, reason: 'missing' });
+    }
+    const runKey = window.location.search;
+    const existing = redirectRuns.get(runKey);
+    if (existing) {
+      return existing;
+    }
+    const run = (async (): Promise<RedirectResult> => {
+      // The stored sign-in state is single use, whatever the outcome.
+      const pending = takePendingSignIn();
+      stripCallbackQuery();
+      try {
+        if (params.error) {
+          return { ok: false, reason: 'provider', detail: params.errorDescription ?? params.error };
+        }
+        if (!pending || !params.state || params.state !== pending.state || !params.code) {
+          return { ok: false, reason: 'state' };
+        }
+        try {
+          await exchangeAndApply(params.code, pending.codeVerifier);
+        } catch (e: unknown) {
+          return { ok: false, reason: 'exchange', detail: e instanceof Error ? e.message : String(e) };
+        }
+        return { ok: true, returnTo: pending.returnTo };
+      } finally {
+        clearPendingSignIn();
+      }
+    })().then((result) => {
+      if (!result.ok && !tokensRef.current && mounted.current) {
+        setStatus('unauthenticated');
+      }
+      return result;
+    });
+    redirectRuns.set(runKey, run);
+    lastRedirectRun = run;
+    return run;
+  }, [exchangeAndApply]);
 
   const signOut = useCallback(async () => {
     const idToken = tokensRef.current?.idToken ?? null;
@@ -329,8 +446,8 @@ function OidcAuthProvider({ children }: { children: ReactNode }) {
   }, [dropSession, getDiscovery, getRedirectUri]);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ mode: 'oidc', status, signingIn, error, signIn, signOut }),
-    [status, signingIn, error, signIn, signOut]
+    () => ({ mode: 'oidc', status, signingIn, error, signIn, signOut, completeRedirect }),
+    [status, signingIn, error, signIn, signOut, completeRedirect]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

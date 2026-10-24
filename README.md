@@ -79,6 +79,38 @@ The `dev-headers` profile turns OAuth2 off and trusts `X-Tenant-Id` (required; L
 `00000000-0000-4000-8000-000000000001`), optional `X-Actor-Role` (`OWNER` by default, or `MASTER` together with
 `X-Specialist-Id`) and `X-Actor-Id`. Invalid values answer 400. Startup fails if neither mode is enabled or both are.
 
+### Public API rate limits
+
+`/api/public/**` is anonymous, so it is throttled in memory (`app.rate-limit.*`; defaults are the numbers of the
+product plan, section 11). Exceeding a limit answers `429` `application/problem+json` with `code=RATE_LIMITED`, a
+human-readable `detail` and a `Retry-After` header (seconds).
+
+| Limit | Key | Default | Property |
+|-------|-----|---------|----------|
+| Slot calculation `GET /api/public/tenants/{slug}/slots` | client IP | 5 per minute | `slots-per-minute-per-ip` |
+| Booking attempts `POST .../bookings` | normalized E.164 phone (tenant country, per tenant) | 3 per day | `bookings-per-day-per-phone` |
+| Booking attempts | tenant slug | 20 per hour | `bookings-per-hour-per-tenant` |
+| Booking attempts | client IP | 20 per hour | `bookings-per-hour-per-ip` |
+
+- An attempt counts whether or not the booking later succeeds; a refused request consumes nothing. An attempt whose
+  phone cannot be parsed is not counted per phone or per tenant (it falls through to the normal `INVALID_PHONE`
+  validation); the per-IP booking limit exists precisely so that such attempts are not unlimited. Raising any
+  property above the plan is a conscious choice, e.g. `APP_RATE_LIMIT_SLOTS_PER_MINUTE_PER_IP=10`.
+- **Client IP** is the TCP peer address. `X-Forwarded-For` is ignored unless the peer is listed in
+  `app.rate-limit.trusted-proxies` (comma-separated CIDRs or addresses, default empty; env
+  `APP_RATE_LIMIT_TRUSTED_PROXIES=127.0.0.1/32,10.0.0.0/8`). For a trusted peer the header is walked from the right and
+  the first address that is not a trusted proxy is the client; a malformed entry on the way falls back to the peer.
+  Behind a reverse proxy (nginx, Caddy, a load balancer) you MUST set `trusted-proxies` to the proxy's address, or all
+  clients share the proxy's IP and its limit; never list address ranges that clients can reach directly.
+- **Audit:** every rejection writes `public.rate_limited` (actor `PUBLIC`, entity `tenant`, details: which limit, masked
+  IP with the last IPv4 octet / IPv6 suffix zeroed, masked phone `+995*******56`; never raw values), at most once per
+  minute per exceeded counter. An unknown slug has no tenant scope and is only logged. An audit failure never changes
+  the 429.
+- **State is in memory of one instance** (single-VPS deployment): it is lost on restart, and several instances behind a
+  balancer would each apply the full limit, i.e. multiply it. A shared store (Redis or the database) is needed before
+  scaling out. At most `max-tracked-keys` counters (default 100000) are kept; expired ones are swept every minute and,
+  when the bound is reached, requests that need a new counter get `429` until old counters expire.
+
 ### Database roles and RLS
 
 | Role | Used by | Rights |

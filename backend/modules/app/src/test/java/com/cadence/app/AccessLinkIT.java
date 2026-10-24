@@ -38,6 +38,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * (not subject to RLS), so they see every tenant.
  */
 @SpringBootTest
+@RelaxedPublicRateLimits
 @AutoConfigureMockMvc
 class AccessLinkIT extends AbstractTimescaleIT {
 

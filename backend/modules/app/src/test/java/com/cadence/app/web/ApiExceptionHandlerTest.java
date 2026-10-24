@@ -1,5 +1,6 @@
 package com.cadence.app.web;
 
+import com.cadence.app.ratelimit.RateLimitedException;
 import com.cadence.platform.error.DomainException;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -87,5 +88,20 @@ class ApiExceptionHandlerTest {
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code", is("DATA_CONFLICT")))
                 .andExpect(content().string(not(containsString("insert into"))));
+    }
+
+    @Test
+    void rateLimitedAnswers429ProblemJsonWithRetryAfter() {
+        ResponseEntity<ProblemDetail> response =
+                handler.onRateLimited(new RateLimitedException("Please wait a minute and try again.", 42));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(429);
+        assertThat(response.getHeaders().getFirst("Retry-After")).isEqualTo("42");
+        assertThat(response.getHeaders().getContentType()).hasToString("application/problem+json");
+        ProblemDetail body = response.getBody();
+        assertThat(body).isNotNull();
+        assertThat(body.getProperties()).containsEntry("code", "RATE_LIMITED");
+        assertThat(body.getTitle()).isEqualTo("RATE_LIMITED");
+        assertThat(body.getDetail()).isEqualTo("Please wait a minute and try again.");
     }
 }

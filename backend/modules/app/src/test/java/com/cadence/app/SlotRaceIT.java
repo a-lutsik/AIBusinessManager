@@ -28,7 +28,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -40,15 +39,14 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
  * {@code no_overlapping_active_appointments} for one slot, the unique {@code client_phone_uq} for one new phone. The
  * losers must get the normal domain answers (409 SLOT_OCCUPIED, or success reusing the client), never a 5xx.
  *
- * <p>Each request carries its own {@code X-Forwarded-For} so the per-IP public rate limit (5 slot reads a minute,
- * 20 bookings an hour) does not interfere with the burst. Slots from +7 and +11 days onwards are used so other ITs sharing the
+ * <p>Runs with {@link RelaxedPublicRateLimits}: the burst comes from one peer address and the same few phones, which
+ * the production limits (5 slot reads a minute per IP, 3 bookings a day per phone) would refuse. Slots from +7 and +11 days onwards are used so other ITs sharing the
  * database (they book the first free slot from +2/+3 days) cannot occupy the chosen ones.
  */
 @SpringBootTest
+@RelaxedPublicRateLimits
 @AutoConfigureMockMvc
 class SlotRaceIT extends AbstractTimescaleIT {
-
-    private static final AtomicInteger IP_SEQ = new AtomicInteger();
 
     @Autowired
     MockMvc mvc;
@@ -62,11 +60,6 @@ class SlotRaceIT extends AbstractTimescaleIT {
         return DriverManager.getConnection(DB.getJdbcUrl(), OWNER_USER, OWNER_PASSWORD);
     }
 
-    private static String nextIp() {
-        int n = IP_SEQ.incrementAndGet();
-        return "10.77." + (n >> 8 & 255) + "." + (n & 255);
-    }
-
     /** Free slots from {@code fromDaysAhead} to the end of the 28-day booking horizon. */
     private List<String> freeSlots(int fromDaysAhead) throws Exception {
         return TestSlots.free(mvc, mapper, DemoIds.HAIRCUT, DemoIds.NINO, fromDaysAhead);
@@ -76,7 +69,6 @@ class SlotRaceIT extends AbstractTimescaleIT {
     private Outcome book(String slot, String phone, String name) {
         try {
             MvcResult res = mvc.perform(post("/api/public/tenants/lumen-studio/bookings")
-                            .header("X-Forwarded-For", nextIp())
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("""
                                     {

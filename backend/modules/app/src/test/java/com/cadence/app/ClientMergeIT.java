@@ -37,6 +37,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * schedule; JDBC checks run as the owner role {@code cadence}, which sees every tenant.
  */
 @SpringBootTest
+@RelaxedPublicRateLimits
 @AutoConfigureMockMvc
 class ClientMergeIT extends AbstractTimescaleIT {
 

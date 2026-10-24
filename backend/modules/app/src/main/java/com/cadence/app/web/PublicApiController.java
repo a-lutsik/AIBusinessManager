@@ -8,10 +8,13 @@ import com.cadence.catalog.api.CatalogService;
 import com.cadence.catalog.api.Offering;
 import com.cadence.catalog.api.ServiceView;
 import com.cadence.catalog.api.SpecialistView;
+import com.cadence.app.ratelimit.ClientIpResolver;
+import com.cadence.app.ratelimit.PublicRateLimiter;
 import com.cadence.app.web.dto.CreatePublicBookingRequest;
 import com.cadence.platform.error.DomainException;
 import com.cadence.platform.tenancy.TenantContext;
 import com.cadence.platform.tenant.TenantDirectory;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -37,11 +40,21 @@ public class PublicApiController {
     private final CatalogService catalogService;
     private final BookingService bookingService;
     private final TenantDirectory tenants;
+    private final PublicRateLimiter rateLimiter;
+    private final ClientIpResolver clientIps;
 
-    public PublicApiController(CatalogService catalogService, BookingService bookingService, TenantDirectory tenants) {
+    public PublicApiController(
+            CatalogService catalogService,
+            BookingService bookingService,
+            TenantDirectory tenants,
+            PublicRateLimiter rateLimiter,
+            ClientIpResolver clientIps
+    ) {
         this.catalogService = catalogService;
         this.bookingService = bookingService;
         this.tenants = tenants;
+        this.rateLimiter = rateLimiter;
+        this.clientIps = clientIps;
     }
 
     @GetMapping("/health")
@@ -102,8 +115,13 @@ public class PublicApiController {
     }
 
     @PostMapping("/tenants/{slug}/bookings")
-    public Map<String, Object> book(@PathVariable String slug, @RequestBody CreatePublicBookingRequest request) {
-        tenants.requireBySlug(slug);
+    public Map<String, Object> book(
+            @PathVariable String slug,
+            @RequestBody CreatePublicBookingRequest request,
+            HttpServletRequest http
+    ) {
+        var tenant = tenants.requireBySlug(slug);
+        rateLimiter.checkBooking(tenant, clientIps.resolve(http), request.phone());
         PublicBookingResult result = bookingService.createPublic(new CreateBookingCommand(
                 request.specialistId(),
                 request.serviceId(),

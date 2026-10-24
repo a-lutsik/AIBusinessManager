@@ -13,12 +13,12 @@
 
 ## Задачи
 
-- [x] T1 OAuth2 по умолчанию, строгий `TenantContextFilter`, профиль `dev-headers`, IT на JWT — исполнитель: worker — тесты: в составе задачи — проверил Opus: ☑ (57 юнит-тестов зелёные; `BookingCoreIT`, `AppApiAuthIT`, `DevHeadersIT` не запускались из-за диска Docker)
-- [x] T2 (проверил Opus: ☑ юнит-тесты; 8 утверждений о поведении TimescaleDB не доказаны до запуска IT) Роль `cadence_app`, гранты, SECURITY DEFINER для токенов и outbox, jOOQ-listener RLS, outbox с savepoint и лимитом попыток, IT изоляции — исполнитель: complex_coder — проверил Opus: ☐
-- [x] T3 (проверил Opus: ☑ юнит-тесты; регулярка V8 проверена на локальном PG17; `AccessLinkIT` не запускался) Сырой токен: owner_task без токена, `POST /api/app/appointments/{id}/access-link`, миграция-скраб — исполнитель: worker — проверил Opus: ☐
-- [x] T4 (проверил Opus: ☑ 92 юнит-теста зелёные; `ClientMergeIT` не запускался; поглощённый профиль обнуляет счётчики против двойного подсчёта) Merge клиентов (use-case в `app`), откат агрегатов при исправлении статуса — исполнитель: worker — проверил Opus: ☐
-- [x] T5 (проверил Opus: ☑ 117 юнит-тестов зелёные; `SlotRaceIT` не запускался) Маппинг exclusion/unique violation в 409, IT гонки — исполнитель: worker — проверил Opus: ☐
-- [x] T6 (review: runtime-логин не проверен, Keycloak не поднимается) Фронтенд: OIDC-логин (PKCE) через Keycloak, Bearer вместо заголовков роли, кнопка «скопировать ссылку» по контракту T3 — исполнитель: worker — проверил Opus: ☐
+- [x] T1 OAuth2 по умолчанию, строгий `TenantContextFilter`, профиль `dev-headers`, IT на JWT — исполнитель: worker — проверил Opus: ☑ (юнит + `AppApiAuthIT`, `DevHeadersIT`, живая проверка с Keycloak)
+- [x] T2 (проверил Opus: ☑ юнит + `RlsIsolationIT`, `OutboxPollerIT`; дополнено V10/V11 для чанков TimescaleDB) Роль `cadence_app`, гранты, SECURITY DEFINER для токенов и outbox, jOOQ-listener RLS, outbox с savepoint и лимитом попыток, IT изоляции — исполнитель: complex_coder
+- [x] T3 (проверил Opus: ☑ юнит + `AccessLinkIT`, живая проверка) Сырой токен: owner_task без токена, `POST /api/app/appointments/{id}/access-link`, миграция-скраб — исполнитель: worker
+- [x] T4 (проверил Opus: ☑ юнит + `ClientMergeIT`) Merge клиентов (use-case в `app`), откат агрегатов при исправлении статуса — исполнитель: worker
+- [x] T5 (проверил Opus: ☑ юнит + `SlotRaceIT`) Маппинг exclusion/unique violation в 409, IT гонки — исполнитель: worker
+- [x] T6 (проверил Opus: ☑ typecheck + проход в браузере; веб-вход переделан на redirect-флоу) Фронтенд: OIDC-логин (PKCE) через Keycloak, Bearer вместо заголовков роли, кнопка «скопировать ссылку» по контракту T3 — исполнитель: worker
 
 Статусы: todo → in_progress → review → done | returned.
 
@@ -33,7 +33,7 @@
 - [x] Все задачи ✔ (Opus)
 - [x] Регрессия зелёная: юнит 140/140, IT 43/43, 0 skipped (`./gradlew test --rerun-tasks`, 2026-10-24); frontend typecheck ✔
 - [x] Независимое ревью (reviewer): 1 blocker, 2 major, 7 minor; blocker, M2 и m1–m4 исправлены, M1 и m5–m7 вынесены в `docs/tech-debt.md`; повторное ревью исправлений — self-review Opus (reduced assurance)
-- [ ] Приёмка архитектором (по политике): ☐ принято / ☐ возвращено — гейт IT закрыт, ждёт приёмки
+- [x] Приёмка архитектором: ☑ принято (2026-10-24, по коду 117deef + рабочее дерево; условия C1–C4 перенесены в следующий этап как TD-12…TD-15, TD-16 — уборка)
 
 ## Журнал
 - 2026-10-24: этап открыт. Docker VM заполнен на 100% (`No space left on device`), IT на Testcontainers не стартуют до освобождения места.
@@ -42,3 +42,11 @@
 - Не проверено: всё, что требует TimescaleDB и Spring-контекста целиком (39 IT), реальный JWT от Keycloak, OIDC-логин во фронтенде.
 - 2026-10-24: по разрешению пользователя выполнены `docker container prune` и `docker image prune` (освобождено 487 МБ, dangling-образов нет). TimescaleDB всё ещё не стартует (`No space left on device`): место занимают тома (40,9 ГБ, неактивные) и образы с тегами (ollama 6 ГБ, старые timescale ~4 ГБ). Гейт IT остаётся открытым.
 - 2026-10-24: по разрешению пользователя удалены образы `ollama/ollama:latest`, `timescale/timescaledb:2.17.2-pg16`, `2.17.2-pg17` (свободно 8,9 ГБ). Первый прогон IT: 35/39. Найдены и исправлены: (1) тестовый хелпер `ClientMergeIT` не передавал `marketingConsent` → 400; (2) **реальный обход RLS**: `cadence_app` читал 228 чужих строк напрямую из чанков TimescaleDB. Исправлено миграциями V10 (чанки в закрытую схему `cadence_chunks`, инвалидация кеша для уже открытых сессий через `set_chunk_time_interval`) и V11 (отзыв прав `cadence_app` на чанки + задача TimescaleDB раз в минуту — закрывает утечку значений через `pg_stats`). Отозвать USAGE на `_timescaledb_internal` нельзя: расширению она нужна в каждой сессии (проверено). V10 прошёл отдельное независимое ревью; его замечания (устаревшие сессии, тест на схему всех hypertables, невакуумная проверка грантов) закрыты. Итоговый прогон: 140 юнит + 43 IT, 0 падений, 0 пропусков. Гейт IT закрыт.
+- 2026-10-24: коммит `117deef`. Живая проверка на docker-compose (TimescaleDB 2.30 + Keycloak 26.2.5), бэкенд с конфигурацией по умолчанию:
+  - Flyway применил V1–V11 на чистой БД; пул приложения подключён ролью `cadence_app` (pg_stat_activity).
+  - Реальные токены Keycloak: без токена и с мусорным токеном — 401; owner — 200 и тенант из claim; `X-Tenant-Id`/`X-Actor-Role` игнорируются; master — 403 на `/metrics`, 200 на `/masters/me/today`.
+  - Публичная запись: CONFIRMED; повтор того же слота — 409 `SLOT_OCCUPIED`; в `owner_task` ноль строк с `token=`, текст содержит `{manageLink}`; ссылка из `access-link` открывает визит; сырой токен не хранится.
+  - `cadence_app` без контекста видит 0 клиентов, прямое чтение чанка — `permission denied for schema cadence_chunks`; job отзыва прав отработал (Success).
+- Живая проверка нашла дефект T6: веб-вход работал только во всплывающем окне; при навигации в той же вкладке (встроенный браузер, блокировщики, webview) `/auth` оставался пустым и код не обменивался. Исправлено: на вебе полноценный redirect-флоу (PKCE-верификатор и state в sessionStorage, проверка state, однократный обмен, очистка URL). Пройдено в браузере: вход owner (SSO), дашборд с данными, перезагрузка восстанавливает сессию, «Скопировать сообщение» выдаёт новую ссылку, выход завершает сессию Keycloak, вход master показывает только «Сегодня/Календарь/Клиенты».
+- TD-10 закрыт: rate limit по IP без доверия `X-Forwarded-For` (только от доверенных прокси), 3 брони/сутки на телефон, 20/час на тенант, 20/час на IP, 429 с `Retry-After`, запись `public.rate_limited` в audit с маскированными IP и телефоном.
+- Итоговый прогон: юнит 180/180, IT 49/49, 0 skipped; frontend typecheck ✔.

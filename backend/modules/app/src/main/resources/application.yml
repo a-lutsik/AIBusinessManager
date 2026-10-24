@@ -34,6 +34,18 @@ app:
     oauth2-enabled: true
     # Dev only (profile dev-headers, requires oauth2-enabled=false): trust X-Tenant-Id / X-Actor-Role headers.
     header-auth-enabled: false
+  rate-limit:
+    # Public (unauthenticated) API limits, product plan section 11. In-memory, per application instance.
+    slots-per-minute-per-ip: 5
+    bookings-per-day-per-phone: 3
+    bookings-per-hour-per-tenant: 20
+    # Throttle for attempts without a parsable phone (those are not counted per phone or per tenant).
+    bookings-per-hour-per-ip: 20
+    # Cap on tracked counters; when reached, requests needing a new counter get 429.
+    max-tracked-keys: 100000
+    # CIDRs of reverse proxies whose X-Forwarded-For is trusted (env: APP_RATE_LIMIT_TRUSTED_PROXIES=10.0.0.0/8,...).
+    # Empty (default): the header is ignored and the TCP peer address is the client IP.
+    # trusted-proxies: []
   seed:
     enabled: true
   outbox:

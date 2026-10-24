@@ -89,7 +89,7 @@ paths:
         "200":
           description: Instant[]
         "429":
-          description: Rate limited
+          description: Rate limited (problem+json, code RATE_LIMITED, Retry-After header in seconds)
   /api/public/tenants/{slug}/bookings:
     post:
       summary: Create public booking
@@ -121,7 +121,7 @@ paths:
         "409":
           description: Slot occupied or validation
         "429":
-          description: Rate limited
+          description: Rate limited (problem+json, code RATE_LIMITED, Retry-After header in seconds)
   /api/public/bookings/{id}:
     get:
       summary: Read visit by opaque token
