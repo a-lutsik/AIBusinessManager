@@ -1,5 +1,6 @@
 package com.cadence.booking.internal;
 
+import com.cadence.booking.api.AccessLinkView;
 import com.cadence.booking.api.AppointmentStatus;
 import com.cadence.booking.api.AppointmentView;
 import com.cadence.booking.api.BookingService;
@@ -37,6 +38,8 @@ import java.util.UUID;
 
 @Service
 public class BookingServiceImpl implements BookingService {
+
+    private static final Duration ACCESS_TOKEN_TTL = Duration.ofDays(365);
 
     private final CatalogService catalogService;
     private final CrmService crmService;
@@ -227,22 +230,20 @@ public class BookingServiceImpl implements BookingService {
         String raw = null;
         if (issueToken) {
             raw = BookingTokens.raw();
-            appointments.insertToken(id, BookingTokens.hash(raw), clock.instant().plus(Duration.ofDays(365)));
-            String manage = "/b/" + id + "?token=" + raw;
-            String copy = status == AppointmentStatus.PENDING
-                    ? "Your visit is waiting for confirmation. " + manage
-                    : "Your visit is confirmed. " + manage;
+            appointments.insertToken(id, BookingTokens.hash(raw), clock.instant().plus(ACCESS_TOKEN_TTL));
+            // The raw token reaches the client once (response below); owner tasks carry only a placeholder.
+            String copy = ClientMessages.bookingConfirmation(status);
             ownerTasks.create(
                     "NEW_BOOKING",
                     "New booking — send confirmation manually",
                     copy,
                     copy,
-                    manage,
+                    null,
                     id,
                     clientId
             );
         }
-        return new PublicBookingResult(enrich(row), raw, raw == null ? null : "/b/" + id + "?token=" + raw);
+        return new PublicBookingResult(enrich(row), raw, raw == null ? null : managePath(id, raw));
     }
 
     @Override
@@ -265,12 +266,17 @@ public class BookingServiceImpl implements BookingService {
     @Override
     @Transactional
     public AppointmentView transition(UUID appointmentId, AppointmentStatus target, String note) {
-        AppointmentView current = appointments.find(appointmentId)
+        // Row lock: concurrent changes of one visit are serialised, so the CRM aggregates below apply exactly once.
+        AppointmentView current = appointments.findForUpdate(appointmentId)
                 .orElseThrow(() -> DomainException.notFound("APPOINTMENT_NOT_FOUND", "Visit not found"));
         assertCanWrite(current);
         AppointmentStatusMachine.assertTransition(current.status(), target);
+        boolean correction = isStatusCorrection(current.status(), target);
+        if (correction) {
+            assertOwnerMayCorrect();
+        }
         AppointmentView updated = withStatus(current, target, note == null ? current.note() : note);
-        appointments.updateStatusAndTimes(updated);
+        appointments.updateStatusAndTimes(updated, current.status());
         String event = switch (target) {
             case CONFIRMED -> "CONFIRMED";
             case COMPLETED -> "COMPLETED";
@@ -279,12 +285,18 @@ public class BookingServiceImpl implements BookingService {
             default -> target.name();
         };
         appointments.insertEvent(appointmentId, event, "{\"from\":\"" + current.status() + "\",\"to\":\"" + target + "\"}");
+        int valueMinor = current.priceSnapshot() - current.discountAmount();
+        if (correction && current.status() == AppointmentStatus.COMPLETED) {
+            // COMPLETED -> NO_SHOW: take the visit back out of the aggregates, then count the no-show.
+            AppointmentRepository.CompletedRange remaining = appointments.completedRangeExcluding(current.clientId(), appointmentId);
+            crmService.revertCompletedVisit(current.clientId(), valueMinor, remaining.first(), remaining.last());
+        }
+        if (correction && current.status() == AppointmentStatus.NO_SHOW) {
+            // NO_SHOW -> COMPLETED: the earlier no-show was a mistake.
+            crmService.revertNoShow(current.clientId());
+        }
         if (target == AppointmentStatus.COMPLETED) {
-            crmService.recordCompletedVisit(
-                    current.clientId(),
-                    current.serviceStart(),
-                    current.priceSnapshot() - current.discountAmount()
-            );
+            crmService.recordCompletedVisit(current.clientId(), current.serviceStart(), valueMinor);
         }
         if (target == AppointmentStatus.NO_SHOW) {
             crmService.recordNoShow(current.clientId());
@@ -301,7 +313,7 @@ public class BookingServiceImpl implements BookingService {
         auditLogger.record(
                 ActorContext.current().map(ActorContext.Actor::actorId).orElse("system"),
                 ActorContext.current().map(a -> a.role().name()).orElse("SYSTEM"),
-                "appointment.transition",
+                correction ? "appointment.status_correction" : "appointment.transition",
                 "appointment",
                 appointmentId,
                 "{\"status\":\"" + current.status() + "\"}",
@@ -312,10 +324,29 @@ public class BookingServiceImpl implements BookingService {
         return enrich(updated);
     }
 
+    /** Owner fix of a settled outcome: NO_SHOW to COMPLETED or COMPLETED to NO_SHOW. */
+    private static boolean isStatusCorrection(AppointmentStatus from, AppointmentStatus to) {
+        return (from == AppointmentStatus.NO_SHOW && to == AppointmentStatus.COMPLETED)
+                || (from == AppointmentStatus.COMPLETED && to == AppointmentStatus.NO_SHOW);
+    }
+
+    private static void assertOwnerMayCorrect() {
+        ActorContext.Actor actor = ActorContext.current().orElse(null);
+        if (actor == null || !actor.isOwner()) {
+            throw DomainException.forbidden("FORBIDDEN_RESOURCE", "Only the owner can correct a completed or no-show visit");
+        }
+    }
+
+    @Override
+    @Transactional
+    public int reassignClient(UUID from, UUID to) {
+        return appointments.reassignClient(from, to);
+    }
+
     @Override
     @Transactional
     public AppointmentView reschedule(UUID appointmentId, Instant newStart) {
-        AppointmentView current = appointments.find(appointmentId)
+        AppointmentView current = appointments.findForUpdate(appointmentId)
                 .orElseThrow(() -> DomainException.notFound("APPOINTMENT_NOT_FOUND", "Visit not found"));
         assertCanWrite(current);
         if (current.status() != AppointmentStatus.PENDING && current.status() != AppointmentStatus.CONFIRMED) {
@@ -355,7 +386,7 @@ public class BookingServiceImpl implements BookingService {
                 current.clientPhone(),
                 current.trustLevel()
         );
-        appointments.updateStatusAndTimes(updated);
+        appointments.updateStatusAndTimes(updated, current.status());
         appointments.insertEvent(appointmentId, "RESCHEDULED", "{\"from\":\"" + current.serviceStart() + "\",\"to\":\"" + newStart + "\"}");
         return enrich(updated);
     }
@@ -363,40 +394,34 @@ public class BookingServiceImpl implements BookingService {
     @Override
     @Transactional(readOnly = true)
     public Optional<AppointmentView> findByAccessToken(String rawToken) {
-        String hash = BookingTokens.hash(rawToken);
-        UUID tenantId = appointments.tenantIdByTokenHash(hash).orElse(null);
-        if (tenantId == null) {
-            return Optional.empty();
-        }
-        try (var ignored = TenantContext.open(tenantId)) {
-            return appointments.appointmentIdByTokenHash(hash).flatMap(appointments::find).map(this::enrich);
-        }
+        return appointments.resolveToken(BookingTokens.hash(rawToken)).flatMap(target -> {
+            try (var ignored = TenantContext.open(target.tenantId())) {
+                return appointments.find(target.appointmentId()).map(this::enrich);
+            }
+        });
     }
 
     @Override
     @Transactional
     public AppointmentView cancelByAccessToken(String rawToken, boolean byClient) {
-        AppointmentView view = findByAccessToken(rawToken)
-                .orElseThrow(() -> DomainException.notFound("TOKEN_INVALID", "Booking link is invalid"));
-        UUID tenantId = appointments.tenantIdByTokenHash(BookingTokens.hash(rawToken)).orElseThrow();
-        try (var ignored = TenantContext.open(tenantId)) {
-            AppointmentStatus target = byClient ? AppointmentStatus.CANCELLED_BY_CLIENT : AppointmentStatus.CANCELLED_BY_BUSINESS;
-            return transition(view.id(), target, view.note());
+        AppointmentRepository.TokenTarget target = requireToken(rawToken);
+        try (var ignored = TenantContext.open(target.tenantId())) {
+            AppointmentView view = appointments.find(target.appointmentId()).orElseThrow(BookingServiceImpl::tokenInvalid);
+            AppointmentStatus status = byClient ? AppointmentStatus.CANCELLED_BY_CLIENT : AppointmentStatus.CANCELLED_BY_BUSINESS;
+            return transition(view.id(), status, view.note());
         }
     }
 
     @Override
     @Transactional
     public AppointmentView rescheduleByAccessToken(String rawToken, Instant newStart) {
-        AppointmentView view = findByAccessToken(rawToken)
-                .orElseThrow(() -> DomainException.notFound("TOKEN_INVALID", "Booking link is invalid"));
-        UUID tenantId = appointments.tenantIdByTokenHash(BookingTokens.hash(rawToken)).orElseThrow();
-        try (var ignored = TenantContext.open(tenantId)) {
+        AppointmentRepository.TokenTarget target = requireToken(rawToken);
+        try (var ignored = TenantContext.open(target.tenantId())) {
             BookingRulesView rules = catalogService.rules();
             if (!rules.clientRescheduleAllowed()) {
                 throw DomainException.forbidden("RESCHEDULE_DISABLED", "Client reschedule is disabled for this business");
             }
-            return reschedule(view.id(), newStart);
+            return reschedule(target.appointmentId(), newStart);
         }
     }
 
@@ -415,19 +440,54 @@ public class BookingServiceImpl implements BookingService {
     @Override
     @Transactional(readOnly = true)
     public String icsByAccessToken(String rawToken) {
-        String hash = BookingTokens.hash(rawToken);
-        UUID tenantId = appointments.tenantIdByTokenHash(hash)
-                .orElseThrow(() -> DomainException.notFound("TOKEN_INVALID", "Booking link is invalid"));
-        try (var ignored = TenantContext.open(tenantId)) {
-            UUID appointmentId = appointments.appointmentIdByTokenHash(hash)
-                    .orElseThrow(() -> DomainException.notFound("TOKEN_INVALID", "Booking link is invalid"));
-            return ics(appointmentId);
+        AppointmentRepository.TokenTarget target = requireToken(rawToken);
+        try (var ignored = TenantContext.open(target.tenantId())) {
+            return ics(target.appointmentId());
         }
     }
 
+    /** Resolves a live token across tenants; the caller opens the returned tenant scope before tenant reads. */
+    private AppointmentRepository.TokenTarget requireToken(String rawToken) {
+        return appointments.resolveToken(BookingTokens.hash(rawToken)).orElseThrow(BookingServiceImpl::tokenInvalid);
+    }
+
+    private static DomainException tokenInvalid() {
+        return DomainException.notFound("TOKEN_INVALID", "Booking link is invalid");
+    }
+
+    private static String managePath(UUID appointmentId, String rawToken) {
+        return "/b/" + appointmentId + "?token=" + rawToken;
+    }
+
     @Override
-    public Optional<String> rawTokenFor(UUID appointmentId) {
-        return Optional.empty();
+    @Transactional
+    public AccessLinkView issueAccessLink(UUID appointmentId) {
+        ActorContext.Actor actor = ActorContext.current().orElse(null);
+        if (actor == null || !actor.isOwner()) {
+            throw DomainException.forbidden("FORBIDDEN_RESOURCE", "Only the owner can issue a client access link");
+        }
+        AppointmentView appointment = appointments.find(appointmentId)
+                .orElseThrow(() -> DomainException.notFound("APPOINTMENT_NOT_FOUND", "Visit not found"));
+        if (appointment.status() == AppointmentStatus.CANCELLED_BY_CLIENT
+                || appointment.status() == AppointmentStatus.CANCELLED_BY_BUSINESS) {
+            throw DomainException.conflict("APPOINTMENT_CANCELLED", "Visit is cancelled");
+        }
+        Instant expiresAt = clock.instant().plus(ACCESS_TOKEN_TTL);
+        String raw = BookingTokens.raw();
+        appointments.insertToken(appointmentId, BookingTokens.hash(raw), expiresAt);
+        // Audit carries no token: only that a link was issued and when it expires.
+        auditLogger.record(
+                actor.actorId(),
+                actor.role().name(),
+                "appointment.access_link.issue",
+                "appointment",
+                appointmentId,
+                null,
+                "{\"expiresAt\":\"" + expiresAt + "\"}",
+                "console",
+                null
+        );
+        return new AccessLinkView(managePath(appointmentId, raw), expiresAt);
     }
 
     private Offering requireOffering(UUID specialistId, UUID serviceId) {

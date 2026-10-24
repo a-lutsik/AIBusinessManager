@@ -2,11 +2,14 @@ package com.cadence.booking.internal;
 
 import com.cadence.booking.api.AppointmentStatus;
 import com.cadence.booking.api.AppointmentView;
+import com.cadence.platform.error.DomainException;
+import com.cadence.platform.persistence.SqlStates;
 import com.cadence.platform.persistence.TenantAwareDsl;
 import com.cadence.platform.tenancy.TenantContext;
 import com.cadence.platform.time.Utc;
 import org.jooq.DSLContext;
 import org.jooq.Record;
+import org.jooq.impl.DSL;
 import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
@@ -21,13 +24,29 @@ import static com.cadence.platform.jooq.Tables.BOOKING_ACCESS_TOKEN;
 @Repository
 class AppointmentRepository {
 
+    /** GiST exclusion constraint from V4: no two active visits of one specialist may overlap in occupied time. */
+    static final String NO_OVERLAP_CONSTRAINT = "no_overlapping_active_appointments";
+
     private final DSLContext dsl;
 
     AppointmentRepository(DSLContext dsl) {
         this.dsl = dsl;
     }
 
+    /**
+     * Inserts the visit. The application-level free-slot check is only advisory: two requests can both pass it, and
+     * the exclusion constraint then rejects the later writer. That rejection is reported as {@code SLOT_OCCUPIED}
+     * (409), the same answer the loser would have got had it arrived a moment later.
+     */
     void insert(AppointmentView row) {
+        try {
+            doInsert(row);
+        } catch (RuntimeException ex) {
+            throw slotConflictOrSame(ex);
+        }
+    }
+
+    private void doInsert(AppointmentView row) {
         dsl.insertInto(APPOINTMENT)
                 .set(APPOINTMENT.ID, row.id())
                 .set(APPOINTMENT.TENANT_ID, TenantContext.require())
@@ -55,8 +74,26 @@ class AppointmentRepository {
                 .execute();
     }
 
-    void updateStatusAndTimes(AppointmentView row) {
-        dsl.update(APPOINTMENT)
+    /**
+     * Updates status and times, but only while the stored status is still {@code expectedStatus}: a concurrent writer
+     * that got there first leaves zero matching rows, reported as {@code CONCURRENT_MODIFICATION} (409) so the caller
+     * does not apply its side effects (CRM aggregates) a second time. Moving or reviving a visit into an occupied
+     * slot is reported as {@code SLOT_OCCUPIED}.
+     */
+    void updateStatusAndTimes(AppointmentView row, AppointmentStatus expectedStatus) {
+        int updated;
+        try {
+            updated = doUpdateStatusAndTimes(row, expectedStatus);
+        } catch (RuntimeException ex) {
+            throw slotConflictOrSame(ex);
+        }
+        if (updated == 0) {
+            throw DomainException.conflict("CONCURRENT_MODIFICATION", "The visit was changed by someone else, reload and retry");
+        }
+    }
+
+    private int doUpdateStatusAndTimes(AppointmentView row, AppointmentStatus expectedStatus) {
+        return dsl.update(APPOINTMENT)
                 .set(APPOINTMENT.STATUS, row.status().name())
                 .set(APPOINTMENT.SERVICE_START, Utc.toLocal(row.serviceStart()))
                 .set(APPOINTMENT.SERVICE_END, Utc.toLocal(row.serviceEnd()))
@@ -64,13 +101,62 @@ class AppointmentRepository {
                 .set(APPOINTMENT.OCCUPIED_END, Utc.toLocal(row.occupiedEnd()))
                 .set(APPOINTMENT.NOTE, row.note())
                 .set(APPOINTMENT.UPDATED_AT, Utc.toLocal(Instant.now()))
-                .where(TenantAwareDsl.tenantEquals(APPOINTMENT.TENANT_ID).and(APPOINTMENT.ID.eq(row.id())))
+                .where(TenantAwareDsl.tenantEquals(APPOINTMENT.TENANT_ID)
+                        .and(APPOINTMENT.ID.eq(row.id()))
+                        .and(APPOINTMENT.STATUS.eq(expectedStatus.name())))
                 .execute();
+    }
+
+    private static RuntimeException slotConflictOrSame(RuntimeException ex) {
+        if (SqlStates.isExclusionViolation(ex, NO_OVERLAP_CONSTRAINT)) {
+            DomainException conflict = DomainException.conflict("SLOT_OCCUPIED", "Slot is not available");
+            conflict.initCause(ex);
+            return conflict;
+        }
+        return ex;
+    }
+
+    int reassignClient(UUID from, UUID to) {
+        return dsl.update(APPOINTMENT)
+                .set(APPOINTMENT.CLIENT_ID, to)
+                .set(APPOINTMENT.UPDATED_AT, Utc.toLocal(Instant.now()))
+                .where(TenantAwareDsl.tenantEquals(APPOINTMENT.TENANT_ID).and(APPOINTMENT.CLIENT_ID.eq(from)))
+                .execute();
+    }
+
+    /** Earliest and latest service start among the client's COMPLETED visits, leaving one visit out. */
+    record CompletedRange(Instant first, Instant last) {
+    }
+
+    CompletedRange completedRangeExcluding(UUID clientId, UUID excludeAppointmentId) {
+        var min = DSL.min(APPOINTMENT.SERVICE_START);
+        var max = DSL.max(APPOINTMENT.SERVICE_START);
+        return dsl.select(min, max)
+                .from(APPOINTMENT)
+                .where(TenantAwareDsl.tenantEquals(APPOINTMENT.TENANT_ID)
+                        .and(APPOINTMENT.CLIENT_ID.eq(clientId))
+                        .and(APPOINTMENT.STATUS.eq(AppointmentStatus.COMPLETED.name()))
+                        .and(APPOINTMENT.ID.ne(excludeAppointmentId)))
+                .fetchOne(r -> new CompletedRange(
+                        r.get(min) == null ? null : Utc.toInstant(r.get(min)),
+                        r.get(max) == null ? null : Utc.toInstant(r.get(max))
+                ));
     }
 
     Optional<AppointmentView> find(UUID id) {
         return dsl.selectFrom(APPOINTMENT)
                 .where(TenantAwareDsl.tenantEquals(APPOINTMENT.TENANT_ID).and(APPOINTMENT.ID.eq(id)))
+                .fetchOptional(this::toView);
+    }
+
+    /**
+     * Loads the visit and locks its row until the transaction ends, so concurrent status changes of one visit are
+     * serialised: the second one re-reads the status the first one wrote.
+     */
+    Optional<AppointmentView> findForUpdate(UUID id) {
+        return dsl.selectFrom(APPOINTMENT)
+                .where(TenantAwareDsl.tenantEquals(APPOINTMENT.TENANT_ID).and(APPOINTMENT.ID.eq(id)))
+                .forUpdate()
                 .fetchOptional(this::toView);
     }
 
@@ -127,18 +213,17 @@ class AppointmentRepository {
                 .execute();
     }
 
-    Optional<UUID> appointmentIdByTokenHash(String hash) {
-        return dsl.selectFrom(BOOKING_ACCESS_TOKEN)
-                .where(BOOKING_ACCESS_TOKEN.TOKEN_HASH.eq(hash)
-                        .and(BOOKING_ACCESS_TOKEN.REVOKED_AT.isNull())
-                        .and(BOOKING_ACCESS_TOKEN.EXPIRES_AT.gt(Utc.toLocal(Instant.now()))))
-                .fetchOptional(BOOKING_ACCESS_TOKEN.APPOINTMENT_ID);
+    /** Tenant and visit behind a live (non-revoked, non-expired) booking token. */
+    record TokenTarget(UUID tenantId, UUID appointmentId) {
     }
 
-    Optional<UUID> tenantIdByTokenHash(String hash) {
-        return dsl.selectFrom(BOOKING_ACCESS_TOKEN)
-                .where(BOOKING_ACCESS_TOKEN.TOKEN_HASH.eq(hash))
-                .fetchOptional(BOOKING_ACCESS_TOKEN.TENANT_ID);
+    /**
+     * Cross-tenant lookup: public booking links carry no tenant, so this runs before any tenant scope is open.
+     * RLS would hide the row from the runtime role, hence the SECURITY DEFINER function from V7.
+     */
+    Optional<TokenTarget> resolveToken(String hash) {
+        return dsl.resultQuery("select tenant_id, appointment_id from booking_token_lookup({0})", DSL.val(hash))
+                .fetchOptional(r -> new TokenTarget(r.get(0, UUID.class), r.get(1, UUID.class)));
     }
 
     private AppointmentView toView(Record r) {

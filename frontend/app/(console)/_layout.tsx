@@ -1,8 +1,11 @@
 import { Link, Slot, usePathname } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Pressable, Text, TextInput, View, useWindowDimensions } from 'react-native';
 import { MaterialIcon } from '@/components/ui/MaterialIcon';
-import { api, LUMEN_TENANT_ID, type MeView } from '@/src/api/client';
+import { api, LUMEN_TENANT_ID } from '@/src/api/client';
+import { useAuth } from '@/src/auth/AuthContext';
+import { ConsoleSessionProvider, useConsoleSession } from '@/src/auth/ConsoleSession';
+import { AuthLoading, SignInScreen } from '@/src/auth/SignInScreen';
 import { currentLocale, setLocale, t, type AppLocale } from '@/src/i18n';
 import { useThemeTokens } from '@/src/theme/tokens';
 import { useTheme } from '@/src/theme/ThemeContext';
@@ -29,47 +32,34 @@ const RAIL_COLLAPSED = 72;
 const RAIL_EXPANDED = 240;
 
 export default function ConsoleLayout() {
+  const { mode, status } = useAuth();
+  if (mode === 'oidc') {
+    if (status === 'loading') return <AuthLoading />;
+    if (status === 'unauthenticated') return <SignInScreen />;
+  }
+  return (
+    <ConsoleSessionProvider>
+      <ConsoleShell />
+    </ConsoleSessionProvider>
+  );
+}
+
+function ConsoleShell() {
+  const { mode, signOut } = useAuth();
+  const { me, role: sessionRole, switchRole } = useConsoleSession();
+  const role = sessionRole ?? (mode === 'dev-headers' ? 'OWNER' : null);
   const path = usePathname();
   const { width } = useWindowDimensions();
   const desktop = width >= 768;
   const [, bump] = useState(0);
-  const [role, setRole] = useState<'OWNER' | 'MASTER'>('OWNER');
-  const [me, setMe] = useState<MeView | null>(null);
   const [railExpanded, setRailExpanded] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [search, setSearch] = useState('');
   const { theme, toggle } = useTheme();
   const { color, space, radius } = useThemeTokens();
 
-  useEffect(() => {
-    const stored = typeof localStorage !== 'undefined' ? localStorage.getItem('cadence.role') : null;
-    if (stored === 'OWNER' || stored === 'MASTER') {
-      setRole(stored);
-    }
-  }, []);
-
-  useEffect(() => {
-    api.me(LUMEN_TENANT_ID)
-      .then(setMe)
-      .catch(() => setMe(null));
-  }, [role]);
-
   const switchLocale = (locale: AppLocale) => {
     setLocale(locale);
-    bump((n) => n + 1);
-  };
-
-  const switchRole = (next: 'OWNER' | 'MASTER') => {
-    setRole(next);
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem('cadence.role', next);
-      localStorage.setItem('cadence.tenantId', LUMEN_TENANT_ID);
-      if (next === 'MASTER') {
-        localStorage.setItem('cadence.specialistId', '00000000-0000-4000-8000-000000000011');
-      } else {
-        localStorage.removeItem('cadence.specialistId');
-      }
-    }
     bump((n) => n + 1);
   };
 
@@ -80,7 +70,7 @@ export default function ConsoleLayout() {
   const tenantName = me?.displayName ?? '…';
   const tz = me?.timezone ?? '—';
   const currency = me?.currencyCode ?? '—';
-  const userLabel = role === 'MASTER' ? t('role.master') : t('role.owner');
+  const userLabel = role === 'MASTER' ? t('role.master') : role === 'OWNER' ? t('role.owner') : '';
   const initials =
     tenantName
       .split(' ')
@@ -235,6 +225,7 @@ export default function ConsoleLayout() {
               }}
             />
 
+            {mode === 'dev-headers' ? (
             <View style={{ flexDirection: 'row', backgroundColor: color.canvas, borderWidth: 1, borderColor: color.line, borderRadius: radius.pill, padding: 3, gap: 2 }}>
               {(['OWNER', 'MASTER'] as const).map((r) => (
                 <Pressable
@@ -253,6 +244,7 @@ export default function ConsoleLayout() {
                 </Pressable>
               ))}
             </View>
+            ) : null}
 
             <View style={{ flexDirection: 'row', backgroundColor: color.canvas, borderWidth: 1, borderColor: color.line, borderRadius: radius.pill, padding: 3, gap: 2 }}>
               {(['en', 'ru'] as AppLocale[]).map((loc) => (
@@ -286,6 +278,28 @@ export default function ConsoleLayout() {
             >
               <Text style={{ color: '#FFFFFF', fontSize: 12, fontWeight: '700' }}>{initials}</Text>
             </View>
+
+            {mode === 'oidc' ? (
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => {
+                  signOut();
+                }}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: space.xs,
+                  paddingVertical: 6,
+                  paddingHorizontal: space.md,
+                  borderRadius: radius.pill,
+                  borderWidth: 1,
+                  borderColor: color.line,
+                }}
+              >
+                <MaterialIcon name="logout" size={16} color={color.muted} />
+                <Text style={{ fontSize: 12, fontWeight: '700', color: color.muted }}>{t('auth.signOut')}</Text>
+              </Pressable>
+            ) : null}
           </View>
         </View>
 

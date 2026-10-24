@@ -6,6 +6,7 @@ import com.cadence.platform.tenancy.TenantContext;
 import com.cadence.platform.time.Utc;
 import org.jooq.DSLContext;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -30,6 +31,7 @@ public class ManualTaskNotificationChannel implements NotificationChannel {
     }
 
     @Override
+    @Transactional
     public void send(String tenantScopedPayloadJson) {
         ownerTaskService.create(
                 "MANUAL_MESSAGE",

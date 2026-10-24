@@ -5,6 +5,7 @@ import com.cadence.platform.tenancy.TenantContext;
 import com.cadence.platform.time.Utc;
 import org.jooq.DSLContext;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -29,6 +30,7 @@ public class TelegramNotificationChannel implements NotificationChannel {
     }
 
     @Override
+    @Transactional
     public void send(String tenantScopedPayloadJson) {
         dsl.insertInto(NOTIFICATION_DELIVERY)
                 .set(NOTIFICATION_DELIVERY.ID, UUID.randomUUID())

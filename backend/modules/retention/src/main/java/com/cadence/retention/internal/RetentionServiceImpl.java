@@ -199,4 +199,17 @@ public class RetentionServiceImpl implements RetentionService {
                 .set(PACKAGE_LEDGER.CREATED_AT, Utc.toLocal(Instant.now()))
                 .execute();
     }
+
+    @Override
+    @Transactional
+    public int reassignClient(UUID from, UUID to) {
+        int moved = dsl.update(SERVICE_PACKAGE)
+                .set(SERVICE_PACKAGE.CLIENT_ID, to)
+                .where(TenantAwareDsl.tenantEquals(SERVICE_PACKAGE.TENANT_ID).and(SERVICE_PACKAGE.CLIENT_ID.eq(from)))
+                .execute();
+        dsl.deleteFrom(TRUST_STATE)
+                .where(TenantAwareDsl.tenantEquals(TRUST_STATE.TENANT_ID).and(TRUST_STATE.CLIENT_ID.eq(from)))
+                .execute();
+        return moved;
+    }
 }

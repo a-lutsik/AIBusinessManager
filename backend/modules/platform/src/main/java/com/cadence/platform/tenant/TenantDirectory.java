@@ -4,6 +4,7 @@ import com.cadence.platform.error.DomainException;
 import com.cadence.platform.jooq.tables.records.TenantRecord;
 import org.jooq.DSLContext;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Optional;
@@ -11,7 +12,12 @@ import java.util.UUID;
 
 import static com.cadence.platform.jooq.Tables.TENANT;
 
+/**
+ * {@code tenant} has no RLS policy, but every statement still runs in a transaction so the RLS listener's strict
+ * mode ({@code app.persistence.require-transaction}) holds for all jOOQ access.
+ */
 @Repository
+@Transactional(readOnly = true)
 public class TenantDirectory {
 
     private final DSLContext dsl;
@@ -42,6 +48,7 @@ public class TenantDirectory {
         return dsl.selectFrom(TENANT).orderBy(TENANT.DISPLAY_NAME.asc()).fetch();
     }
 
+    @Transactional
     public void upsert(UUID id, String slug, String displayName, String timezone, String currency, String country) {
         dsl.insertInto(TENANT)
                 .set(TENANT.ID, id)

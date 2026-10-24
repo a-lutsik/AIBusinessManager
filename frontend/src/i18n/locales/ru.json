@@ -119,5 +119,15 @@
   "ai.draftConfirmed": "Черновик подтверждён.",
   "ai.draftRejected": "Черновик отклонён.",
   "ai.historyUnavailable": "История диалога пока недоступна.",
-  "ai.rejectUnavailable": "Отклонение черновика пока недоступно."
+  "ai.rejectUnavailable": "Отклонение черновика пока недоступно.",
+  "auth.loading": "Выполняется вход…",
+  "auth.signIn.body": "Войдите в свою учётную запись Cadence, чтобы открыть консоль.",
+  "auth.signIn.button": "Войти",
+  "auth.signIn.waiting": "Ожидаем вход…",
+  "auth.signIn.error": "Не удалось войти:",
+  "auth.signOut": "Выйти",
+  "task.copyMessage": "Скопировать сообщение",
+  "task.copying": "Готовим…",
+  "task.copied": "Скопировано",
+  "task.copyFailed": "Не удалось скопировать, повторите"
 }

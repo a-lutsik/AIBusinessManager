@@ -3,28 +3,50 @@ spring:
     name: cadence
   datasource:
     url: jdbc:postgresql://localhost:5433/cadence
-    username: cadence
-    password: cadence
+    # Runtime role: not the table owner, NOBYPASSRLS, so Postgres RLS applies (created by V7 migration).
+    username: ${APP_DB_USER:cadence_app}
+    password: ${APP_DB_PASSWORD:cadence_app}
   flyway:
     enabled: true
     locations: classpath:db/migration
+    # Migrations run as the schema owner over the datasource URL; Flyway opens its own connection,
+    # so the pool never connects as cadence_app before V7 has created that role.
+    user: ${FLYWAY_DB_USER:cadence}
+    password: ${FLYWAY_DB_PASSWORD:cadence}
+    placeholders:
+      appDbPassword: ${APP_DB_PASSWORD:cadence_app}
   jooq:
     sql-dialect: POSTGRES
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # Resolved lazily (SupplierJwtDecoder): the app boots even when Keycloak is down.
+          issuer-uri: ${APP_SECURITY_ISSUER_URI:http://localhost:8081/realms/cadence}
   batch:
-    jdbc:
-      initialize-schema: always
+    # No spring-boot-batch-jdbc on the classpath: the JobRepository is resourceless (no BATCH_* tables).
     job:
       enabled: false
 
 app:
   security:
-    oauth2-enabled: false
-    issuer-uri: http://localhost:8081/realms/cadence
+    # Default: OAuth2 resource server (JWT from Keycloak). Tenant and role come from token claims only.
+    oauth2-enabled: true
+    # Dev only (profile dev-headers, requires oauth2-enabled=false): trust X-Tenant-Id / X-Actor-Role headers.
+    header-auth-enabled: false
   seed:
     enabled: true
   outbox:
     enabled: true
     poll-ms: 2000
+    # Events failing this many times are no longer claimed (they stay with last_error for inspection).
+    max-attempts: 10
+  persistence:
+    # Local development default. Production MUST set false (APP_PERSISTENCE_ALLOW_DEFAULT_DB_PASSWORD=false) and
+    # APP_DB_PASSWORD: with false the app refuses to start while the DB password is the development default.
+    allow-default-db-password: true
+    # true: a jOOQ statement outside a Spring transaction throws (tests); false: logged once per call site.
+    require-transaction: false
   ai:
     # Committed default stays stub so boot works without a key.
     # Local DeepSeek: APP_AI_PROVIDER=deepseek and DEEPSEEK_API_KEY, or gitignored application-local.yml.

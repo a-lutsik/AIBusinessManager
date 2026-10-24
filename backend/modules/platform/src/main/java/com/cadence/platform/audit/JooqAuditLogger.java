@@ -5,6 +5,7 @@ import com.cadence.platform.time.Utc;
 import org.jooq.DSLContext;
 import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -22,6 +23,7 @@ public class JooqAuditLogger implements AuditLogger {
     }
 
     @Override
+    @Transactional
     public void record(
             String actorId,
             String actorType,

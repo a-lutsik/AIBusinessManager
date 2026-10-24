@@ -3,9 +3,11 @@ package com.cadence.app.web;
 import com.cadence.ai.api.AiAssistantService;
 import com.cadence.ai.api.ChatResponse;
 import com.cadence.ai.api.ConversationHistoryView;
+import com.cadence.app.usecase.ClientMergeService;
 import com.cadence.app.web.dto.AppointmentDetailView;
 import com.cadence.app.web.dto.DashboardView;
 import com.cadence.app.web.dto.MasterTodayView;
+import com.cadence.booking.api.AccessLinkView;
 import com.cadence.booking.api.AppointmentStatus;
 import com.cadence.booking.api.AppointmentView;
 import com.cadence.booking.api.BookingService;
@@ -62,6 +64,7 @@ public class AppApiController {
     private final AiAssistantService aiAssistantService;
     private final OwnerTaskService ownerTaskService;
     private final TenantDirectory tenants;
+    private final ClientMergeService clientMerge;
 
     public AppApiController(
             CatalogService catalogService,
@@ -71,7 +74,8 @@ public class AppApiController {
             GrowthService growthService,
             AiAssistantService aiAssistantService,
             OwnerTaskService ownerTaskService,
-            TenantDirectory tenants
+            TenantDirectory tenants,
+            ClientMergeService clientMerge
     ) {
         this.catalogService = catalogService;
         this.bookingService = bookingService;
@@ -81,6 +85,7 @@ public class AppApiController {
         this.aiAssistantService = aiAssistantService;
         this.ownerTaskService = ownerTaskService;
         this.tenants = tenants;
+        this.clientMerge = clientMerge;
     }
 
     @GetMapping("/health")
@@ -94,7 +99,8 @@ public class AppApiController {
 
     @GetMapping("/me")
     public Map<String, Object> me() {
-        ActorContext.Actor actor = ActorContext.current().orElse(new ActorContext.Actor("anon", ActorContext.Role.OWNER, null));
+        ActorContext.Actor actor = ActorContext.current()
+                .orElseThrow(() -> DomainException.forbidden("FORBIDDEN_RESOURCE", "Authenticated actor is required"));
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("actorId", actor.actorId());
         body.put("role", actor.role().name());
@@ -255,6 +261,13 @@ public class AppApiController {
         return bookingService.transition(id, to, note);
     }
 
+    /** Issues a fresh client manage link; the raw token is returned once and never stored. */
+    @PostMapping("/appointments/{id}/access-link")
+    public AccessLinkView accessLink(@PathVariable UUID id) {
+        assertOwner();
+        return bookingService.issueAccessLink(id);
+    }
+
     @PostMapping("/appointments/{id}/reschedule")
     public AppointmentView reschedule(@PathVariable UUID id, @RequestParam Instant start) {
         return bookingService.reschedule(id, start);
@@ -291,6 +304,12 @@ public class AppApiController {
         }
         body.put("history", history);
         return body;
+    }
+
+    /** Owner-only: folds the duplicate {@code absorbedId} into client {@code id} and returns the survivor. */
+    @PostMapping("/clients/{id}/merge")
+    public ClientView mergeClients(@PathVariable UUID id, @RequestParam UUID absorbedId) {
+        return clientMerge.merge(id, absorbedId);
     }
 
     @PostMapping("/clients/{id}/trust")
@@ -386,8 +405,8 @@ public class AppApiController {
     }
 
     private void assertOwner() {
-        ActorContext.Actor actor = ActorContext.current().orElse(null);
-        if (actor != null && actor.isMaster()) {
+        boolean owner = ActorContext.current().map(ActorContext.Actor::isOwner).orElse(false);
+        if (!owner) {
             throw DomainException.forbidden(
                     "FORBIDDEN_RESOURCE", "Owner-only endpoint"
             );

@@ -1,3 +1,6 @@
+import { AUTH_MODE } from '@/src/auth/config';
+import { getAuthBridge } from './authBridge';
+
 export const API_BASE = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8080';
 
 export type TenantPublic = {
@@ -112,9 +115,21 @@ export type GrowthSignalView = {
 
 export type OwnerTaskView = {
   id: string;
+  kind: string;
   title: string;
-  body?: string;
-  deepLink?: string;
+  body?: string | null;
+  /** Ready-to-send message; NEW_BOOKING tasks contain the literal `{manageLink}` placeholder. */
+  copyText?: string | null;
+  link?: string | null;
+  appointmentId?: string | null;
+  createdAt?: string | null;
+  completedAt?: string | null;
+};
+
+export type AccessLinkView = {
+  /** Relative path, e.g. `/b/{id}?token=...`. Each issue call returns a fresh token. */
+  managePath: string;
+  expiresAt: string;
 };
 
 export type AppointmentView = {
@@ -206,22 +221,49 @@ export function shortRef(id: string | undefined | null): string {
 }
 
 async function request<T>(path: string, init: RequestInit = {}, tenantId?: string): Promise<T> {
+  const oidc = AUTH_MODE === 'oidc';
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(init.headers as Record<string, string> | undefined),
   };
-  if (tenantId) {
-    headers['X-Tenant-Id'] = tenantId;
+  if (!oidc) {
+    // dev-headers mode only: the backend trusts these headers solely in its dev-headers profile.
+    if (tenantId) {
+      headers['X-Tenant-Id'] = tenantId;
+    }
+    const role = globalThis.localStorage?.getItem('cadence.role');
+    const specialistId = globalThis.localStorage?.getItem('cadence.specialistId');
+    if (role) {
+      headers['X-Actor-Role'] = role;
+    }
+    if (specialistId) {
+      headers['X-Specialist-Id'] = specialistId;
+    }
   }
-  const role = globalThis.localStorage?.getItem('cadence.role');
-  const specialistId = globalThis.localStorage?.getItem('cadence.specialistId');
-  if (role) {
-    headers['X-Actor-Role'] = role;
+
+  const send = (token?: string | null) =>
+    fetch(`${API_BASE}${path}`, {
+      ...init,
+      headers: token ? { ...headers, Authorization: `Bearer ${token}` } : headers,
+    });
+
+  let res: Response;
+  const bridge = oidc && path.startsWith('/api/app/') ? getAuthBridge() : null;
+  if (bridge) {
+    res = await send(await bridge.getAccessToken());
+    if (res.status === 401) {
+      // One refresh attempt, then give up and sign out.
+      const fresh = await bridge.refreshAccessToken();
+      if (fresh) {
+        res = await send(fresh);
+      }
+      if (!fresh || res.status === 401) {
+        bridge.onUnauthorized();
+      }
+    }
+  } else {
+    res = await send();
   }
-  if (specialistId) {
-    headers['X-Specialist-Id'] = specialistId;
-  }
-  const res = await fetch(`${API_BASE}${path}`, { ...init, headers });
   if (!res.ok) {
     const text = await res.text();
     const err = new Error(text || res.statusText) as Error & { status?: number };
@@ -306,6 +348,9 @@ export const api = {
   matrix: (tenantId: string, specialistId: string) =>
     request<MatrixRowView[]>(`/api/app/specialists/${specialistId}/matrix`, {}, tenantId),
   tasks: (tenantId: string) => request<OwnerTaskView[]>('/api/app/tasks', {}, tenantId),
+  /** Issues a fresh manage-link token for the appointment (new token on every call). */
+  issueAccessLink: (tenantId: string, appointmentId: string) =>
+    request<AccessLinkView>(`/api/app/appointments/${appointmentId}/access-link`, { method: 'POST' }, tenantId),
   completeTask: (tenantId: string, id: string) =>
     request<void>(`/api/app/tasks/${id}/complete`, { method: 'POST' }, tenantId),
   metrics: (tenantId: string) => request<MetricView[]>('/api/app/metrics', {}, tenantId),

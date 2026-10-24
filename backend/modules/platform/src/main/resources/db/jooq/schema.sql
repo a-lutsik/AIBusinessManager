@@ -162,8 +162,10 @@ CREATE TABLE client (
     late_cancel_count       INT NOT NULL DEFAULT 0,
     completed_value_minor   INT NOT NULL DEFAULT 0,
     anonymized_at           TIMESTAMP,
+    merged_into_client_id   UUID,
     CONSTRAINT client_pk PRIMARY KEY (id),
     CONSTRAINT client_tenant_fk FOREIGN KEY (tenant_id) REFERENCES tenant (id),
+    CONSTRAINT client_merged_into_fk FOREIGN KEY (merged_into_client_id) REFERENCES client (id),
     CONSTRAINT client_phone_uq UNIQUE (tenant_id, normalized_phone)
 );
 

@@ -6,6 +6,7 @@ import com.cadence.platform.tenancy.TenantContext;
 import com.cadence.platform.time.Utc;
 import org.jooq.DSLContext;
 import org.jooq.Record;
+import org.jooq.impl.DSL;
 import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
@@ -28,6 +29,37 @@ class ClientRepository {
         return dsl.selectFrom(CLIENT)
                 .where(TenantAwareDsl.tenantEquals(CLIENT.TENANT_ID).and(CLIENT.ID.eq(id)))
                 .fetchOptional(this::toView);
+    }
+
+    /** Merge-relevant state of a profile: the view plus whether it was anonymized or absorbed. */
+    record ClientState(ClientView view, Instant anonymizedAt, UUID mergedIntoClientId) {
+        boolean retired() {
+            return anonymizedAt != null || mergedIntoClientId != null;
+        }
+    }
+
+    Optional<ClientState> findState(UUID id) {
+        return dsl.selectFrom(CLIENT)
+                .where(TenantAwareDsl.tenantEquals(CLIENT.TENANT_ID).and(CLIENT.ID.eq(id)))
+                .fetchOptional(r -> new ClientState(
+                        toView(r),
+                        r.get(CLIENT.ANONYMIZED_AT) == null ? null : Utc.toInstant(r.get(CLIENT.ANONYMIZED_AT)),
+                        r.get(CLIENT.MERGED_INTO_CLIENT_ID)
+                ));
+    }
+
+    /**
+     * Locks both profiles until the transaction ends. The rows are locked in {@code ORDER BY id} order (the sort runs
+     * below the lock step), so two merges touching the same pair in opposite directions cannot deadlock. Missing rows
+     * are simply not locked; the caller validates existence afterwards.
+     */
+    void lockForUpdate(UUID one, UUID other) {
+        dsl.select(CLIENT.ID)
+                .from(CLIENT)
+                .where(TenantAwareDsl.tenantEquals(CLIENT.TENANT_ID).and(CLIENT.ID.in(one, other)))
+                .orderBy(CLIENT.ID.asc())
+                .forUpdate()
+                .fetch();
     }
 
     Optional<ClientView> findByPhone(String e164) {
@@ -91,16 +123,18 @@ class ClientRepository {
         update.where(TenantAwareDsl.tenantEquals(CLIENT.TENANT_ID).and(CLIENT.ID.eq(id))).execute();
     }
 
+    /**
+     * Records a completed visit. First/last visit are the earliest/latest completed service start, so completing an
+     * older visit later (owner status correction) never moves them the wrong way.
+     */
     void bumpCompleted(UUID id, Instant when, int valueMinor) {
+        var at = Utc.toLocal(when);
         dsl.update(CLIENT)
                 .set(CLIENT.COMPLETED_VISIT_COUNT, CLIENT.COMPLETED_VISIT_COUNT.plus(1))
                 .set(CLIENT.COMPLETED_VALUE_MINOR, CLIENT.COMPLETED_VALUE_MINOR.plus(valueMinor))
-                .set(CLIENT.LAST_VISIT_AT, Utc.toLocal(when))
+                .set(CLIENT.LAST_VISIT_AT, DSL.greatest(DSL.coalesce(CLIENT.LAST_VISIT_AT, DSL.val(at)), DSL.val(at)))
+                .set(CLIENT.FIRST_VISIT_AT, DSL.least(DSL.coalesce(CLIENT.FIRST_VISIT_AT, DSL.val(at)), DSL.val(at)))
                 .where(TenantAwareDsl.tenantEquals(CLIENT.TENANT_ID).and(CLIENT.ID.eq(id)))
-                .execute();
-        dsl.update(CLIENT)
-                .set(CLIENT.FIRST_VISIT_AT, Utc.toLocal(when))
-                .where(TenantAwareDsl.tenantEquals(CLIENT.TENANT_ID).and(CLIENT.ID.eq(id)).and(CLIENT.FIRST_VISIT_AT.isNull()))
                 .execute();
     }
 
@@ -118,10 +152,76 @@ class ClientRepository {
                 .execute();
     }
 
+    /** Owner correction NO_SHOW to COMPLETED: one recorded no-show less, never below zero. */
+    void revertNoShow(UUID id) {
+        dsl.update(CLIENT)
+                .set(CLIENT.NO_SHOW_COUNT, DSL.greatest(CLIENT.NO_SHOW_COUNT.minus(1), DSL.inline(0)))
+                .where(TenantAwareDsl.tenantEquals(CLIENT.TENANT_ID).and(CLIENT.ID.eq(id)))
+                .execute();
+    }
+
+    /**
+     * Owner correction COMPLETED to NO_SHOW: one completed visit and its value less (floored at zero); the first/last
+     * visit timestamps become the values recomputed from the remaining completed visits.
+     */
+    void revertCompleted(UUID id, int valueMinor, Instant firstCompletedAt, Instant lastCompletedAt) {
+        dsl.update(CLIENT)
+                .set(CLIENT.COMPLETED_VISIT_COUNT, DSL.greatest(CLIENT.COMPLETED_VISIT_COUNT.minus(1), DSL.inline(0)))
+                .set(CLIENT.COMPLETED_VALUE_MINOR, DSL.greatest(CLIENT.COMPLETED_VALUE_MINOR.minus(valueMinor), DSL.inline(0)))
+                .set(CLIENT.FIRST_VISIT_AT, firstCompletedAt == null ? null : Utc.toLocal(firstCompletedAt))
+                .set(CLIENT.LAST_VISIT_AT, lastCompletedAt == null ? null : Utc.toLocal(lastCompletedAt))
+                .where(TenantAwareDsl.tenantEquals(CLIENT.TENANT_ID).and(CLIENT.ID.eq(id)))
+                .execute();
+    }
+
+    /** Overwrites the survivor's aggregates, notes and tags with the already merged values. Consent is untouched. */
+    void applyMerge(
+            UUID id,
+            int completedVisitCount,
+            int noShowCount,
+            int lateCancelCount,
+            int completedValueMinor,
+            Instant firstVisitAt,
+            Instant lastVisitAt,
+            String notes,
+            String tags
+    ) {
+        dsl.update(CLIENT)
+                .set(CLIENT.COMPLETED_VISIT_COUNT, completedVisitCount)
+                .set(CLIENT.NO_SHOW_COUNT, noShowCount)
+                .set(CLIENT.LATE_CANCEL_COUNT, lateCancelCount)
+                .set(CLIENT.COMPLETED_VALUE_MINOR, completedValueMinor)
+                .set(CLIENT.FIRST_VISIT_AT, firstVisitAt == null ? null : Utc.toLocal(firstVisitAt))
+                .set(CLIENT.LAST_VISIT_AT, lastVisitAt == null ? null : Utc.toLocal(lastVisitAt))
+                .set(CLIENT.NOTES, notes)
+                .set(CLIENT.TAGS, tags)
+                .where(TenantAwareDsl.tenantEquals(CLIENT.TENANT_ID).and(CLIENT.ID.eq(id)))
+                .execute();
+    }
+
+    /**
+     * Retires the absorbed profile: anonymized, pointing at the survivor, with its aggregates and tags cleared so the
+     * folded-in numbers are not counted twice.
+     */
+    void markMerged(UUID absorbedId, UUID survivorId) {
+        anonymize(absorbedId);
+        dsl.update(CLIENT)
+                .set(CLIENT.MERGED_INTO_CLIENT_ID, survivorId)
+                .set(CLIENT.TAGS, (String) null)
+                .set(CLIENT.COMPLETED_VISIT_COUNT, 0)
+                .set(CLIENT.NO_SHOW_COUNT, 0)
+                .set(CLIENT.LATE_CANCEL_COUNT, 0)
+                .set(CLIENT.COMPLETED_VALUE_MINOR, 0)
+                .set(CLIENT.FIRST_VISIT_AT, (java.time.LocalDateTime) null)
+                .set(CLIENT.LAST_VISIT_AT, (java.time.LocalDateTime) null)
+                .where(TenantAwareDsl.tenantEquals(CLIENT.TENANT_ID).and(CLIENT.ID.eq(absorbedId)))
+                .execute();
+    }
+
     void anonymize(UUID id) {
         dsl.update(CLIENT)
                 .set(CLIENT.DISPLAY_NAME, "anonymized")
-                .set(CLIENT.NORMALIZED_PHONE, "anon-" + id)
+                .set(CLIENT.NORMALIZED_PHONE, AnonymizedPhone.forClient(id))
                 .set(CLIENT.NOTES, (String) null)
                 .set(CLIENT.TELEGRAM_CHAT_ID, (String) null)
                 .set(CLIENT.ANONYMIZED_AT, Utc.toLocal(Instant.now()))

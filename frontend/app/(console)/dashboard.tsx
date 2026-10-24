@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ScrollView, Text, View, useWindowDimensions } from 'react-native';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -12,14 +12,14 @@ import {
   type AppointmentSummary,
   type DashboardView,
   type MetricDefinitionView,
+  type OwnerTaskView,
 } from '@/src/api/client';
+import { useConsoleSession } from '@/src/auth/ConsoleSession';
 import { t } from '@/src/i18n';
 import { statusColor, useThemeTokens } from '@/src/theme/tokens';
+import { copyOwnerTaskMessage } from '@/src/utils/ownerTask';
 
-function readRole(): 'OWNER' | 'MASTER' {
-  const stored = typeof localStorage !== 'undefined' ? localStorage.getItem('cadence.role') : null;
-  return stored === 'MASTER' ? 'MASTER' : 'OWNER';
-}
+type CopyState = 'busy' | 'copied' | 'error';
 
 const SIGNAL_ROUTES: Record<string, string> = {
   OPEN_RULES: '/rules',
@@ -35,11 +35,34 @@ export default function DashboardScreen() {
   const [data, setData] = useState<DashboardView | null>(null);
   const [defs, setDefs] = useState<Record<string, MetricDefinitionView>>({});
   const [error, setError] = useState<string | null>(null);
-  const [role, setRole] = useState<'OWNER' | 'MASTER'>(readRole);
+  const { role, ready } = useConsoleSession();
+  const [copyState, setCopyState] = useState<Record<string, CopyState>>({});
+  const copyTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+
+  const copyMessage = (task: OwnerTaskView) => {
+    setCopyState((prev) => ({ ...prev, [task.id]: 'busy' }));
+    copyOwnerTaskMessage(LUMEN_TENANT_ID, task)
+      .then(() => setCopyState((prev) => ({ ...prev, [task.id]: 'copied' })))
+      .catch(() => setCopyState((prev) => ({ ...prev, [task.id]: 'error' })))
+      .finally(() => {
+        clearTimeout(copyTimers.current[task.id]);
+        copyTimers.current[task.id] = setTimeout(() => {
+          setCopyState((prev) => {
+            const { [task.id]: _drop, ...rest } = prev;
+            return rest;
+          });
+        }, 3000);
+      });
+  };
+
+  useEffect(() => {
+    const timers = copyTimers.current;
+    return () => Object.values(timers).forEach(clearTimeout);
+  }, []);
 
   const load = () => {
-    const nextRole = readRole();
-    setRole(nextRole);
+    if (!role) return;
+    const nextRole = role;
     api
       .dashboard(LUMEN_TENANT_ID)
       .then(async (dash) => {
@@ -73,9 +96,12 @@ export default function DashboardScreen() {
   };
 
   useEffect(() => {
+    if (!ready) return;
+    setData(null);
+    setError(null);
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [ready, role]);
 
   const isOwner = role === 'OWNER';
   const today = data?.today ?? [];
@@ -134,6 +160,15 @@ export default function DashboardScreen() {
         >
           <Text style={{ fontWeight: '700', color: color.ink }}>{task.title}</Text>
           {task.body ? <Text style={{ marginTop: 4, color: color.ink }}>{task.body}</Text> : null}
+          {task.copyText ? (
+            <Button
+              label={copyLabel(copyState[task.id])}
+              variant="ghost"
+              disabled={copyState[task.id] === 'busy'}
+              onPress={() => copyMessage(task)}
+              style={{ marginTop: space.md }}
+            />
+          ) : null}
           <Button
             label={t('action.done')}
             onPress={() =>
@@ -221,6 +256,13 @@ export default function DashboardScreen() {
       </View>
     </ScrollView>
   );
+}
+
+function copyLabel(state: CopyState | undefined): string {
+  if (state === 'busy') return t('task.copying');
+  if (state === 'copied') return t('task.copied');
+  if (state === 'error') return t('task.copyFailed');
+  return t('task.copyMessage');
 }
 
 const NAV_LABEL: Record<string, string> = {

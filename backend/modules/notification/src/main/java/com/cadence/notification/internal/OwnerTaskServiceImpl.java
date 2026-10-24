@@ -79,4 +79,13 @@ public class OwnerTaskServiceImpl implements OwnerTaskService {
                 .where(TenantAwareDsl.tenantEquals(OWNER_TASK.TENANT_ID).and(OWNER_TASK.ID.eq(taskId)))
                 .execute();
     }
+
+    @Override
+    @Transactional
+    public int reassignClient(UUID from, UUID to) {
+        return dsl.update(OWNER_TASK)
+                .set(OWNER_TASK.CLIENT_ID, to)
+                .where(TenantAwareDsl.tenantEquals(OWNER_TASK.TENANT_ID).and(OWNER_TASK.CLIENT_ID.eq(from)))
+                .execute();
+    }
 }

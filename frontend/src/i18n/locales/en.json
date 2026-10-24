@@ -119,5 +119,15 @@
   "ai.draftConfirmed": "Draft confirmed.",
   "ai.draftRejected": "Draft rejected.",
   "ai.historyUnavailable": "Conversation history endpoint not available yet.",
-  "ai.rejectUnavailable": "Reject endpoint not available yet."
+  "ai.rejectUnavailable": "Reject endpoint not available yet.",
+  "auth.loading": "Signing you in…",
+  "auth.signIn.body": "Sign in with your Cadence account to open the console.",
+  "auth.signIn.button": "Sign in",
+  "auth.signIn.waiting": "Waiting for sign-in…",
+  "auth.signIn.error": "Sign-in failed:",
+  "auth.signOut": "Sign out",
+  "task.copyMessage": "Copy message",
+  "task.copying": "Preparing…",
+  "task.copied": "Copied",
+  "task.copyFailed": "Copy failed, try again"
 }

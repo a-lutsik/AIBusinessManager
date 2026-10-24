@@ -1,0 +1,7 @@
+# LOCAL DEVELOPMENT ONLY. Activate with: --spring.profiles.active=dev-headers
+# Authentication is replaced by X-Tenant-Id / X-Actor-Role / X-Specialist-Id headers.
+# Never enable this profile on a shared or production environment.
+app:
+  security:
+    oauth2-enabled: false
+    header-auth-enabled: true

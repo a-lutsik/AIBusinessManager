@@ -18,4 +18,9 @@ public interface OwnerTaskService {
     List<OwnerTaskView> listOpen();
 
     void complete(UUID taskId);
+
+    /**
+     * Client merge: points the owner tasks of client {@code from} at client {@code to}. Returns how many moved.
+     */
+    int reassignClient(UUID from, UUID to);
 }

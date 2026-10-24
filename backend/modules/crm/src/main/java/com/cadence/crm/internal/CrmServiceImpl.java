@@ -3,21 +3,37 @@ package com.cadence.crm.internal;
 import com.cadence.crm.api.ClientView;
 import com.cadence.crm.api.CrmService;
 import com.cadence.platform.error.DomainException;
+import com.cadence.platform.persistence.SqlStates;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
 @Service
 public class CrmServiceImpl implements CrmService {
 
-    private final ClientRepository repository;
+    private static final int NOTES_MAX = 4096;
+    private static final int TAGS_MAX = 1024;
 
-    public CrmServiceImpl(ClientRepository repository) {
+    /** Unique index on (tenant_id, normalized_phone), see V3. */
+    static final String PHONE_CONSTRAINT = "client_phone_uq";
+
+    private final ClientRepository repository;
+    private final TransactionTemplate savepoint;
+
+    public CrmServiceImpl(ClientRepository repository, PlatformTransactionManager transactionManager) {
         this.repository = repository;
+        this.savepoint = new TransactionTemplate(transactionManager);
+        this.savepoint.setPropagationBehavior(TransactionDefinition.PROPAGATION_NESTED);
     }
 
     @Override
@@ -36,9 +52,7 @@ public class CrmServiceImpl implements CrmService {
     ) {
         Optional<ClientView> existing = repository.findByPhone(e164Phone);
         if (existing.isPresent()) {
-            ClientView row = existing.get();
-            repository.updateProfile(row.id(), row.displayName(), null, null, locale, marketingConsent, consentVersion);
-            return repository.findById(row.id()).orElse(row);
+            return refresh(existing.get(), locale, marketingConsent, consentVersion);
         }
         ClientView created = new ClientView(
                 UUID.randomUUID(),
@@ -56,9 +70,44 @@ public class CrmServiceImpl implements CrmService {
                 0,
                 0
         );
-        repository.insert(created);
+        if (!insertUnlessPhoneTaken(created)) {
+            // Lost the race for this phone: the winner committed its row before our insert failed, so a fresh
+            // statement sees it (READ COMMITTED) and we continue exactly as for a returning client.
+            ClientView winner = repository.findByPhone(e164Phone).orElseThrow(() -> DomainException.conflict(
+                    "CLIENT_CONFLICT", "Client with this phone is being created, retry"));
+            return refresh(winner, locale, marketingConsent, consentVersion);
+        }
         repository.updateProfile(created.id(), displayName, null, null, locale, marketingConsent, consentVersion);
         return repository.findById(created.id()).orElse(created);
+    }
+
+    private ClientView refresh(ClientView row, String locale, boolean marketingConsent, String consentVersion) {
+        repository.updateProfile(row.id(), row.displayName(), null, null, locale, marketingConsent, consentVersion);
+        return repository.findById(row.id()).orElse(row);
+    }
+
+    /**
+     * Inserts the client inside a savepoint (nested transaction) and reports whether the row was written.
+     *
+     * <p>Two first bookings with the same phone can both miss {@code findByPhone} and then collide on
+     * {@code client_phone_uq} (SQLSTATE 23505). PostgreSQL marks the whole transaction aborted after any error, so
+     * catching the failure and re-reading in the same transaction would fail with "current transaction is aborted".
+     * Rolling back only to a savepoint keeps the outer transaction (the booking being created) usable. The JDBC
+     * transaction manager supports {@code PROPAGATION_NESTED} through JDBC savepoints; the RLS tenant setting is
+     * re-applied before every statement, so the rollback does not lose it.
+     *
+     * @return {@code false} when the phone already exists (unique violation), {@code true} when inserted
+     */
+    private boolean insertUnlessPhoneTaken(ClientView created) {
+        try {
+            savepoint.executeWithoutResult(status -> repository.insert(created));
+            return true;
+        } catch (RuntimeException ex) {
+            if (SqlStates.isUniqueViolation(ex, PHONE_CONSTRAINT)) {
+                return false;
+            }
+            throw ex;
+        }
     }
 
     @Override
@@ -116,13 +165,116 @@ public class CrmServiceImpl implements CrmService {
 
     @Override
     @Transactional
-    public MergeResult merge(UUID survivingId, UUID absorbedId) {
-        if (survivingId.equals(absorbedId)) {
+    public void revertNoShow(UUID clientId) {
+        repository.revertNoShow(clientId);
+    }
+
+    @Override
+    @Transactional
+    public void revertCompletedVisit(UUID clientId, int valueMinor, Instant firstCompletedAt, Instant lastCompletedAt) {
+        repository.revertCompleted(clientId, valueMinor, firstCompletedAt, lastCompletedAt);
+    }
+
+    @Override
+    @Transactional
+    public void lockForMerge(UUID survivorId, UUID absorbedId) {
+        lockAndLoadPair(survivorId, absorbedId);
+    }
+
+    /** Self-merge check, row locks on both profiles, then existence and retired-state checks on the locked rows. */
+    private MergePair lockAndLoadPair(UUID survivorId, UUID absorbedId) {
+        if (survivorId.equals(absorbedId)) {
             throw DomainException.badRequest("INVALID_MERGE", "Cannot merge a client with itself");
         }
-        repository.findById(survivingId).orElseThrow(() -> DomainException.notFound("CLIENT_NOT_FOUND", "Survivor not found"));
-        repository.findById(absorbedId).orElseThrow(() -> DomainException.notFound("CLIENT_NOT_FOUND", "Absorbed client not found"));
-        repository.anonymize(absorbedId);
-        return new MergeResult(survivingId, absorbedId);
+        repository.lockForUpdate(survivorId, absorbedId);
+        ClientRepository.ClientState survivor = repository.findState(survivorId)
+                .orElseThrow(() -> DomainException.notFound("CLIENT_NOT_FOUND", "Client not found"));
+        ClientRepository.ClientState absorbed = repository.findState(absorbedId)
+                .orElseThrow(() -> DomainException.notFound("CLIENT_NOT_FOUND", "Client to merge not found"));
+        if (absorbed.retired()) {
+            throw DomainException.conflict("CLIENT_ALREADY_MERGED", "Client is already anonymized or merged");
+        }
+        if (survivor.retired()) {
+            throw DomainException.conflict("CLIENT_ALREADY_MERGED", "Target client is already anonymized or merged");
+        }
+        return new MergePair(survivor, absorbed);
+    }
+
+    private record MergePair(ClientRepository.ClientState survivor, ClientRepository.ClientState absorbed) {
+    }
+
+    @Override
+    @Transactional
+    public ClientView absorb(UUID survivorId, UUID absorbedId) {
+        MergePair pair = lockAndLoadPair(survivorId, absorbedId);
+        ClientRepository.ClientState survivor = pair.survivor();
+        ClientRepository.ClientState absorbed = pair.absorbed();
+        ClientView keep = survivor.view();
+        ClientView gone = absorbed.view();
+        repository.applyMerge(
+                survivorId,
+                keep.completedVisitCount() + gone.completedVisitCount(),
+                keep.noShowCount() + gone.noShowCount(),
+                keep.lateCancelCount() + gone.lateCancelCount(),
+                keep.completedValueMinor() + gone.completedValueMinor(),
+                earliest(keep.firstVisitAt(), gone.firstVisitAt()),
+                latest(keep.lastVisitAt(), gone.lastVisitAt()),
+                mergeNotes(keep.notes(), gone.notes(), gone.displayName()),
+                mergeTags(keep.tags(), gone.tags())
+        );
+        repository.markMerged(absorbedId, survivorId);
+        return repository.findById(survivorId)
+                .orElseThrow(() -> DomainException.notFound("CLIENT_NOT_FOUND", "Client not found"));
+    }
+
+    private static Instant earliest(Instant a, Instant b) {
+        if (a == null) {
+            return b;
+        }
+        if (b == null) {
+            return a;
+        }
+        return a.isBefore(b) ? a : b;
+    }
+
+    private static Instant latest(Instant a, Instant b) {
+        if (a == null) {
+            return b;
+        }
+        if (b == null) {
+            return a;
+        }
+        return a.isAfter(b) ? a : b;
+    }
+
+    /** Appends the absorbed notes under a separator naming the absorbed profile; capped to the column length. */
+    static String mergeNotes(String survivorNotes, String absorbedNotes, String absorbedName) {
+        if (absorbedNotes == null || absorbedNotes.isBlank()) {
+            return survivorNotes;
+        }
+        String block = "--- merged from " + absorbedName + " ---\n" + absorbedNotes;
+        String merged = survivorNotes == null || survivorNotes.isBlank() ? block : survivorNotes + "\n" + block;
+        return merged.length() > NOTES_MAX ? merged.substring(0, NOTES_MAX) : merged;
+    }
+
+    /** Union of the comma-separated tag lists, order of first appearance, case-insensitive duplicates dropped. */
+    static String mergeTags(String survivorTags, String absorbedTags) {
+        Map<String, String> union = new LinkedHashMap<>();
+        for (String list : new String[]{survivorTags, absorbedTags}) {
+            if (list == null) {
+                continue;
+            }
+            for (String tag : list.split(",")) {
+                String trimmed = tag.trim();
+                if (!trimmed.isEmpty()) {
+                    union.putIfAbsent(trimmed.toLowerCase(Locale.ROOT), trimmed);
+                }
+            }
+        }
+        if (union.isEmpty()) {
+            return survivorTags;
+        }
+        String merged = String.join(",", union.values());
+        return merged.length() > TAGS_MAX ? merged.substring(0, TAGS_MAX) : merged;
     }
 }

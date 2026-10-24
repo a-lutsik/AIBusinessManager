@@ -63,12 +63,13 @@ public class AiAssistantServiceImpl implements AiAssistantService {
         return "ai";
     }
 
+    /**
+     * Deliberately not transactional: no connection or transaction is held across the LLM HTTP call. Facts and the
+     * prompt log go through transactional service/store methods, each in its own short transaction.
+     */
     @Override
     public ChatResponse chat(UUID conversationId, String userLocale, String message) {
-        ActorContext.Actor actor = ActorContext.current().orElse(null);
-        if (actor != null && actor.isMaster()) {
-            throw DomainException.forbidden("FORBIDDEN_RESOURCE", "AI assistant is owner-only");
-        }
+        assertOwner();
         UUID convo = conversationId == null ? UUID.randomUUID() : conversationId;
         String facts = collectFacts(convo);
         String system = "You are Cadence, an AI business manager. Locale=" + userLocale
@@ -197,8 +198,8 @@ public class AiAssistantServiceImpl implements AiAssistantService {
     }
 
     private void assertOwner() {
-        ActorContext.Actor actor = ActorContext.current().orElse(null);
-        if (actor != null && actor.isMaster()) {
+        boolean owner = ActorContext.current().map(ActorContext.Actor::isOwner).orElse(false);
+        if (!owner) {
             throw DomainException.forbidden("FORBIDDEN_RESOURCE", "AI assistant is owner-only");
         }
     }

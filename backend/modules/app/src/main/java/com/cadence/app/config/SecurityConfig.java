@@ -20,6 +20,10 @@ import java.util.List;
 @EnableConfigurationProperties(SecurityProperties.class)
 public class SecurityConfig {
 
+    public SecurityConfig(SecurityProperties props) {
+        props.validate();
+    }
+
     @Bean
     CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration cors = new CorsConfiguration();

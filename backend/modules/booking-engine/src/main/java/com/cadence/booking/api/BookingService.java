@@ -35,5 +35,15 @@ public interface BookingService {
 
     String icsByAccessToken(String rawToken);
 
-    Optional<String> rawTokenFor(UUID appointmentId);
+    /**
+     * Issues a fresh client manage link for a visit (OWNER only). Each call mints a new token; only its hash is
+     * stored, so the raw value is returned here once and cannot be recovered later.
+     */
+    AccessLinkView issueAccessLink(UUID appointmentId);
+
+    /**
+     * Moves every visit of client {@code from} to client {@code to} within the current tenant (client merge) and
+     * returns how many visits moved. Touches only booking-engine tables.
+     */
+    int reassignClient(UUID from, UUID to);
 }

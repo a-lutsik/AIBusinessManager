@@ -10,15 +10,16 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
-import java.time.LocalDate;
-import java.time.ZoneId;
 
+import static com.cadence.app.TestJwt.master;
+import static com.cadence.app.TestJwt.owner;
 import static org.hamcrest.Matchers.greaterThan;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -46,17 +47,8 @@ class BookingCoreIT extends AbstractTimescaleIT {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].id", notNullValue()));
 
-        LocalDate from = LocalDate.now(ZoneId.of("Asia/Tbilisi")).plusDays(2);
-        MvcResult slots = mvc.perform(get("/api/public/tenants/lumen-studio/slots")
-                        .param("serviceId", DemoIds.HAIRCUT.toString())
-                        .param("specialistId", DemoIds.NINO.toString())
-                        .param("from", from.toString())
-                        .param("to", from.plusDays(5).toString()))
-                .andExpect(status().isOk())
-                .andReturn();
-        JsonNode slotArray = mapper.readTree(slots.getResponse().getContentAsByteArray());
-        org.junit.jupiter.api.Assumptions.assumeTrue(slotArray.size() > 0, "Need a free slot in demo schedule");
-        String start = slotArray.get(0).asText();
+        String firstSlot = TestSlots.firstFree(mvc, mapper, DemoIds.HAIRCUT, DemoIds.NINO, 2);
+        String start = firstSlot;
 
         MvcResult created = mvc.perform(post("/api/public/tenants/lumen-studio/bookings")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -86,14 +78,19 @@ class BookingCoreIT extends AbstractTimescaleIT {
         mvc.perform(get("/api/public/bookings/" + id + "/calendar.ics").param("token", token))
                 .andExpect(status().isOk());
 
-        mvc.perform(get("/api/app/clients").header("X-Tenant-Id", DemoIds.LUMEN.toString()))
+        // Token write path without a slug: tenant resolved via booking_token_lookup, then RLS-scoped writes.
+        mvc.perform(post("/api/public/bookings/" + id + "/cancel").param("token", token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status", is("CANCELLED_BY_CLIENT")));
+
+        mvc.perform(get("/api/app/clients").with(owner(DemoIds.LUMEN)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[?(@.displayName == 'Mariam Test')]", notNullValue()));
     }
 
     @Test
     void newClientPendingWhenConfirmationRequired() throws Exception {
-        MvcResult rulesRes = mvc.perform(get("/api/app/rules").header("X-Tenant-Id", DemoIds.LUMEN.toString()))
+        MvcResult rulesRes = mvc.perform(get("/api/app/rules").with(owner(DemoIds.LUMEN)))
                 .andExpect(status().isOk())
                 .andReturn();
         JsonNode rules = mapper.readTree(rulesRes.getResponse().getContentAsByteArray());
@@ -101,22 +98,13 @@ class BookingCoreIT extends AbstractTimescaleIT {
         rules.fields().forEachRemaining(e -> body.set(e.getKey(), e.getValue()));
         body.put("newClientRequiresConfirmation", true);
         mvc.perform(put("/api/app/rules")
-                        .header("X-Tenant-Id", DemoIds.LUMEN.toString())
+                        .with(owner(DemoIds.LUMEN))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(mapper.writeValueAsBytes(body)))
                 .andExpect(status().isOk());
 
-        LocalDate from = LocalDate.now(ZoneId.of("Asia/Tbilisi")).plusDays(3);
-        MvcResult slots = mvc.perform(get("/api/public/tenants/lumen-studio/slots")
-                        .param("serviceId", DemoIds.CONSULT.toString())
-                        .param("specialistId", DemoIds.NINO.toString())
-                        .param("from", from.toString())
-                        .param("to", from.plusDays(4).toString()))
-                .andExpect(status().isOk())
-                .andReturn();
-        JsonNode slotArray = mapper.readTree(slots.getResponse().getContentAsByteArray());
-        org.junit.jupiter.api.Assumptions.assumeTrue(slotArray.size() > 0);
-        String start = slotArray.get(0).asText();
+        String firstSlot = TestSlots.firstFree(mvc, mapper, DemoIds.CONSULT, DemoIds.NINO, 3);
+        String start = firstSlot;
         mvc.perform(post("/api/public/tenants/lumen-studio/bookings")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -140,7 +128,7 @@ class BookingCoreIT extends AbstractTimescaleIT {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.displayName", is("Aura Atelier")))
                 .andExpect(jsonPath("$.currencyCode", is("CZK")));
-        mvc.perform(get("/api/app/specialists").header("X-Tenant-Id", DemoIds.AURA.toString()))
+        mvc.perform(get("/api/app/specialists").with(owner(DemoIds.AURA)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].displayName", is("Klára Svobodová")));
     }
@@ -148,22 +136,18 @@ class BookingCoreIT extends AbstractTimescaleIT {
     @Test
     void masterCannotReadAnotherSpecialistsAppointment() throws Exception {
         var calendar = mvc.perform(get("/api/app/calendar")
-                        .header("X-Tenant-Id", DemoIds.LUMEN.toString())
-                        .header("X-Actor-Role", "OWNER")
+                        .with(owner(DemoIds.LUMEN))
                         .param("from", "2020-01-01T00:00:00Z")
                         .param("to", "2030-01-01T00:00:00Z")
                         .param("specialistId", DemoIds.ANNA.toString()))
                 .andExpect(status().isOk())
                 .andReturn();
         JsonNode visits = mapper.readTree(calendar.getResponse().getContentAsByteArray());
-        org.junit.jupiter.api.Assumptions.assumeTrue(visits.size() > 0);
+        assertThat(visits.size()).as("demo seed must contain a visit of another specialist (Anna)").isGreaterThan(0);
         String foreignId = visits.get(0).get("id").asText();
 
         mvc.perform(get("/api/app/appointments/" + foreignId)
-                        .header("X-Tenant-Id", DemoIds.LUMEN.toString())
-                        .header("X-Actor-Role", "MASTER")
-                        .header("X-Specialist-Id", DemoIds.NINO.toString())
-                        .header("X-Actor-Id", "nino"))
+                        .with(master(DemoIds.LUMEN, DemoIds.NINO)))
                 .andExpect(status().isForbidden());
     }
 }

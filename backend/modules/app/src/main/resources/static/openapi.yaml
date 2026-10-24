@@ -216,11 +216,64 @@ paths:
         "200": { description: Updated visit }
         "403": { description: Master cannot access another specialist }
         "409": { description: Invalid transition }
+      description: >
+        NO_SHOW to COMPLETED and COMPLETED to NO_SHOW are owner corrections: they also adjust the client's counters
+        and are audited as appointment.status_correction. A master gets 403 FORBIDDEN_RESOURCE.
+  /api/app/appointments/{id}/access-link:
+    post:
+      summary: Issue a fresh client manage link (owner only)
+      description: >
+        Mints a new 256-bit booking token on every call and returns the manage path once. Only the SHA-256 hash is
+        stored; the raw token cannot be retrieved later. Owner tasks carry the {manageLink} placeholder instead.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Manage link valid for 365 days
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [managePath, expiresAt]
+                properties:
+                  managePath: { type: string, example: "/b/3f2b1c1e-0000-4000-8000-000000000000?token=..." }
+                  expiresAt: { type: string, format: date-time }
+        "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
+        "404": { description: "APPOINTMENT_NOT_FOUND - no such visit in the current tenant" }
+        "409": { description: "APPOINTMENT_CANCELLED - cancelled visits cannot be managed" }
   /api/app/clients:
     get:
       summary: Search clients
       responses:
         "200": { description: Clients }
+  /api/app/clients/{id}/merge:
+    post:
+      summary: Merge a duplicate client into this one (owner only)
+      description: >
+        Moves the absorbed client's visits, packages and owner tasks to the surviving client and adds its counters
+        (completed visits, no-shows, late cancellations, completed value). First/last visit become the earliest/latest,
+        notes are appended under a separator naming the absorbed client, tags are united. The survivor's marketing
+        consent is not changed. The absorbed profile is anonymized and keeps merged_into_client_id. Atomic.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          description: Surviving client
+          schema: { type: string, format: uuid }
+        - in: query
+          name: absorbedId
+          required: true
+          description: Duplicate client that is absorbed
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: The updated surviving client }
+        "400": { description: "INVALID_MERGE - a client cannot be merged with itself" }
+        "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
+        "404": { description: "CLIENT_NOT_FOUND - no such client in the current tenant" }
+        "409": { description: "CLIENT_ALREADY_MERGED - the absorbed client is already anonymized or merged" }
   /api/app/metrics:
     get:
       summary: Six metrics

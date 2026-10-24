@@ -4,6 +4,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
 import 'react-native-reanimated';
 import '../global.css';
+import { AuthProvider } from '@/src/auth/AuthContext';
 import { ThemeProvider } from '@/src/theme/ThemeContext';
 
 export { ErrorBoundary } from 'expo-router';
@@ -32,11 +33,14 @@ export default function RootLayout() {
 
   return (
     <ThemeProvider>
-      <Stack>
-        <Stack.Screen name="(console)" options={{ headerShown: false }} />
-        <Stack.Screen name="book/[slug]" options={{ title: 'Book' }} />
-        <Stack.Screen name="b/[id]" options={{ title: 'Visit' }} />
-      </Stack>
+      <AuthProvider>
+        <Stack>
+          <Stack.Screen name="(console)" options={{ headerShown: false }} />
+          <Stack.Screen name="auth" options={{ headerShown: false }} />
+          <Stack.Screen name="book/[slug]" options={{ title: 'Book' }} />
+          <Stack.Screen name="b/[id]" options={{ title: 'Visit' }} />
+        </Stack>
+      </AuthProvider>
     </ThemeProvider>
   );
 }

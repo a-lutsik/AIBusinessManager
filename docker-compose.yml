@@ -47,10 +47,12 @@ services:
   #     - "8080:8080"
   #   environment:
   #     SPRING_DATASOURCE_URL: jdbc:postgresql://timescaledb:5432/cadence
-  #     SPRING_DATASOURCE_USERNAME: cadence
-  #     SPRING_DATASOURCE_PASSWORD: cadence
-  #     APP_SECURITY_OAUTH2_ENABLED: "true"
-  #     SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: http://keycloak:8081/realms/cadence
+  #     # Runtime role is not the table owner, so RLS applies; Flyway migrates as the owner.
+  #     APP_DB_USER: cadence_app
+  #     APP_DB_PASSWORD: cadence_app
+  #     FLYWAY_DB_USER: cadence
+  #     FLYWAY_DB_PASSWORD: cadence
+  #     APP_SECURITY_ISSUER_URI: http://keycloak:8081/realms/cadence
 
 volumes:
   timescaledb_data:

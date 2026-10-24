@@ -24,4 +24,11 @@ public interface RetentionService {
     List<PackageView> packagesForClient(UUID clientId);
 
     void deductSession(UUID packageId, UUID appointmentId);
+
+    /**
+     * Client merge: moves the packages of client {@code from} to client {@code to} (their ledger rows follow the
+     * package) and deletes the absorbed client's trust state, so the survivor's trust is recomputed from the merged
+     * aggregates. Returns the number of packages moved.
+     */
+    int reassignClient(UUID from, UUID to);
 }

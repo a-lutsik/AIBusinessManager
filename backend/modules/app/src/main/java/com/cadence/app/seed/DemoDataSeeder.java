@@ -22,7 +22,6 @@ import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -62,7 +61,11 @@ public class DemoDataSeeder implements ApplicationRunner {
         seed();
     }
 
-    @Transactional
+    /**
+     * Deliberately no outer transaction: every service call below runs in its own transaction under the tenant
+     * scope opened around it (the RLS listener binds the tenant per statement). An outer transaction would turn the
+     * tolerated overlap failures of {@code booking.create} into a rollback-only seed.
+     */
     public void seed() {
         if (tenants.findById(DemoIds.LUMEN).isPresent() && !catalogEmpty()) {
             log.info("Demo data already present, skipping seed");

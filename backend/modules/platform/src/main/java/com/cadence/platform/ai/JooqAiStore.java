@@ -7,6 +7,7 @@ import com.cadence.platform.time.Utc;
 import org.jooq.Condition;
 import org.jooq.DSLContext;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
@@ -15,7 +16,9 @@ import java.util.UUID;
 import static com.cadence.platform.jooq.Tables.AI_DRAFT;
 import static com.cadence.platform.jooq.Tables.AI_PROMPT_LOG;
 
+/** Each method runs in its own transaction or joins the caller's, so the RLS tenant setting is bound. */
 @Repository
+@Transactional
 public class JooqAiStore implements AiStore {
 
     private final DSLContext dsl;
@@ -54,6 +57,7 @@ public class JooqAiStore implements AiStore {
     }
 
     @Override
+    @Transactional(readOnly = true)
     public DraftRecord requireDraft(UUID draftId) {
         return dsl.selectFrom(AI_DRAFT)
                 .where(TenantAwareDsl.tenantEquals(AI_DRAFT.TENANT_ID).and(AI_DRAFT.ID.eq(draftId)))
@@ -87,6 +91,7 @@ public class JooqAiStore implements AiStore {
     }
 
     @Override
+    @Transactional(readOnly = true)
     public List<DraftRecord> listDrafts(UUID conversationId, String status) {
         Condition condition = TenantAwareDsl.tenantEquals(AI_DRAFT.TENANT_ID);
         if (conversationId != null) {
@@ -110,6 +115,7 @@ public class JooqAiStore implements AiStore {
     }
 
     @Override
+    @Transactional(readOnly = true)
     public List<PromptRecord> listPrompts(UUID conversationId) {
         return dsl.selectFrom(AI_PROMPT_LOG)
                 .where(TenantAwareDsl.tenantEquals(AI_PROMPT_LOG.TENANT_ID)

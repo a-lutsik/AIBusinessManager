@@ -31,6 +31,9 @@ dependencies {
     testImplementation(platform(libs.spring.boot.dependencies))
     testImplementation(libs.spring.boot.starter.test)
     testImplementation(libs.spring.boot.starter.webmvc.test)
+    // Boot 4 splits MockMvc security auto-configuration (applies springSecurity() to @AutoConfigureMockMvc) into this starter.
+    testImplementation(libs.spring.boot.starter.security.test)
+    testImplementation(libs.spring.security.test)
     testImplementation(libs.archunit.junit5)
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     testImplementation(libs.spring.boot.testcontainers)
