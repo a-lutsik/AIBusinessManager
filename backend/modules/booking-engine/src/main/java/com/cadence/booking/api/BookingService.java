@@ -21,6 +21,18 @@ public interface BookingService {
 
     Optional<AppointmentView> find(UUID appointmentId);
 
+    /**
+     * Distinct clients with at least one visit (any status) with {@code specialistId}. A MASTER always gets their own
+     * clients, whatever id is passed.
+     */
+    List<UUID> clientIdsOf(UUID specialistId);
+
+    /**
+     * All visits of a client, oldest first, without a time window. A MASTER sees only their own visits with the
+     * client, so an empty list means the client is outside that master's scope.
+     */
+    List<AppointmentView> clientHistory(UUID clientId);
+
     AppointmentView transition(UUID appointmentId, AppointmentStatus target, String note);
 
     AppointmentView reschedule(UUID appointmentId, Instant newStart);

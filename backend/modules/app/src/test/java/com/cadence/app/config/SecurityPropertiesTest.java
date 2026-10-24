@@ -30,4 +30,28 @@ class SecurityPropertiesTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("header-auth-enabled");
     }
+
+    @Test
+    void prodWithHeaderAuthIsRefused() {
+        assertThatThrownBy(() -> new SecurityProperties(false, true).validate(true, false))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("prod profile");
+    }
+
+    @Test
+    void prodWithTheDevHeadersProfileIsRefusedEvenWhenTheFlagsLookFine() {
+        assertThatThrownBy(() -> new SecurityProperties(true, false).validate(true, true))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("prod profile");
+    }
+
+    @Test
+    void prodWithOauth2IsValid() {
+        assertThatCode(() -> new SecurityProperties(true, false).validate(true, false)).doesNotThrowAnyException();
+    }
+
+    @Test
+    void devHeadersWithoutProdIsValid() {
+        assertThatCode(() -> new SecurityProperties(false, true).validate(false, true)).doesNotThrowAnyException();
+    }
 }

@@ -186,6 +186,7 @@ public class AppApiController {
 
     @GetMapping("/specialists/{id}/matrix")
     public List<MatrixRowView> matrix(@PathVariable UUID id) {
+        assertOwnerOrSelf(id);
         return catalogService.listMatrixRows(id);
     }
 
@@ -206,6 +207,7 @@ public class AppApiController {
 
     @GetMapping("/specialists/{id}/schedule")
     public List<WeeklyInterval> schedule(@PathVariable UUID id) {
+        assertOwnerOrSelf(id);
         return catalogService.weeklySchedule(id);
     }
 
@@ -226,6 +228,7 @@ public class AppApiController {
 
     @GetMapping("/rules")
     public BookingRulesView rules() {
+        assertOwner();
         return catalogService.rules();
     }
 
@@ -273,35 +276,32 @@ public class AppApiController {
         return bookingService.reschedule(id, start);
     }
 
+    /** A MASTER gets only clients with at least one visit with them (any time, any status). */
     @GetMapping("/clients")
     public List<ClientView> clients(@RequestParam(required = false) String q) {
-        List<ClientView> all = crmService.search(q);
         ActorContext.Actor actor = ActorContext.current().orElse(null);
         if (actor != null && actor.isMaster()) {
-            Instant from = Instant.now().minusSeconds(365L * 86400);
-            List<UUID> mine = bookingService.calendar(from, Instant.now().plusSeconds(365L * 86400), actor.specialistId())
-                    .stream().map(AppointmentView::clientId).distinct().toList();
-            return all.stream().filter(c -> mine.contains(c.id())).toList();
+            return crmService.searchAmong(q, bookingService.clientIdsOf(actor.specialistId()));
         }
-        return all;
+        return crmService.search(q);
     }
 
+    /**
+     * Client card with the visit history. A MASTER may open only a client who has a visit with them, and the history
+     * then holds only those visits; any other client id is refused before the card is read.
+     */
     @GetMapping("/clients/{id}")
     public Map<String, Object> client(@PathVariable UUID id) {
+        List<AppointmentView> history = bookingService.clientHistory(id);
+        ActorContext.Actor actor = ActorContext.current().orElse(null);
+        if (actor != null && actor.isMaster() && history.isEmpty()) {
+            throw DomainException.forbidden("FORBIDDEN_RESOURCE", "Master can open only clients with a visit with them");
+        }
         ClientView client = crmService.findById(id).orElseThrow();
         TrustView trust = retentionService.assess(id);
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("client", client);
         body.put("trust", trust);
-        Instant from = Instant.parse("2020-01-01T00:00:00Z");
-        List<AppointmentView> history = bookingService.calendar(from, Instant.now().plusSeconds(365L * 86400), null)
-                .stream()
-                .filter(a -> a.clientId().equals(id))
-                .toList();
-        ActorContext.Actor actor = ActorContext.current().orElse(null);
-        if (actor != null && actor.isMaster()) {
-            history = history.stream().filter(a -> a.specialistId().equals(actor.specialistId())).toList();
-        }
         body.put("history", history);
         return body;
     }
@@ -402,6 +402,16 @@ public class AppApiController {
     public ChatResponse reject(@PathVariable UUID id) {
         assertOwner();
         return aiAssistantService.rejectDraft(id);
+    }
+
+    /** OWNER: any specialist of the tenant; MASTER: only their own specialist record. */
+    private static void assertOwnerOrSelf(UUID specialistId) {
+        ActorContext.Actor actor = ActorContext.current().orElse(null);
+        boolean allowed = actor != null
+                && (actor.isOwner() || (actor.isMaster() && specialistId.equals(actor.specialistId())));
+        if (!allowed) {
+            throw DomainException.forbidden("FORBIDDEN_RESOURCE", "Master can read only their own specialist data");
+        }
     }
 
     private void assertOwner() {

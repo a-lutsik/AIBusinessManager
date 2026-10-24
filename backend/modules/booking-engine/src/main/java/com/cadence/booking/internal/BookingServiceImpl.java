@@ -131,6 +131,9 @@ public class BookingServiceImpl implements BookingService {
     }
 
     private PublicBookingResult persist(CreateBookingCommand command, boolean issueToken) {
+        // Before any read or client upsert: a refused master booking has no side effects at all.
+        assertMasterOwns(command.specialistId());
+        assertMasterKeepsBookingRules(command);
         Offering offering = requireOffering(command.specialistId(), command.serviceId());
         TenantRecord tenant = tenants.requireById(TenantContext.require());
         BookingRulesView rules = catalogService.rules();
@@ -183,9 +186,9 @@ public class BookingServiceImpl implements BookingService {
         if (status == null) {
             boolean pending = retentionService.requiresConfirmation(clientId);
             status = pending ? AppointmentStatus.PENDING : AppointmentStatus.CONFIRMED;
+        } else if (status == AppointmentStatus.CONFIRMED && isMaster() && retentionService.requiresConfirmation(clientId)) {
+            throw DomainException.forbidden("FORBIDDEN_RESOURCE", "This client's visit must start as pending");
         }
-
-        assertMasterOwns(command.specialistId());
 
         UUID id = UUID.randomUUID();
         AppointmentView row = new AppointmentView(
@@ -264,6 +267,22 @@ public class BookingServiceImpl implements BookingService {
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public List<UUID> clientIdsOf(UUID specialistId) {
+        ActorContext.Actor actor = ActorContext.current().orElse(null);
+        UUID filter = actor != null && actor.isMaster() ? actor.specialistId() : specialistId;
+        return appointments.clientIdsOf(filter);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<AppointmentView> clientHistory(UUID clientId) {
+        ActorContext.Actor actor = ActorContext.current().orElse(null);
+        UUID specialistFilter = actor != null && actor.isMaster() ? actor.specialistId() : null;
+        return appointments.byClient(clientId, specialistFilter).stream().map(this::enrich).toList();
+    }
+
+    @Override
     @Transactional
     public AppointmentView transition(UUID appointmentId, AppointmentStatus target, String note) {
         // Row lock: concurrent changes of one visit are serialised, so the CRM aggregates below apply exactly once.
@@ -271,6 +290,11 @@ public class BookingServiceImpl implements BookingService {
                 .orElseThrow(() -> DomainException.notFound("APPOINTMENT_NOT_FOUND", "Visit not found"));
         assertCanWrite(current);
         AppointmentStatusMachine.assertTransition(current.status(), target);
+        if (isMaster() && current.status() == AppointmentStatus.PENDING && target == AppointmentStatus.CONFIRMED
+                && retentionService.requiresConfirmation(current.clientId())) {
+            // Same rule as on create: a master cannot skip the confirmation the retention policy demands of this client.
+            throw DomainException.forbidden("FORBIDDEN_RESOURCE", "This client's visit must be confirmed by the owner");
+        }
         boolean correction = isStatusCorrection(current.status(), target);
         if (correction) {
             assertOwnerMayCorrect();
@@ -577,9 +601,31 @@ public class BookingServiceImpl implements BookingService {
         assertCanRead(appointment);
     }
 
+    private static boolean isMaster() {
+        return ActorContext.current().map(ActorContext.Actor::isMaster).orElse(false);
+    }
+
+    /**
+     * A MASTER books under the tenant's rules and the status machine, like the public flow: no notice, horizon and
+     * schedule bypass, and a visit starts PENDING or CONFIRMED only (CONFIRMED is checked against the client's trust
+     * once the client is known). Both switches stay with OWNER and SYSTEM (seed, imports).
+     */
+    private static void assertMasterKeepsBookingRules(CreateBookingCommand command) {
+        if (!isMaster()) {
+            return;
+        }
+        if (command.skipNoticeAndHorizon()) {
+            throw DomainException.forbidden("FORBIDDEN_RESOURCE", "Master cannot bypass the booking rules");
+        }
+        AppointmentStatus status = command.statusOverride();
+        if (status != null && status != AppointmentStatus.PENDING && status != AppointmentStatus.CONFIRMED) {
+            throw DomainException.forbidden("FORBIDDEN_RESOURCE", "Master can create only pending or confirmed visits");
+        }
+    }
+
     private void assertMasterOwns(UUID specialistId) {
         ActorContext.Actor actor = ActorContext.current().orElse(null);
-        if (actor != null && actor.isMaster() && !specialistId.equals(actor.specialistId())) {
+        if (actor != null && actor.isMaster() && !actor.specialistId().equals(specialistId)) {
             throw DomainException.forbidden("FORBIDDEN_RESOURCE", "Master cannot book for another specialist");
         }
     }

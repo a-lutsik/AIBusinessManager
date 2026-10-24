@@ -1,0 +1,160 @@
+# Cadence production stack (single host, pilot). Standalone file: it is NOT an override of docker-compose.yml.
+#
+#   cp .env.prod.example .env.prod          # then fill in every value (see comments there)
+#   docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
+#
+# What runs:
+#   timescaledb  Application database (TimescaleDB). No host port: reachable only on the compose network.
+#   keycloak-db  Separate PostgreSQL for Keycloak (see the note on the Keycloak database below).
+#   keycloak     Identity provider, production mode (`start`), plain HTTP behind your TLS-terminating reverse proxy.
+#   app          Spring Boot backend, profile `prod`.
+# Host ports: only 127.0.0.1:8080 (app) and 127.0.0.1:8081 (Keycloak), for the reverse proxy on the same host.
+#
+# Every secret is required: `docker compose config` / `up` fails with the variable name when one is missing.
+# Do not put `$`, `'`, spaces or `#` in secret values: the application's Flyway migration rejects `'` and `$` in
+# APP_DB_PASSWORD, and Compose interpolates `$` in env files.
+
+name: cadence
+
+services:
+  timescaledb:
+    image: timescale/timescaledb:2.30.0-pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: cadence
+      # Schema owner: Flyway runs as this role and creates the runtime role cadence_app (migration V7).
+      # The image makes the bootstrap user a superuser, which V7 (CREATE ROLE) and V2 (CREATE EXTENSION) need.
+      POSTGRES_USER: cadence
+      POSTGRES_PASSWORD: ${FLYWAY_DB_PASSWORD:?FLYWAY_DB_PASSWORD is required (schema owner password, must differ from APP_DB_PASSWORD)}
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cadence -d cadence"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    security_opt:
+      - no-new-privileges:true
+
+  # Keycloak database: a separate small PostgreSQL service instead of an extra database inside TimescaleDB.
+  #  - an init script in TimescaleDB's docker-entrypoint-initdb.d runs only on the FIRST start of an empty volume, so a
+  #    changed password or a stack created before the script existed would silently not get its database/role;
+  #  - Keycloak never gets a connection (or a credential) to the application database and vice versa;
+  #  - the two databases can be backed up, restored and upgraded independently.
+  keycloak-db:
+    image: postgres:16.9-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?KEYCLOAK_DB_PASSWORD is required (password of the Keycloak database)}
+    volumes:
+      - keycloak_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keycloak -d keycloak"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.2.5
+    restart: unless-stopped
+    # Production mode. Keycloak runs its own build step on first start (health and DB vendor are build options).
+    command: ["start", "--import-realm"]
+    depends_on:
+      keycloak-db:
+        condition: service_healthy
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-db:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?KEYCLOAK_DB_PASSWORD is required (password of the Keycloak database)}
+      # Public URL of Keycloak, as users and the web console see it, e.g. https://auth.example.com (no trailing slash).
+      # Tokens carry this value + /realms/cadence as their issuer.
+      KC_HOSTNAME: ${KC_HOSTNAME:?KC_HOSTNAME is required (public https URL of Keycloak, e.g. https://auth.example.com)}
+      # TLS ends at the reverse proxy; Keycloak listens on plain HTTP and trusts X-Forwarded-* from it.
+      KC_HTTP_ENABLED: "true"
+      KC_HTTP_PORT: "8081"
+      KC_PROXY_HEADERS: xforwarded
+      # Health endpoints live on the management port 9000, which is not published.
+      KC_HEALTH_ENABLED: "true"
+      # Created only on the first start of an empty database; change the password in the console afterwards if needed.
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME:?KC_BOOTSTRAP_ADMIN_USERNAME is required (initial Keycloak admin)}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD:?KC_BOOTSTRAP_ADMIN_PASSWORD is required (initial Keycloak admin password)}
+      # Substituted into the realm import (redirect URIs, web origins, post-logout URIs of client cadence-app).
+      CADENCE_WEB_ORIGIN: ${CADENCE_WEB_ORIGIN:?CADENCE_WEB_ORIGIN is required (origin of the web console, e.g. https://app.example.com)}
+    ports:
+      - "127.0.0.1:8081:8081"
+    volumes:
+      - ./docker/keycloak/realm-cadence.prod.json:/opt/keycloak/data/import/realm-cadence.json:ro
+      - ./docker/keycloak/themes/cadence:/opt/keycloak/themes/cadence:ro
+    healthcheck:
+      # The image has no curl: speak HTTP over bash's /dev/tcp to the management port.
+      test:
+        - CMD-SHELL
+        - >-
+          exec 3<>/dev/tcp/127.0.0.1/9000 &&
+          printf 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 &&
+          grep -q '"status": "UP"' <&3
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+    security_opt:
+      - no-new-privileges:true
+
+  app:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      SPRING_DATASOURCE_URL: jdbc:postgresql://timescaledb:5432/cadence
+      # Runtime role (non-owner, subject to RLS); created by migration V7 with this password.
+      APP_DB_USER: cadence_app
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?APP_DB_PASSWORD is required (runtime role password, must differ from FLYWAY_DB_PASSWORD)}
+      # Schema owner, used by Flyway only.
+      FLYWAY_DB_USER: cadence
+      FLYWAY_DB_PASSWORD: ${FLYWAY_DB_PASSWORD:?FLYWAY_DB_PASSWORD is required (schema owner password, must differ from APP_DB_PASSWORD)}
+      # Issuer = the `iss` of the tokens = the PUBLIC Keycloak URL; keys are fetched over the internal network, so the
+      # container does not need to reach Keycloak through the reverse proxy.
+      APP_SECURITY_ISSUER_URI: ${KC_HOSTNAME:?KC_HOSTNAME is required (public https URL of Keycloak)}/realms/cadence
+      APP_SECURITY_JWK_SET_URI: http://keycloak:8081/realms/cadence/protocol/openid-connect/certs
+      APP_CORS_ALLOWED_ORIGINS: ${CADENCE_WEB_ORIGIN:?CADENCE_WEB_ORIGIN is required (origin of the web console, e.g. https://app.example.com)}
+      APP_RATE_LIMIT_TRUSTED_PROXIES: ${APP_RATE_LIMIT_TRUSTED_PROXIES:-}
+      APP_AI_PROVIDER: ${APP_AI_PROVIDER:-stub}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      JAVA_OPTS: ${JAVA_OPTS:--XX:MaxRAMPercentage=75 -XX:+ExitOnOutOfMemoryError}
+    ports:
+      - "127.0.0.1:8080:8080"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      # The image has no curl: plain HTTP over bash's /dev/tcp; healthy only on {"status":"UP"}.
+      # CMD-SHELL would use dash, which has no /dev/tcp, hence an explicit bash.
+      test:
+        - CMD
+        - bash
+        - -c
+        - >-
+          exec 3<>/dev/tcp/127.0.0.1/8080 &&
+          printf 'GET /actuator/health HTTP/1.0\r\nHost: localhost\r\n\r\n' >&3 &&
+          grep -q '"status":"UP"' <&3
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+
+volumes:
+  timescaledb_data:
+  keycloak_db_data:

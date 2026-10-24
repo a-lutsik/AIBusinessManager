@@ -1,0 +1,11 @@
+# Build context of backend/Dockerfile is ./backend
+**/build/
+.gradle/
+.claude/
+.idea/
+*.iml
+**/application-local.yml
+**/application-local.yaml
+**/.env
+**/.env.*
+*.log

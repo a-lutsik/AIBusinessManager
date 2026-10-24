@@ -10,6 +10,7 @@ import org.jooq.impl.DSL;
 import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -69,7 +70,15 @@ class ClientRepository {
     }
 
     List<ClientView> search(String query) {
+        return search(query, null);
+    }
+
+    /** {@code clientIds}, when not null, limits the search to those clients before the result limit applies. */
+    List<ClientView> search(String query, Collection<UUID> clientIds) {
         var condition = TenantAwareDsl.tenantEquals(CLIENT.TENANT_ID).and(CLIENT.ANONYMIZED_AT.isNull());
+        if (clientIds != null) {
+            condition = condition.and(CLIENT.ID.in(clientIds));
+        }
         if (query != null && !query.isBlank()) {
             String like = "%" + query.trim() + "%";
             condition = condition.and(CLIENT.DISPLAY_NAME.likeIgnoreCase(like)

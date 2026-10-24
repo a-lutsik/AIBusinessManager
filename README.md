@@ -179,6 +179,133 @@ npm run web
 
 i18n catalogs: `frontend/src/i18n/locales/{en,ru,ka,uk,cs}.json` (ru/en complete for UI; ka/uk/cs files exist so adding copy does not require code changes). Dark theme toggle lives in the console sidebar (`data-theme` on web).
 
+## Production deployment
+
+`docker-compose.prod.yml` is a standalone single-host stack for a pilot (it is not an override of the dev
+`docker-compose.yml`). Configuration comes from an env file; start from [`.env.prod.example`](.env.prod.example), which
+documents every variable.
+
+```bash
+cp .env.prod.example .env.prod          # gitignored; every secret is EMPTY in the example, fill each in (`openssl rand -hex 24`)
+docker compose --env-file .env.prod -f docker-compose.prod.yml config   # fails naming the first empty/missing variable
+docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
+```
+
+### What runs where
+
+| Service | Image | Host port | Notes |
+|---------|-------|-----------|-------|
+| `app` | built from `backend/Dockerfile` (JRE 25, non-root, read-only root fs) | `127.0.0.1:8080` | Spring profile `prod`; `/actuator/health` only |
+| `keycloak` | `quay.io/keycloak/keycloak:26.2.5`, `start --import-realm` | `127.0.0.1:8081` | production mode, plain HTTP behind the proxy (`KC_PROXY_HEADERS=xforwarded`, `KC_HOSTNAME` = public URL) |
+| `timescaledb` | `timescale/timescaledb:2.30.0-pg16` | none | application database, compose network only |
+| `keycloak-db` | `postgres:16.9-alpine` | none | Keycloak's own database, separate from the application database |
+
+Nothing is published on 5432/5433. The two published ports are bound to loopback only, for the reverse proxy.
+
+- **Reverse proxy (not part of this repo):** TLS terminates in front. Route `https://auth.example.com` (= `KC_HOSTNAME`) to
+  `127.0.0.1:8081` and the API host to `127.0.0.1:8080`, forwarding `X-Forwarded-For`, `-Proto` and `-Host`. Expose
+  **only** `/realms/cadence/**` and `/resources/**` of Keycloak on the public hostname. Do not expose `/admin/**`,
+  `/realms/master/**` (the admin realm: its token endpoint accepts the bootstrap admin's password) or anything else. Admin
+  work is done from a separate, IP-allow-listed/VPN-only proxy location or hostname (Keycloak builds its admin links from
+  `KC_HOSTNAME`, so a plain tunnel to `127.0.0.1:8081` redirects to the public name, which the rule below blocks).
+  nginx:
+
+  ```nginx
+  location ~ ^/(realms/cadence/|resources/) { proxy_pass http://127.0.0.1:8081; # + X-Forwarded-* headers }
+  location / { return 404; }          # blocks /admin, /realms/master, /metrics and the rest
+  ```
+
+  Caddy: `@kc path /realms/cadence/* /resources/*`, `reverse_proxy @kc 127.0.0.1:8081`, `respond 404` for everything else.
+- **Admin realm brute-force protection (one-time, recommended):** Keycloak creates realm `master` with brute-force
+  protection off and there is no startup flag or import file for it (the import only adds realm `cadence`). After the first
+  start run this once; it changes one realm setting and is stored in the Keycloak database (verified with `kcadm.sh` on
+  26.2.5):
+
+  ```bash
+  docker compose --env-file .env.prod -f docker-compose.prod.yml exec keycloak bash -c \
+    '/opt/keycloak/bin/kcadm.sh config credentials --server http://localhost:8081 --realm master \
+       --user "$KC_BOOTSTRAP_ADMIN_USERNAME" --password "$KC_BOOTSTRAP_ADMIN_PASSWORD" --config /tmp/kc.cfg &&
+     /opt/keycloak/bin/kcadm.sh update realms/master -s bruteForceProtected=true -s failureFactor=5 \
+       -s maxFailureWaitSeconds=900 -s minimumQuickLoginWaitSeconds=60 -s waitIncrementSeconds=60 --config /tmp/kc.cfg'
+  ```
+
+  Together with the proxy rule above this keeps the admin realm off the internet; the setting is a second layer.
+- **Web console:** serve it from `CADENCE_WEB_ORIGIN` (e.g. `https://app.example.com`) built with
+  `EXPO_PUBLIC_API_URL`, `EXPO_PUBLIC_OIDC_ISSUER=<KC_HOSTNAME>/realms/cadence`. That origin is the only CORS origin of the
+  API (`APP_CORS_ALLOWED_ORIGINS`) and the only web redirect/origin of the Keycloak client.
+
+### What the `prod` profile enforces
+
+`application-prod.yml`: demo seed off; `APP_SECURITY_ISSUER_URI`, `APP_SECURITY_JWK_SET_URI` and `SPRING_DATASOURCE_URL` have no
+defaults (an unresolved placeholder stops the startup); `APP_CORS_ALLOWED_ORIGINS` has no default either (compose derives it
+from the required `CADENCE_WEB_ORIGIN`); the `dev-headers` mode is switched off; only `/actuator/health` is exposed.
+`app.persistence.allow-default-db-password=false` activates `DbPasswordGuard`: the app refuses to start (before any
+migration) when `APP_DB_PASSWORD` or `FLYWAY_DB_PASSWORD` is blank or still the dev default (`cadence_app` / `cadence`), or
+when both are equal. Passwords must not contain `'` or `$`. A production process (`prod` profile) is never exempted by a
+dev profile.
+
+### Issuer and key set
+
+Access tokens carry the public issuer `<KC_HOSTNAME>/realms/cadence`, which the backend validates exactly
+(`APP_SECURITY_ISSUER_URI`). The signing keys are fetched from the internal address
+`http://keycloak:8081/realms/cadence/protocol/openid-connect/certs` (`APP_SECURITY_JWK_SET_URI`): with an explicit
+`jwk-set-uri` Spring does not run OIDC discovery against the issuer, so the app container never has to reach Keycloak
+through the public proxy (no hairpin DNS/TLS from inside the network).
+
+### Keycloak realm
+
+`docker/keycloak/realm-cadence.prod.json` is imported on the first start of an empty Keycloak database. Compared with the
+dev realm: no users, no `cadence-backend` client (it carried a committed secret and is unused), client `cadence-app` has
+direct access grants off, implicit flow off, PKCE `S256`, redirect `<CADENCE_WEB_ORIGIN>/auth` and `cadence://auth`, web
+origin and post-logout redirect only `CADENCE_WEB_ORIGIN` (the `${CADENCE_WEB_ORIGIN}` placeholder is substituted by
+Keycloak's import from the container environment). Verified on Keycloak 26.2.5: with the variable unset the placeholder is
+kept literally and the import then aborts on the redirect URI `${CADENCE_WEB_ORIGIN}/auth` ("A redirect URI is not a valid
+URI"); that is a side effect of URI validation, not a guarantee, so do not rely on it: compose requires the variable (`:?`)
+and refuses to start without it. The built-in client `admin-cli` is redeclared with direct access grants off (Keycloak
+otherwise creates it in every realm with the password grant enabled, which would let anyone test passwords against realm
+`cadence` outside the login UI); a password grant with `admin-cli` or `cadence-app` answers `unauthorized_client`;
+the realm also declares `tenant_id` and `specialist_id` as admin-only managed user attributes (without that, Keycloak 26
+silently drops unmanaged attributes set through the admin console); brute-force protection on, password policy 12 characters. The import
+runs only when the realm does not exist yet: later edits of the file do not change a running realm (use the admin
+console, or wipe `keycloak_db_data` on a fresh install).
+
+### First owner user
+
+The seed is off, so a tenant and its first user are created by hand (no onboarding API yet):
+
+1. Create the tenant as the schema owner:
+
+   ```bash
+   docker compose --env-file .env.prod -f docker-compose.prod.yml exec timescaledb psql -U cadence -d cadence -c \
+     "INSERT INTO tenant (id, slug, display_name, timezone, currency_code, country_code)
+      VALUES (gen_random_uuid(), 'my-studio', 'My Studio', 'Asia/Tbilisi', 'GEL', 'GE') RETURNING id;"
+   ```
+
+2. In the Keycloak admin console (realm `cadence`, reached through the proxy or an SSH tunnel to `127.0.0.1:8081`, signed
+   in with `KC_BOOTSTRAP_ADMIN_*`): Users, Add user. Set username, email, first and last name (required by the realm's user
+   profile; a user without them is asked to complete the profile at first sign-in), enable email verified, then
+   Credentials, set a password (12+ characters).
+3. `tenant_id` = the UUID from step 1 (the form field is in the user's details; it validates the UUID format). Without it
+   the API answers 403 `TENANT_CLAIM_MISSING`. For a master also `specialist_id`. Both are admin-only attributes of the
+   realm's user profile: users cannot view or change them in the account console.
+4. Role mapping tab: assign realm role `OWNER` (or `MASTER`).
+5. Replace the bootstrap admin with a named admin and a strong password; remove `KC_BOOTSTRAP_ADMIN_*` from `.env.prod`
+   afterwards if you like (it is read only on the first start).
+
+### Rate limits behind the proxy
+
+The client IP is the TCP peer unless the peer is listed in `APP_RATE_LIMIT_TRUSTED_PROXIES` (CIDRs, comma-separated). With
+the proxy on the Docker host the peer is the compose network gateway; find it with
+`docker network inspect cadence_default --format '{{(index .IPAM.Config 0).Gateway}}'` and set e.g.
+`APP_RATE_LIMIT_TRUSTED_PROXIES=172.18.0.1/32`. Leave it empty and every client shares the proxy's address (and its
+limit). Do not list ranges clients can reach directly. See [Public API rate limits](#public-api-rate-limits).
+
+### Out of scope
+
+Backups and restore (both volumes, `timescaledb_data` and `keycloak_db_data`, need a `pg_dump` or snapshot schedule and a
+restore drill), log shipping, monitoring and alerting, TLS certificates and the proxy configuration, SMTP for Keycloak
+(password reset e-mails), image vulnerability scanning, a non-superuser schema owner (TD-05), upgrades of pinned images.
+
 ## Phase 0 / 6 waitlist landing
 
 Open `waitlist/index.html` (or any static file server). Submissions stay in `localStorage`.

@@ -84,7 +84,6 @@ public class RetentionServiceImpl implements RetentionService {
     private TrustView computeInternal(UUID clientId) {
         ClientView client = crmService.findById(clientId)
                 .orElseThrow(() -> DomainException.notFound("CLIENT_NOT_FOUND", "Client not found"));
-        BookingRulesView rules = catalogService.rules();
         List<String> reasons = new ArrayList<>();
         String level;
         if (client.completedVisitCount() == 0) {
@@ -98,7 +97,7 @@ public class RetentionServiceImpl implements RetentionService {
                 reasons.add(recentNoShows + " no-shows recorded");
             } else if (lateCancels >= 2) {
                 level = "LOW";
-                reasons.add(lateCancels + " late cancellations (threshold " + rules.lateCancellationHours() + "h)");
+                reasons.add(lateCancels + " late cancellations");
             } else if (recentNoShows == 0 && lateCancels == 0 && client.completedVisitCount() >= 3) {
                 level = "HIGH";
                 reasons.add(client.completedVisitCount() + " completed visits, 0 no-shows");

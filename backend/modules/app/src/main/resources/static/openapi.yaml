@@ -2,7 +2,15 @@ openapi: 3.0.3
 info:
   title: Cadence API
   version: 0.2.0
-  description: Public booking vs authenticated console. Domain errors are application/problem+json with a machine `code`.
+  description: >
+    Public booking vs authenticated console. Domain errors are application/problem+json with a machine `code`.
+
+
+    MASTER response policy (all /api/app/** responses, reads and writes): for every caller except the OWNER, each
+    JSON property whose name contains price, amount, value, revenue, discount or minor (case-insensitive) is null at
+    any depth - e.g. priceSnapshot, discountAmount, amountReceived, priceMinor, defaultPriceMinor, priceMinorOverride,
+    completedValueMinor, package valueMinor. The key is kept and the value is null, never 0. A MASTER reads only
+    their own specialist, matrix, schedule, visits and clients; any other id is 403 FORBIDDEN_RESOURCE.
 paths:
   /api/public/health:
     get:
@@ -180,7 +188,46 @@ paths:
     get:
       summary: Owner/master dashboard
       responses:
-        "200": { description: Dashboard }
+        "200": { description: "Dashboard. MASTER: only own visits, money fields null, no metrics, tasks or signals" }
+  /api/app/masters/me/today:
+    get:
+      summary: Master's visits today with trust and packages (MASTER only)
+      responses:
+        "200": { description: "Own visits of the tenant day; visit money and package valueMinor are null" }
+        "403": { description: "FORBIDDEN_RESOURCE - caller is not a master" }
+  /api/app/services:
+    get:
+      summary: Service catalog
+      responses:
+        "200": { description: "Services. MASTER: priceMinor is null" }
+  /api/app/specialists/{id}/matrix:
+    get:
+      summary: Services matrix of a specialist
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: "Matrix rows. MASTER: defaultPriceMinor and priceMinorOverride are null" }
+        "403": { description: "FORBIDDEN_RESOURCE - a master asked for another specialist" }
+  /api/app/specialists/{id}/schedule:
+    get:
+      summary: Weekly schedule of a specialist
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: Weekly intervals }
+        "403": { description: "FORBIDDEN_RESOURCE - a master asked for another specialist" }
+  /api/app/rules:
+    get:
+      summary: Tenant booking rules (owner only)
+      responses:
+        "200": { description: Booking rules }
+        "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
   /api/app/calendar:
     get:
       summary: Calendar visits
@@ -195,9 +242,32 @@ paths:
           schema: { type: string, format: date-time }
         - in: query
           name: specialistId
+          description: Ignored for a MASTER, who always gets their own visits
           schema: { type: string, format: uuid }
       responses:
-        "200": { description: Visits }
+        "200": { description: "Visits. MASTER: own visits only, money fields null" }
+  /api/app/appointments/{id}:
+    get:
+      summary: Visit with the client's trust
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: "Visit. MASTER: money fields null" }
+        "403": { description: "FORBIDDEN_RESOURCE - a master asked for another specialist's visit" }
+  /api/app/appointments:
+    post:
+      summary: Create a console visit
+      description: >
+        OWNER may set statusOverride and skipNoticeAndHorizon (imports, back-dated entries). A MASTER books only for
+        themselves under the tenant's rules: skipNoticeAndHorizon must be false, statusOverride null or PENDING, or
+        CONFIRMED only when the client does not need confirmation; otherwise 403 FORBIDDEN_RESOURCE.
+      responses:
+        "200": { description: "Created visit. MASTER: money fields null" }
+        "403": { description: "FORBIDDEN_RESOURCE - master booking for another specialist or bypassing the rules" }
+        "409": { description: "SLOT_OCCUPIED, MIN_NOTICE, BEYOND_HORIZON" }
   /api/app/appointments/{id}/transition:
     post:
       summary: Status machine transition
@@ -214,11 +284,13 @@ paths:
             enum: [PENDING, CONFIRMED, COMPLETED, NO_SHOW, CANCELLED_BY_CLIENT, CANCELLED_BY_BUSINESS]
       responses:
         "200": { description: Updated visit }
-        "403": { description: Master cannot access another specialist }
+        "403": { description: "FORBIDDEN_RESOURCE - master on another specialist's visit, or confirming a visit of a client who needs the owner's confirmation" }
         "409": { description: Invalid transition }
       description: >
         NO_SHOW to COMPLETED and COMPLETED to NO_SHOW are owner corrections: they also adjust the client's counters
         and are audited as appointment.status_correction. A master gets 403 FORBIDDEN_RESOURCE.
+        A master also gets 403 FORBIDDEN_RESOURCE for PENDING to CONFIRMED when the client still needs confirmation
+        (the same rule as statusOverride=CONFIRMED on create); the owner confirms such visits.
   /api/app/appointments/{id}/access-link:
     post:
       summary: Issue a fresh client manage link (owner only)
@@ -248,7 +320,19 @@ paths:
     get:
       summary: Search clients
       responses:
-        "200": { description: Clients }
+        "200": { description: "Clients. MASTER: only clients with a visit with them; completedValueMinor null" }
+  /api/app/clients/{id}:
+    get:
+      summary: Client card with trust and full visit history
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: "Card. MASTER: history only with them, money fields null" }
+        "403": { description: "FORBIDDEN_RESOURCE - a master asked for a client without a visit with them" }
+        "404": { description: "NOT_FOUND - no such client in the current tenant" }
   /api/app/clients/{id}/merge:
     post:
       summary: Merge a duplicate client into this one (owner only)
@@ -276,9 +360,10 @@ paths:
         "409": { description: "CLIENT_ALREADY_MERGED - the absorbed client is already anonymized or merged" }
   /api/app/metrics:
     get:
-      summary: Six metrics
+      summary: Six metrics (owner only)
       responses:
         "200": { description: Metric snapshots }
+        "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
   /api/app/metrics/recalculate:
     post:
       summary: Recalculate metrics for last 30 days

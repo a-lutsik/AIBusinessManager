@@ -17,6 +17,7 @@ build/
 .env
 .env.*
 !.env.example
+!.env.prod.example
 backend/.env
 
 # Machine-local Spring profile (API keys). Never on the classpath.

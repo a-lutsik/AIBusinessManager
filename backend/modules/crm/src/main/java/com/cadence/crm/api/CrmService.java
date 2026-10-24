@@ -1,6 +1,7 @@
 package com.cadence.crm.api;
 
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -17,6 +18,9 @@ public interface CrmService {
     Optional<ClientView> findByPhone(String e164Phone);
 
     List<ClientView> search(String query);
+
+    /** {@link #search(String)} limited to the given clients (a master's own clients); empty ids give an empty list. */
+    List<ClientView> searchAmong(String query, Collection<UUID> clientIds);
 
     ClientView updateNotes(UUID clientId, String notes, String tags);
 

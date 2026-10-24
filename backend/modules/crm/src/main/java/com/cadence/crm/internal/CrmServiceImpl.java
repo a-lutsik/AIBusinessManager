@@ -11,6 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Instant;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -126,6 +127,15 @@ public class CrmServiceImpl implements CrmService {
     @Transactional(readOnly = true)
     public List<ClientView> search(String query) {
         return repository.search(query);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<ClientView> searchAmong(String query, Collection<UUID> clientIds) {
+        if (clientIds.isEmpty()) {
+            return List.of();
+        }
+        return repository.search(query, clientIds);
     }
 
     @Override

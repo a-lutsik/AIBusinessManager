@@ -1,0 +1,47 @@
+# Production profile (SPRING_PROFILES_ACTIVE=prod). Layered over application.yml.
+# Everything that has an unsafe local-development default there is replaced here by a value that MUST come from the
+# environment: a missing variable leaves an unresolved placeholder and the application refuses to start.
+spring:
+  datasource:
+    # No localhost fallback: a missing URL must not silently point the app at a developer database.
+    url: ${SPRING_DATASOURCE_URL}
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # Public issuer: must equal the `iss` claim of the tokens (Keycloak KC_HOSTNAME + /realms/cadence).
+          issuer-uri: ${APP_SECURITY_ISSUER_URI}
+          # Where the signing keys are fetched from. With jwk-set-uri set, Spring does NOT do OIDC discovery on the
+          # issuer; it only validates `iss` against issuer-uri. This lets the container reach Keycloak over the
+          # internal network (http://keycloak:8081/...) while tokens carry the public https issuer.
+          jwk-set-uri: ${APP_SECURITY_JWK_SET_URI}
+
+app:
+  security:
+    # Prod is an OAuth2 resource server only; the X-Tenant-Id header mode (profile dev-headers) is never available.
+    oauth2-enabled: true
+    header-auth-enabled: false
+  seed:
+    # No demo tenant/data in production.
+    enabled: false
+  persistence:
+    # Refuse to start while the runtime (APP_DB_PASSWORD) or the Flyway owner (FLYWAY_DB_PASSWORD) password is
+    # blank/default, or both are equal (see DbPasswordGuard).
+    allow-default-db-password: false
+  cors:
+    # Comma-separated exact origins of the web console, e.g. https://app.example.com. No default: fail closed.
+    allowed-origins: ${APP_CORS_ALLOWED_ORIGINS}
+  rate-limit:
+    # CIDRs of the reverse proxy whose X-Forwarded-For is trusted. Empty: the header is ignored and all clients behind
+    # the proxy share its IP (see README, "Production deployment").
+    trusted-proxies: ${APP_RATE_LIMIT_TRUSTED_PROXIES:}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # Health only (no info, no metrics/env/beans).
+        include: health
+  endpoint:
+    health:
+      show-details: never

@@ -173,6 +173,25 @@ class AppointmentRepository {
                 .fetch(this::toView);
     }
 
+    List<UUID> clientIdsOf(UUID specialistId) {
+        return dsl.selectDistinct(APPOINTMENT.CLIENT_ID)
+                .from(APPOINTMENT)
+                .where(TenantAwareDsl.tenantEquals(APPOINTMENT.TENANT_ID).and(APPOINTMENT.SPECIALIST_ID.eq(specialistId)))
+                .fetch(APPOINTMENT.CLIENT_ID);
+    }
+
+    /** Visits of one client, oldest first; {@code specialistId} narrows them to one specialist when not null. */
+    List<AppointmentView> byClient(UUID clientId, UUID specialistId) {
+        var condition = TenantAwareDsl.tenantEquals(APPOINTMENT.TENANT_ID).and(APPOINTMENT.CLIENT_ID.eq(clientId));
+        if (specialistId != null) {
+            condition = condition.and(APPOINTMENT.SPECIALIST_ID.eq(specialistId));
+        }
+        return dsl.selectFrom(APPOINTMENT)
+                .where(condition)
+                .orderBy(APPOINTMENT.SERVICE_START.asc())
+                .fetch(this::toView);
+    }
+
     List<SlotCalculator.OccupiedInterval> occupying(UUID specialistId, Instant from, Instant to, UUID excludeId) {
         var statuses = AppointmentStatus.OCCUPYING_STATUSES.stream().map(Enum::name).toList();
         var condition = TenantAwareDsl.tenantEquals(APPOINTMENT.TENANT_ID)
