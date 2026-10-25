@@ -8,6 +8,7 @@
 #   keycloak-db  Separate PostgreSQL for Keycloak (see the note on the Keycloak database below).
 #   keycloak     Identity provider, production mode (`start`), plain HTTP behind your TLS-terminating reverse proxy.
 #   app          Spring Boot backend, profile `prod`.
+#   backup       Scheduled pg_dump of both databases into ${BACKUP_DIR:-./backups} (see README, "Backups and restore").
 # Host ports: only 127.0.0.1:8080 (app) and 127.0.0.1:8081 (Keycloak), for the reverse proxy on the same host.
 #
 # Every secret is required: `docker compose config` / `up` fails with the variable name when one is missing.
@@ -154,6 +155,51 @@ services:
       timeout: 5s
       retries: 5
       start_period: 90s
+
+  # Scheduled logical backups of BOTH databases (application DB + Keycloak DB), see docker/backup/backup.sh.
+  # The image is the application database's own image, so pg_dump/pg_restore match the server version; it is only used
+  # for its client tools and no database server runs in this container. Credentials come from the environment (no
+  # secret in an image); the schema owner is used because the roles dump needs a superuser and the owner is one.
+  # Backups on the same host do not survive losing the host: copying them elsewhere is the operator's job (README).
+  # One-off backup now:   docker compose --env-file .env.prod -f docker-compose.prod.yml run --rm backup once
+  backup:
+    image: timescale/timescaledb:2.30.0-pg16
+    restart: unless-stopped
+    # Default root in the container, files 0600 in a 0700 run directory. To own the files as your host user, create
+    # the directory yourself and set BACKUP_UID/BACKUP_GID (e.g. `id -u`, `id -g`) in .env.prod.
+    user: "${BACKUP_UID:-0}:${BACKUP_GID:-0}"
+    entrypoint: ["/bin/sh", "/opt/backup/backup.sh"]
+    command: ["loop"]
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      keycloak-db:
+        condition: service_healthy
+    environment:
+      BACKUP_INTERVAL: ${BACKUP_INTERVAL:-6h}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      BACKUP_KEEP_MIN: ${BACKUP_KEEP_MIN:-3}
+      # Minimum free space in BACKUP_DIR before a dump starts; below it old backups are pruned first (README).
+      BACKUP_MIN_FREE_MB: ${BACKUP_MIN_FREE_MB:-1024}
+      APPDB_OWNER_PASSWORD: ${FLYWAY_DB_PASSWORD:?FLYWAY_DB_PASSWORD is required (schema owner password, must differ from APP_DB_PASSWORD)}
+      KCDB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?KEYCLOAK_DB_PASSWORD is required (password of the Keycloak database)}
+    volumes:
+      - ${BACKUP_DIR:-./backups}:/backups
+      - ./docker/backup:/opt/backup:ro
+    healthcheck:
+      # Unhealthy when the last backup attempt failed or the newest complete backup is older than two intervals.
+      test: ["CMD", "/bin/sh", "/opt/backup/healthcheck.sh"]
+      interval: 60s
+      timeout: 10s
+      retries: 1
+      start_period: 10m
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
 
 volumes:
   timescaledb_data:

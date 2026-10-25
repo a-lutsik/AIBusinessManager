@@ -31,7 +31,7 @@ class CrmServiceAbsorbTest {
     @BeforeEach
     void setUp() {
         repository = mock(ClientRepository.class);
-        service = new CrmServiceImpl(repository, mock(PlatformTransactionManager.class));
+        service = new CrmServiceImpl(repository, mock(PlatformTransactionManager.class), mock(com.cadence.platform.audit.AuditLogger.class));
     }
 
     private static ClientView client(

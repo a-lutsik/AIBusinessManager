@@ -148,11 +148,13 @@ public class AppApiController {
         List<AppointmentView> appointments = bookingService.calendar(from, to, specialistId);
         List<MasterTodayView.Item> items = new ArrayList<>();
         for (AppointmentView appointment : appointments) {
-            TrustView trust = retentionService.assess(appointment.clientId());
+            // Decision A and TD-19: a visit hidden from the master or cancelled carries neither the trust nor the
+            // packages of its client. Decision C: a visible client's packages stay (name and sessions; money is nulled).
+            boolean hidden = appointment.clientWithheldFromMaster();
             items.add(new MasterTodayView.Item(
                     appointment,
-                    trust,
-                    retentionService.packagesForClient(appointment.clientId())
+                    hidden ? null : retentionService.assess(appointment.clientId()),
+                    hidden ? List.of() : retentionService.packagesForClient(appointment.clientId())
             ));
         }
         return new MasterTodayView(Instant.now(), day, specialistId, items);
@@ -247,10 +249,12 @@ public class AppApiController {
         return bookingService.calendar(from, to, specialistId);
     }
 
+    /** Visit with its client's trust; a MASTER gets no trust for a visit hidden from them or cancelled. */
     @GetMapping("/appointments/{id}")
     public AppointmentDetailView appointment(@PathVariable UUID id) {
         AppointmentView view = bookingService.find(id).orElseThrow();
-        TrustView trust = retentionService.assess(view.clientId());
+        boolean master = ActorContext.current().map(ActorContext.Actor::isMaster).orElse(false);
+        TrustView trust = master && view.clientWithheldFromMaster() ? null : retentionService.assess(view.clientId());
         return new AppointmentDetailView(view, trust);
     }
 
@@ -310,6 +314,13 @@ public class AppApiController {
     @PostMapping("/clients/{id}/merge")
     public ClientView mergeClients(@PathVariable UUID id, @RequestParam UUID absorbedId) {
         return clientMerge.merge(id, absorbedId);
+    }
+
+    /** Owner-only: withdraws a client's marketing consent on their request (PRODUCT_PLAN §10); audited. */
+    @PostMapping("/clients/{id}/consent/withdraw")
+    public ClientView withdrawConsent(@PathVariable UUID id) {
+        assertOwner();
+        return crmService.withdrawMarketingConsent(id, "owner");
     }
 
     @PostMapping("/clients/{id}/trust")

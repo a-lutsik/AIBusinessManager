@@ -82,6 +82,18 @@ public class OwnerTaskServiceImpl implements OwnerTaskService {
 
     @Override
     @Transactional
+    public int completeForAppointment(UUID appointmentId, String kind) {
+        return dsl.update(OWNER_TASK)
+                .set(OWNER_TASK.COMPLETED_AT, Utc.toLocal(Instant.now()))
+                .where(TenantAwareDsl.tenantEquals(OWNER_TASK.TENANT_ID)
+                        .and(OWNER_TASK.APPOINTMENT_ID.eq(appointmentId))
+                        .and(OWNER_TASK.KIND.eq(kind))
+                        .and(OWNER_TASK.COMPLETED_AT.isNull()))
+                .execute();
+    }
+
+    @Override
+    @Transactional
     public int reassignClient(UUID from, UUID to) {
         return dsl.update(OWNER_TASK)
                 .set(OWNER_TASK.CLIENT_ID, to)

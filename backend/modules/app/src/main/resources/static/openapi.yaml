@@ -11,6 +11,29 @@ info:
     any depth - e.g. priceSnapshot, discountAmount, amountReceived, priceMinor, defaultPriceMinor, priceMinorOverride,
     completedValueMinor, package valueMinor. The key is kept and the value is null, never 0. A MASTER reads only
     their own specialist, matrix, schedule, visits and clients; any other id is 403 FORBIDDEN_RESOURCE.
+
+
+    Client fields for a non-owner (same responses, by type, at any depth): a client object keeps only id and
+    displayName; normalizedPhone, notes, tags, preferredLocale, telegramChatId, marketingConsent, firstVisitAt,
+    lastVisitAt, completedVisitCount, noShowCount and lateCancelCount are null. A visit keeps clientDisplayName and
+    trustLevel, while clientPhone and enteredName are null. A display name that shows a phone is null too (the
+    client's phone in any formatting, a run of 7+ digits ending the client's phone, or any run of 9+ digits; spaces,
+    dashes, dots and parentheses between digits are ignored). Trust keeps clientId, level, overrideLevel and the
+    number-free reasonCodes (NEW_CLIENT, NO_SHOWS, LATE_CANCELLATIONS, REGULAR_CLIENT, RETURNING_CLIENT,
+    OWNER_OVERRIDE); reasons (texts with salon-wide counts) and overrideReason (owner text) are null. A MASTER's
+    clients are those with a non-cancelled visit with them that is not hidden from them; a cancelled visit gives no
+    access to the client.
+
+
+    Hidden phone bookings (clientHiddenFromMaster on a visit): a MASTER's booking by phone whose client is not
+    already in the master's scope is created PENDING with clientHiddenFromMaster=true and an owner task
+    MASTER_PHONE_BOOKING, the same for a matching existing client and for a new one. Until the OWNER confirms it
+    (PENDING to CONFIRMED) every master read shows on that visit only the name the master typed: clientId, stored
+    name, phone and trust are null, the visit detail and today view carry no trust and no packages, and the client
+    stays out of the master's client list and card (403). A cancelled hidden visit stays hidden. The owner's
+    confirmation reveals the master's other hidden visits with that client too and closes the task; a cancellation
+    closes it as well. A cancelled visit (hidden or not) shows a master the same way: the visit stays on their
+    calendar with the typed name only, no clientId, stored name, phone, trust or packages. Owner views are unchanged.
 paths:
   /api/public/health:
     get:
@@ -142,8 +165,14 @@ paths:
           name: token
           required: true
           schema: { type: string }
+      description: >
+        Answers with the visit facts (id, specialistId, serviceId, status, serviceStart, serviceEnd,
+        serviceNameSnapshot, priceSnapshot, currencyCode) and enteredName, the name typed at booking (for rows from
+        before stage 03 that held "typed / stored", everything from the first " / " is dropped). Never the stored
+        client name, phone or trust. The status still differs for a returning client when new clients need
+        confirmation (accepted, rate-limited). The cancel and reschedule routes answer the same way.
       responses:
-        "200": { description: Visit }
+        "200": { description: "Visit facts and the typed name only" }
         "404": { description: Invalid token }
   /api/public/bookings/{id}/cancel:
     post:
@@ -158,7 +187,27 @@ paths:
           required: true
           schema: { type: string }
       responses:
-        "200": { description: Cancelled }
+        "200": { description: "Cancelled visit: visit facts and the typed name only, as GET /api/public/bookings/{id}" }
+  /api/public/bookings/{id}/consent/withdraw:
+    post:
+      summary: Withdraw the client's marketing consent by the manage link
+      description: >
+        Sets the marketing consent of the client behind this visit to false (consent time and version
+        "withdrawn:public-link"), audited as client.consent.withdraw. No marketing messages are sent yet, so it records
+        the choice that later sends must honour. Idempotent.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+        - in: query
+          name: token
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: "{ id, marketingConsent: false }" }
+        "403": { description: "TOKEN_INVALID - the token belongs to another visit; nothing is written" }
+        "404": { description: "TOKEN_INVALID - unknown, revoked or expired token" }
   /api/public/bookings/{id}/calendar.ics:
     get:
       summary: Download .ics
@@ -193,7 +242,7 @@ paths:
     get:
       summary: Master's visits today with trust and packages (MASTER only)
       responses:
-        "200": { description: "Own visits of the tenant day; visit money and package valueMinor are null" }
+        "200": { description: "Own visits of the tenant day; visit money and package valueMinor are null (package name and sessions stay). A visit hidden from the master has trust null and no packages" }
         "403": { description: "FORBIDDEN_RESOURCE - caller is not a master" }
   /api/app/services:
     get:
@@ -255,7 +304,7 @@ paths:
           required: true
           schema: { type: string, format: uuid }
       responses:
-        "200": { description: "Visit. MASTER: money fields null" }
+        "200": { description: "Visit. MASTER: money fields null; trust null on a visit hidden from the master, whose client fields show only the typed name" }
         "403": { description: "FORBIDDEN_RESOURCE - a master asked for another specialist's visit" }
   /api/app/appointments:
     post:
@@ -263,11 +312,20 @@ paths:
       description: >
         OWNER may set statusOverride and skipNoticeAndHorizon (imports, back-dated entries). A MASTER books only for
         themselves under the tenant's rules: skipNoticeAndHorizon must be false, statusOverride null or PENDING, or
-        CONFIRMED only when the client does not need confirmation; otherwise 403 FORBIDDEN_RESOURCE.
+        CONFIRMED only when the client does not need confirmation; otherwise 403 FORBIDDEN_RESOURCE. A MASTER passing a
+        clientId must have a non-cancelled, not hidden visit with that client, otherwise 403 FORBIDDEN_RESOURCE. When a
+        MASTER books by phone, the response carries the displayName the master typed (or null) and null clientPhone,
+        enteredName and trustLevel, so a matching existing client is not revealed; when that client is not already in
+        the master's scope the visit is PENDING whatever statusOverride says, clientHiddenFromMaster is true and the
+        owner gets a MASTER_PHONE_BOOKING task (see the hidden phone bookings note above). A phone match never replaces
+        the stored name, never revokes marketing consent (true adds it with the new consent version) and sets the
+        locale only when the client has none. The visit stores the typed name; the owner reads "typed / stored" in
+        enteredName when they differ. No role creates a visit already COMPLETED or NO_SHOW whose serviceStart is in the
+        future (409 VISIT_NOT_STARTED); back-dated settled entries stay possible.
       responses:
-        "200": { description: "Created visit. MASTER: money fields null" }
-        "403": { description: "FORBIDDEN_RESOURCE - master booking for another specialist or bypassing the rules" }
-        "409": { description: "SLOT_OCCUPIED, MIN_NOTICE, BEYOND_HORIZON" }
+        "200": { description: "Created visit. MASTER: money fields null, client fields as typed" }
+        "403": { description: "FORBIDDEN_RESOURCE - master booking for another specialist, bypassing the rules, or a clientId outside the master's clients" }
+        "409": { description: "SLOT_OCCUPIED, MIN_NOTICE, BEYOND_HORIZON, VISIT_NOT_STARTED" }
   /api/app/appointments/{id}/transition:
     post:
       summary: Status machine transition
@@ -285,12 +343,17 @@ paths:
       responses:
         "200": { description: Updated visit }
         "403": { description: "FORBIDDEN_RESOURCE - master on another specialist's visit, or confirming a visit of a client who needs the owner's confirmation" }
-        "409": { description: Invalid transition }
+        "409": { description: "INVALID_TRANSITION, or VISIT_NOT_STARTED - COMPLETED or NO_SHOW before serviceStart" }
       description: >
+        COMPLETED and NO_SHOW are reachable only once the visit has started (serviceStart not in the future), for every
+        role including the owner; earlier attempts get 409 VISIT_NOT_STARTED.
         NO_SHOW to COMPLETED and COMPLETED to NO_SHOW are owner corrections: they also adjust the client's counters
         and are audited as appointment.status_correction. A master gets 403 FORBIDDEN_RESOURCE.
         A master also gets 403 FORBIDDEN_RESOURCE for PENDING to CONFIRMED when the client still needs confirmation
-        (the same rule as statusOverride=CONFIRMED on create); the owner confirms such visits.
+        (the same rule as statusOverride=CONFIRMED on create) or the visit is hidden from the master; the owner confirms
+        such visits, and the owner's confirmation clears clientHiddenFromMaster (a cancellation keeps it).
+        A correction of a row settled before its start (data from before this rule) is refused with 409
+        VISIT_NOT_STARTED and a message saying so; it can be corrected once the visit has started.
   /api/app/appointments/{id}/access-link:
     post:
       summary: Issue a fresh client manage link (owner only)
@@ -320,7 +383,7 @@ paths:
     get:
       summary: Search clients
       responses:
-        "200": { description: "Clients. MASTER: only clients with a visit with them; completedValueMinor null" }
+        "200": { description: "Clients. MASTER: only clients with a non-cancelled, not hidden visit with them, id and displayName only; q matches the name only, never the phone; a q with 3 or more digits finds nothing and clients whose name shows a phone are left out" }
   /api/app/clients/{id}:
     get:
       summary: Client card with trust and full visit history
@@ -330,9 +393,24 @@ paths:
           required: true
           schema: { type: string, format: uuid }
       responses:
-        "200": { description: "Card. MASTER: history only with them, money fields null" }
-        "403": { description: "FORBIDDEN_RESOURCE - a master asked for a client without a visit with them" }
+        "200": { description: "Card. MASTER: client id and displayName, trust (level, overrideLevel, reasonCodes), history only of their non-cancelled, not hidden visits; other client fields and money null" }
+        "403": { description: "FORBIDDEN_RESOURCE - a master asked for a client without a non-cancelled, not hidden visit with them" }
         "404": { description: "NOT_FOUND - no such client in the current tenant" }
+  /api/app/clients/{id}/consent/withdraw:
+    post:
+      summary: Withdraw a client's marketing consent on their request (owner only)
+      description: >
+        Sets marketing consent to false (consent version "withdrawn:owner"), audited as client.consent.withdraw.
+        Bookings never revoke consent (a phone match may only add it), so this and the manage link are the ways back.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: Updated client }
+        "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
+        "404": { description: "CLIENT_NOT_FOUND" }
   /api/app/clients/{id}/merge:
     post:
       summary: Merge a duplicate client into this one (owner only)

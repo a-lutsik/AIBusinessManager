@@ -10,5 +10,6 @@ dependencies {
     implementation(project(":modules:catalog"))
     implementation(project(":modules:notification"))
     testImplementation(platform(libs.spring.boot.dependencies))
-    testImplementation("org.junit.jupiter:junit-jupiter")
+    testImplementation(libs.spring.boot.starter.test)
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }

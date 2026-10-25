@@ -11,6 +11,11 @@ public interface CrmService {
 
     String moduleName();
 
+    /**
+     * The client with this phone, created with the given name, locale and consent when there is none. For an existing
+     * client the booking only adds: marketing consent {@code true} is recorded with {@code consentVersion}, {@code false}
+     * never revokes it; the locale is set only when the client has none; the stored name is kept.
+     */
     ClientView findOrCreate(String e164Phone, String displayName, String locale, boolean marketingConsent, String consentVersion);
 
     Optional<ClientView> findById(UUID clientId);
@@ -19,10 +24,25 @@ public interface CrmService {
 
     List<ClientView> search(String query);
 
-    /** {@link #search(String)} limited to the given clients (a master's own clients); empty ids give an empty list. */
+    /**
+     * Search limited to the given clients (a master's own clients) that matches the display name only, never the
+     * phone (a master does not see phones, TD-18); empty ids give an empty list. It is no phone oracle either: a query
+     * with three or more digits finds nothing, and clients whose display name shows a phone (a client created without
+     * a name is stored with the phone as its name) are left out.
+     */
     List<ClientView> searchAmong(String query, Collection<UUID> clientIds);
 
     ClientView updateNotes(UUID clientId, String notes, String tags);
+
+    /**
+     * Withdraws marketing consent (PRODUCT_PLAN §10: by the booking link, or on request through the owner): sets it
+     * {@code false} with the time and {@code consentVersion = "withdrawn:" + source}, and audits
+     * {@code client.consent.withdraw} with the source. Idempotent. No marketing messages are sent yet, so for now it
+     * only records the client's choice that later sends must honour.
+     *
+     * @throws com.cadence.platform.error.DomainException {@code CLIENT_NOT_FOUND} (404)
+     */
+    ClientView withdrawMarketingConsent(UUID clientId, String source);
 
     void recordCompletedVisit(UUID clientId, Instant when, int valueMinor);
 

@@ -1,0 +1,176 @@
+# Cadence CI: backend (compile, ArchUnit, unit and Testcontainers ITs), frontend (typecheck, web export), production
+# compose validation, and a no-push build of the backend Docker image.
+#
+# Actions are pinned to the major tag of the official/first-party release (checkout, setup-java, setup-node,
+# upload-artifact @v4; gradle/actions/setup-gradle @v4; docker/setup-buildx-action @v3; docker/build-push-action @v6).
+# Dependabot (.github/dependabot.yml) keeps them current. No job needs more than read access to the repository.
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+# A newer push to the same ref supersedes the running one; runs on main are never cancelled so every main commit
+# keeps a complete result.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend (build, ArchUnit, unit + integration tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      # Gradle 8.14 cannot run on JDK 25, while the project toolchain is Java 25 (backend/build.gradle.kts).
+      # Both are installed; the LAST listed version becomes JAVA_HOME / PATH java (21, runs Gradle itself), and
+      # setup-java exports JAVA_HOME_25_X64 for the other one, which is handed to Gradle below.
+      - name: Set up JDK 21 (runs Gradle) and JDK 25 (toolchain)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: |
+            25
+            21
+
+      - name: Set up Gradle (wrapper distribution, dependency and build cache)
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Show JDKs
+        run: |
+          echo "JAVA_HOME=$JAVA_HOME"
+          echo "JAVA_HOME_25_X64=$JAVA_HOME_25_X64"
+          java -version
+          "$JAVA_HOME_25_X64/bin/java" -version
+          test -x "$JAVA_HOME_25_X64/bin/java"
+
+      # jOOQ code generation runs inside compileJava; `build` also runs ArchUnit, unit tests and the ITs that start
+      # TimescaleDB through Testcontainers (Docker is preinstalled on ubuntu-latest) and assembles the boot jar.
+      # toolchain auto-download is disabled in gradle.properties on purpose, so the Java 25 location is passed in.
+      # --no-build-cache: gradle.properties enables the build cache, but a cache hit would replay a previous test run
+      # without starting the containers (the image tag is not a task input), so CI always executes the tests.
+      # CI=true (GitHub sets it anyway, stated here so nobody removes the dependency by accident): AbstractTimescaleIT
+      # then FAILS instead of skipping every Testcontainers IT when the Docker daemon is not reachable.
+      - name: Gradle build
+        env:
+          CI: "true"
+        run: >
+          ./gradlew build --no-build-cache --console=plain --stacktrace
+          -Porg.gradle.java.installations.paths="$JAVA_HOME_25_X64"
+
+      # Second line of defence behind AbstractTimescaleIT: the job fails when any test was skipped, when fewer than
+      # 400 test cases ran (430 at the time of writing; lower the number only when tests were removed on purpose), or
+      # when not a single integration test (class name ending in IT) executed. Gradle alone would stay green.
+      - name: Test summary and gate
+        if: always()
+        run: >
+          python3 "$GITHUB_WORKSPACE/.github/scripts/junit_summary.py" "$GITHUB_WORKSPACE/backend"
+          --fail-on-skipped --min-tests 400 --require-class 'IT$'
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-reports
+          path: |
+            backend/**/build/reports/tests/
+            backend/**/build/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  frontend:
+    name: Frontend (typecheck, web export)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+
+      - run: npm run typecheck
+
+      - name: Web export
+        run: npx expo export --platform web
+        env:
+          CI: "1"
+          EXPO_NO_TELEMETRY: "1"
+
+  compose:
+    name: Production compose validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      # The public example file has every secret deliberately empty, so compose must refuse it and name a variable.
+      - name: Compose rejects the example env file (empty secrets)
+        run: |
+          set -u
+          if docker compose --env-file .env.prod.example -f docker-compose.prod.yml config >"$RUNNER_TEMP/example.out" 2>&1; then
+            echo "::error::docker-compose.prod.yml accepted .env.prod.example although its secrets are empty"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/example.out"
+          grep -q 'is required' "$RUNNER_TEMP/example.out" \
+            || { echo "::error::compose failed for a reason other than a missing required variable"; exit 1; }
+          echo "OK: rejected with a missing-variable error"
+
+      # A throwaway env file: every empty `KEY=` of the example gets a random hex value (nothing here is a real secret).
+      - name: Compose accepts a fully populated env file
+        run: |
+          set -eu
+          umask 077
+          ENV_FILE="$RUNNER_TEMP/prod.env"
+          : > "$ENV_FILE"
+          while IFS= read -r line; do
+            if [[ "$line" =~ ^[A-Z][A-Z0-9_]*=$ ]]; then
+              echo "${line}$(openssl rand -hex 24)" >> "$ENV_FILE"
+            else
+              echo "$line" >> "$ENV_FILE"
+            fi
+          done < .env.prod.example
+          if grep -Eq '^[A-Z][A-Z0-9_]*=$' "$ENV_FILE"; then
+            echo "::error::generated env file still has empty variables"; exit 1
+          fi
+          docker compose --env-file "$ENV_FILE" -f docker-compose.prod.yml config --quiet
+          echo "OK: compose config is valid with all required variables set"
+
+  docker:
+    name: Backend image build (no push)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Not pushed and not loaded: this only proves backend/Dockerfile still builds. The Dockerfile skips tests
+      # (they run in the backend job). Layer cache goes to the GitHub Actions cache; the BuildKit `--mount=type=cache`
+      # Gradle cache is not exported, so dependency downloads repeat on a cold build.
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          file: backend/Dockerfile
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

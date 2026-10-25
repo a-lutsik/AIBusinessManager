@@ -153,9 +153,44 @@ export type AppointmentView = {
   enteredName?: string | null;
   note?: string | null;
   source?: string;
-  clientDisplayName?: string;
-  clientPhone?: string;
+  /** Null for a master when the stored name is the client's phone. */
+  clientDisplayName?: string | null;
+  /** Null for a master: masters never receive client phones. */
+  clientPhone?: string | null;
   trustLevel?: string | null;
+  /**
+   * A master booked this visit by phone onto a client outside their scope: until the owner confirms it, the master
+   * sees only the name they typed and no trust (decision A).
+   */
+  clientHiddenFromMaster?: boolean;
+};
+
+/** Public manage-link view: visit facts and the name the visitor typed only (no stored client name, phone or trust). */
+export type PublicVisitView = {
+  id: string;
+  specialistId?: string;
+  serviceId?: string;
+  status: string;
+  serviceStart?: string;
+  serviceEnd?: string;
+  serviceNameSnapshot?: string;
+  priceSnapshot?: number;
+  currencyCode?: string;
+  enteredName?: string | null;
+};
+
+/**
+ * Trust of a client. `reasons` (texts with salon-wide counts) and `overrideReason` (owner text) are null for a
+ * master, who gets the number-free `reasonCodes` instead (decision B).
+ */
+export type TrustView = {
+  clientId?: string;
+  level?: string;
+  effectiveLevel?: string;
+  overrideLevel?: string | null;
+  overrideReason?: string | null;
+  reasons?: string[] | null;
+  reasonCodes?: string[] | null;
 };
 
 /** Calendar list row — same fields as AppointmentView when BE enriches. */
@@ -163,7 +198,8 @@ export type AppointmentSummary = AppointmentView;
 
 export type AppointmentDetailView = {
   appointment: AppointmentView;
-  trust?: { effectiveLevel?: string; level?: string } | null;
+  /** Null for a master on a visit hidden from them (decision A). */
+  trust?: TrustView | null;
 };
 
 export type DashboardView = {
@@ -176,7 +212,7 @@ export type DashboardView = {
 
 export type MasterTodayItem = {
   appointment: AppointmentView;
-  trust?: { effectiveLevel?: string; level?: string } | null;
+  trust?: TrustView | null;
   packages?: unknown[];
 };
 
@@ -305,14 +341,20 @@ export const api = {
       body: JSON.stringify(body),
     }),
   publicBooking: (id: string, token: string) =>
-    request<AppointmentView>(`/api/public/bookings/${id}?token=${encodeURIComponent(token)}`),
+    request<PublicVisitView>(`/api/public/bookings/${id}?token=${encodeURIComponent(token)}`),
   publicCancel: (id: string, token: string) =>
-    request<AppointmentView>(`/api/public/bookings/${id}/cancel?token=${encodeURIComponent(token)}`, {
+    request<PublicVisitView>(`/api/public/bookings/${id}/cancel?token=${encodeURIComponent(token)}`, {
       method: 'POST',
     }),
+  /** Withdraws the marketing consent of the client behind this manage link. */
+  publicWithdrawConsent: (id: string, token: string) =>
+    request<{ id: string; marketingConsent: boolean }>(
+      `/api/public/bookings/${id}/consent/withdraw?token=${encodeURIComponent(token)}`,
+      { method: 'POST' }
+    ),
   /** Optional until BE lands; returns null on 404. */
   publicReschedule: (id: string, token: string, start: string) =>
-    optionalRequest<AppointmentView>(
+    optionalRequest<PublicVisitView>(
       `/api/public/bookings/${id}/reschedule?token=${encodeURIComponent(token)}&start=${encodeURIComponent(start)}`,
       { method: 'POST' }
     ),
@@ -342,6 +384,9 @@ export const api = {
   clients: (tenantId: string, q = '') =>
     request<unknown[]>(`/api/app/clients?q=${encodeURIComponent(q)}`, {}, tenantId),
   client: (tenantId: string, id: string) => request<unknown>(`/api/app/clients/${id}`, {}, tenantId),
+  /** Owner only: withdraws a client's marketing consent on their request. */
+  withdrawConsent: (tenantId: string, id: string) =>
+    request<unknown>(`/api/app/clients/${id}/consent/withdraw`, { method: 'POST' }, tenantId),
   rules: (tenantId: string) => request<BookingRulesView>('/api/app/rules', {}, tenantId),
   saveRules: (tenantId: string, body: BookingRulesView) =>
     request<BookingRulesView>('/api/app/rules', { method: 'PUT', body: JSON.stringify(body) }, tenantId),

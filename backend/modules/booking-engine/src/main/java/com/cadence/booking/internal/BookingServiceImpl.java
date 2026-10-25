@@ -134,6 +134,8 @@ public class BookingServiceImpl implements BookingService {
         // Before any read or client upsert: a refused master booking has no side effects at all.
         assertMasterOwns(command.specialistId());
         assertMasterKeepsBookingRules(command);
+        assertNotSettledBeforeStart(command.statusOverride(), command.serviceStart());
+        assertMasterMayBookClient(command.clientId(), command.specialistId());
         Offering offering = requireOffering(command.specialistId(), command.serviceId());
         TenantRecord tenant = tenants.requireById(TenantContext.require());
         BookingRulesView rules = catalogService.rules();
@@ -165,7 +167,10 @@ public class BookingServiceImpl implements BookingService {
         }
 
         UUID clientId = command.clientId();
+        // The visit stores what was typed, nothing else; the owner's "typed / stored" hint is built when the owner
+        // reads it (enrich), so no public or master answer can carry a stored name through this column.
         String enteredName = command.displayName();
+        boolean hideClient = false;
         if (clientId == null) {
             String region = tenant.getCountryCode();
             String e164 = phones.toE164(command.phone(), region);
@@ -177,13 +182,17 @@ public class BookingServiceImpl implements BookingService {
                     command.consentVersion()
             );
             clientId = client.id();
-            if (enteredName != null && !enteredName.equals(client.displayName())) {
-                enteredName = enteredName + " / " + client.displayName();
-            }
+            // Decision A: a master's phone booking onto a client outside their scope (known or just created, the
+            // master cannot tell) hides that client from the master until the owner confirms the visit.
+            hideClient = isMaster() && !appointments.hasActiveVisit(clientId, command.specialistId());
         }
 
         AppointmentStatus status = command.statusOverride();
-        if (status == null) {
+        if (hideClient) {
+            // Always PENDING, whatever was asked for and whatever the client's trust: neither the status nor a refusal
+            // may tell the master whether the phone belonged to an existing client.
+            status = AppointmentStatus.PENDING;
+        } else if (status == null) {
             boolean pending = retentionService.requiresConfirmation(clientId);
             status = pending ? AppointmentStatus.PENDING : AppointmentStatus.CONFIRMED;
         } else if (status == AppointmentStatus.CONFIRMED && isMaster() && retentionService.requiresConfirmation(clientId)) {
@@ -214,7 +223,8 @@ public class BookingServiceImpl implements BookingService {
                 command.source() == null ? "CONSOLE" : command.source(),
                 enteredName,
                 null,
-                null
+                null,
+                hideClient
         );
         appointments.insert(row);
         appointments.insertEvent(id, "CREATED", "{\"status\":\"" + status + "\"}");
@@ -230,6 +240,22 @@ public class BookingServiceImpl implements BookingService {
                 command.source(),
                 null
         );
+        if (hideClient) {
+            String master = catalogService.findSpecialist(command.specialistId())
+                    .map(SpecialistView::displayName)
+                    .map(name -> name.length() > MAX_NAME_IN_TITLE ? name.substring(0, MAX_NAME_IN_TITLE) : name)
+                    .orElse("A master");
+            ownerTasks.create(
+                    MASTER_PHONE_BOOKING_TASK,
+                    "Master " + master + " booked a client by phone — confirm",
+                    "Confirm the visit to show this client to the master. Until then the master sees only the name "
+                            + "they typed on it, and cancelling the visit keeps the client hidden.",
+                    null,
+                    null,
+                    id,
+                    clientId
+            );
+        }
         String raw = null;
         if (issueToken) {
             raw = BookingTokens.raw();
@@ -246,7 +272,18 @@ public class BookingServiceImpl implements BookingService {
                     clientId
             );
         }
-        return new PublicBookingResult(enrich(row), raw, raw == null ? null : managePath(id, raw));
+        AppointmentView result;
+        if (issueToken) {
+            result = publicView(row);
+        } else if (isMaster() && command.clientId() == null) {
+            // Phone path: the phone may belong to a client the master does not know; answer with what the master
+            // typed, never with a stored name, phone or trust (TD-19). A hidden visit carries no client id either, so
+            // a known and a new number get the same answer.
+            result = hideClient ? maskedForMaster(row) : withClientShown(row, row.enteredName(), row.enteredName(), null, null);
+        } else {
+            result = enrich(row);
+        }
+        return new PublicBookingResult(result, raw, raw == null ? null : managePath(id, raw));
     }
 
     @Override
@@ -279,17 +316,33 @@ public class BookingServiceImpl implements BookingService {
     public List<AppointmentView> clientHistory(UUID clientId) {
         ActorContext.Actor actor = ActorContext.current().orElse(null);
         UUID specialistFilter = actor != null && actor.isMaster() ? actor.specialistId() : null;
-        return appointments.byClient(clientId, specialistFilter).stream().map(this::enrich).toList();
+        // A master's view of the client leaves cancelled visits out, so a cancellation never keeps a client in scope.
+        return appointments.byClient(clientId, specialistFilter, specialistFilter != null).stream().map(this::enrich).toList();
     }
 
     @Override
     @Transactional
     public AppointmentView transition(UUID appointmentId, AppointmentStatus target, String note) {
+        return enrich(applyTransition(appointmentId, target, note));
+    }
+
+    /** The transition itself; returns the written row without any client data added. */
+    private AppointmentView applyTransition(UUID appointmentId, AppointmentStatus target, String note) {
         // Row lock: concurrent changes of one visit are serialised, so the CRM aggregates below apply exactly once.
         AppointmentView current = appointments.findForUpdate(appointmentId)
                 .orElseThrow(() -> DomainException.notFound("APPOINTMENT_NOT_FOUND", "Visit not found"));
         assertCanWrite(current);
         AppointmentStatusMachine.assertTransition(current.status(), target);
+        if (isStatusCorrection(current.status(), target) && clock.instant().isBefore(current.serviceStart())) {
+            // TD-17 legacy: a row settled before the rule existed, while its start was still ahead. The rule stays.
+            throw DomainException.conflict("VISIT_NOT_STARTED", "This visit was settled before it started (recorded "
+                    + "before that was refused); its outcome can be corrected only after it starts");
+        }
+        assertNotSettledBeforeStart(target, current.serviceStart());
+        if (isMaster() && current.clientHiddenFromMaster() && target == AppointmentStatus.CONFIRMED) {
+            // Decision A: only the owner's confirmation reveals the client; same answer as the trust rule below.
+            throw DomainException.forbidden("FORBIDDEN_RESOURCE", "This client's visit must be confirmed by the owner");
+        }
         if (isMaster() && current.status() == AppointmentStatus.PENDING && target == AppointmentStatus.CONFIRMED
                 && retentionService.requiresConfirmation(current.clientId())) {
             // Same rule as on create: a master cannot skip the confirmation the retention policy demands of this client.
@@ -299,8 +352,20 @@ public class BookingServiceImpl implements BookingService {
         if (correction) {
             assertOwnerMayCorrect();
         }
-        AppointmentView updated = withStatus(current, target, note == null ? current.note() : note);
+        // The owner's confirmation clears the decision-A flag; any other change (a cancellation too) keeps it.
+        boolean ownerConfirms = target == AppointmentStatus.CONFIRMED && isOwner();
+        boolean hidden = current.clientHiddenFromMaster() && !ownerConfirms;
+        AppointmentView updated = withStatus(current, target, note == null ? current.note() : note, hidden);
         appointments.updateStatusAndTimes(updated, current.status());
+        if (current.clientHiddenFromMaster() && ownerConfirms) {
+            // The client is now in the master's scope, so the master's other hidden visits with them are revealed too.
+            appointments.revealToMaster(current.clientId(), current.specialistId());
+        }
+        boolean cancelled = target == AppointmentStatus.CANCELLED_BY_CLIENT || target == AppointmentStatus.CANCELLED_BY_BUSINESS;
+        if (ownerConfirms || cancelled) {
+            // The owner's "confirm the master's phone booking" task is done once the visit is confirmed or cancelled.
+            ownerTasks.completeForAppointment(appointmentId, MASTER_PHONE_BOOKING_TASK);
+        }
         String event = switch (target) {
             case CONFIRMED -> "CONFIRMED";
             case COMPLETED -> "COMPLETED";
@@ -345,7 +410,7 @@ public class BookingServiceImpl implements BookingService {
                 "console",
                 null
         );
-        return enrich(updated);
+        return updated;
     }
 
     /** Owner fix of a settled outcome: NO_SHOW to COMPLETED or COMPLETED to NO_SHOW. */
@@ -370,6 +435,11 @@ public class BookingServiceImpl implements BookingService {
     @Override
     @Transactional
     public AppointmentView reschedule(UUID appointmentId, Instant newStart) {
+        return enrich(applyReschedule(appointmentId, newStart));
+    }
+
+    /** The move itself; returns the written row without any client data added. */
+    private AppointmentView applyReschedule(UUID appointmentId, Instant newStart) {
         AppointmentView current = appointments.findForUpdate(appointmentId)
                 .orElseThrow(() -> DomainException.notFound("APPOINTMENT_NOT_FOUND", "Visit not found"));
         assertCanWrite(current);
@@ -408,11 +478,12 @@ public class BookingServiceImpl implements BookingService {
                 current.source(),
                 current.clientDisplayName(),
                 current.clientPhone(),
-                current.trustLevel()
+                current.trustLevel(),
+                current.clientHiddenFromMaster()
         );
         appointments.updateStatusAndTimes(updated, current.status());
         appointments.insertEvent(appointmentId, "RESCHEDULED", "{\"from\":\"" + current.serviceStart() + "\",\"to\":\"" + newStart + "\"}");
-        return enrich(updated);
+        return updated;
     }
 
     @Override
@@ -420,7 +491,7 @@ public class BookingServiceImpl implements BookingService {
     public Optional<AppointmentView> findByAccessToken(String rawToken) {
         return appointments.resolveToken(BookingTokens.hash(rawToken)).flatMap(target -> {
             try (var ignored = TenantContext.open(target.tenantId())) {
-                return appointments.find(target.appointmentId()).map(this::enrich);
+                return appointments.find(target.appointmentId()).map(BookingServiceImpl::publicView);
             }
         });
     }
@@ -432,7 +503,7 @@ public class BookingServiceImpl implements BookingService {
         try (var ignored = TenantContext.open(target.tenantId())) {
             AppointmentView view = appointments.find(target.appointmentId()).orElseThrow(BookingServiceImpl::tokenInvalid);
             AppointmentStatus status = byClient ? AppointmentStatus.CANCELLED_BY_CLIENT : AppointmentStatus.CANCELLED_BY_BUSINESS;
-            return transition(view.id(), status, view.note());
+            return publicView(applyTransition(view.id(), status, view.note()));
         }
     }
 
@@ -445,7 +516,21 @@ public class BookingServiceImpl implements BookingService {
             if (!rules.clientRescheduleAllowed()) {
                 throw DomainException.forbidden("RESCHEDULE_DISABLED", "Client reschedule is disabled for this business");
             }
-            return reschedule(target.appointmentId(), newStart);
+            return publicView(applyReschedule(target.appointmentId(), newStart));
+        }
+    }
+
+    @Override
+    @Transactional
+    public AppointmentView withdrawConsentByAccessToken(UUID appointmentId, String rawToken) {
+        AppointmentRepository.TokenTarget target = requireToken(rawToken);
+        if (!target.appointmentId().equals(appointmentId)) {
+            throw DomainException.forbidden("TOKEN_INVALID", "Token does not match this visit");
+        }
+        try (var ignored = TenantContext.open(target.tenantId())) {
+            AppointmentView view = appointments.find(target.appointmentId()).orElseThrow(BookingServiceImpl::tokenInvalid);
+            crmService.withdrawMarketingConsent(view.clientId(), "public-link");
+            return publicView(view);
         }
     }
 
@@ -523,7 +608,17 @@ public class BookingServiceImpl implements BookingService {
         return offering;
     }
 
+    /**
+     * The console view of a visit: the stored client's name, phone and trust, and for anyone but a master the owner's
+     * "typed / stored" hint when the typed name differs. A MASTER reading a visit hidden from them (decision A) or a
+     * cancelled one gets the typed name only, without the client id, stored name, phone or trust; the client is not
+     * even looked up ({@link AppointmentView#clientWithheldFromMaster()}).
+     */
     private AppointmentView enrich(AppointmentView row) {
+        boolean master = isMaster();
+        if (master && row.clientWithheldFromMaster()) {
+            return maskedForMaster(row);
+        }
         ClientView client = crmService.findById(row.clientId()).orElse(null);
         String trustLevel = null;
         try {
@@ -534,6 +629,60 @@ public class BookingServiceImpl implements BookingService {
         if (client == null) {
             return trustLevel == null ? row : row.withTrustLevel(trustLevel);
         }
+        String entered = master ? row.enteredName() : ownerHint(row.enteredName(), client.displayName());
+        return withClientShown(row, entered, client.displayName(), client.normalizedPhone(), trustLevel);
+    }
+
+    private static final String HINT_SEPARATOR = " / ";
+    static final String MASTER_PHONE_BOOKING_TASK = "MASTER_PHONE_BOOKING";
+
+    /** A master's view of a visit that withholds its client: typed name only, no client id, phone or trust. */
+    private static AppointmentView maskedForMaster(AppointmentView row) {
+        String typed = typedOnly(row.enteredName());
+        AppointmentView shown = withClientShown(row, typed, typed, null, null);
+        return new AppointmentView(shown.id(), shown.specialistId(), shown.serviceId(), null, shown.status(),
+                shown.serviceStart(), shown.serviceEnd(), shown.occupiedStart(), shown.occupiedEnd(),
+                shown.serviceNameSnapshot(), shown.priceSnapshot(), shown.durationSnapshot(),
+                shown.bufferBeforeSnapshot(), shown.bufferAfterSnapshot(), shown.currencyCode(), shown.discountAmount(),
+                shown.amountReceived(), shown.enteredName(), shown.note(), shown.source(), shown.clientDisplayName(),
+                null, null, shown.clientHiddenFromMaster());
+    }
+
+    /**
+     * The typed name without anything a legacy row appended to it. Rows written before the visit stored the typed name
+     * alone hold "typed / stored"; everything from the first {@code " / "} on is dropped, so no stored name (not even
+     * one that contains " / " itself, nor one renamed or merged since) can show. A typed name that contains " / "
+     * shows shortened: it fails closed.
+     */
+    static String typedOnly(String enteredName) {
+        if (enteredName == null) {
+            return null;
+        }
+        int separator = enteredName.indexOf(HINT_SEPARATOR);
+        return separator < 0 ? enteredName : enteredName.substring(0, separator);
+    }
+    private static final int MAX_NAME_IN_TITLE = 150;
+
+    /** The owner's "typed / stored" hint; rows written before the visit stored the typed name alone already carry it. */
+    static String ownerHint(String typed, String stored) {
+        if (typed == null || stored == null || typed.equals(stored) || typed.endsWith(HINT_SEPARATOR + stored)) {
+            return typed;
+        }
+        return typed + HINT_SEPARATOR + stored;
+    }
+
+    /**
+     * The view a public booking link gets (finding 4): visit facts and what the visitor typed, never the stored client
+     * name, phone or trust; a legacy "typed / stored" row shows the typed part only ({@link #typedOnly}).
+     */
+    private static AppointmentView publicView(AppointmentView row) {
+        String typed = typedOnly(row.enteredName());
+        return withClientShown(row, typed, typed, null, null);
+    }
+
+    /** {@code row} with the typed name and the client fields of the response set as given. */
+    private static AppointmentView withClientShown(AppointmentView row, String enteredName, String displayName,
+                                                   String phone, String trustLevel) {
         return new AppointmentView(
                 row.id(),
                 row.specialistId(),
@@ -552,16 +701,17 @@ public class BookingServiceImpl implements BookingService {
                 row.currencyCode(),
                 row.discountAmount(),
                 row.amountReceived(),
-                row.enteredName(),
+                enteredName,
                 row.note(),
                 row.source(),
-                client.displayName(),
-                client.normalizedPhone(),
-                trustLevel
+                displayName,
+                phone,
+                trustLevel,
+                row.clientHiddenFromMaster()
         );
     }
 
-    private AppointmentView withStatus(AppointmentView current, AppointmentStatus status, String note) {
+    private AppointmentView withStatus(AppointmentView current, AppointmentStatus status, String note, boolean hidden) {
         return new AppointmentView(
                 current.id(),
                 current.specialistId(),
@@ -585,7 +735,8 @@ public class BookingServiceImpl implements BookingService {
                 current.source(),
                 current.clientDisplayName(),
                 current.clientPhone(),
-                current.trustLevel()
+                current.trustLevel(),
+                hidden
         );
     }
 
@@ -605,6 +756,10 @@ public class BookingServiceImpl implements BookingService {
         return ActorContext.current().map(ActorContext.Actor::isMaster).orElse(false);
     }
 
+    private static boolean isOwner() {
+        return ActorContext.current().map(ActorContext.Actor::isOwner).orElse(false);
+    }
+
     /**
      * A MASTER books under the tenant's rules and the status machine, like the public flow: no notice, horizon and
      * schedule bypass, and a visit starts PENDING or CONFIRMED only (CONFIRMED is checked against the client's trust
@@ -620,6 +775,32 @@ public class BookingServiceImpl implements BookingService {
         AppointmentStatus status = command.statusOverride();
         if (status != null && status != AppointmentStatus.PENDING && status != AppointmentStatus.CONFIRMED) {
             throw DomainException.forbidden("FORBIDDEN_RESOURCE", "Master can create only pending or confirmed visits");
+        }
+    }
+
+    /**
+     * TD-17: no role settles a visit (COMPLETED or NO_SHOW) before it starts, neither by a transition nor by creating
+     * it in that status; the demo seed and imports record only past visits as settled.
+     */
+    private void assertNotSettledBeforeStart(AppointmentStatus target, Instant serviceStart) {
+        if ((target == AppointmentStatus.COMPLETED || target == AppointmentStatus.NO_SHOW)
+                && serviceStart != null && clock.instant().isBefore(serviceStart)) {
+            throw DomainException.conflict("VISIT_NOT_STARTED", "A visit can be completed or marked no-show only after it starts");
+        }
+    }
+
+    /**
+     * TD-19: a MASTER books an existing client by id only within their own scope (a non-cancelled visit with them), so
+     * a booking cannot pull an unknown client of the tenant into it. Checked before any read or write.
+     *
+     * <p>Not locked on purpose (TD-25): a concurrent cancellation of the master's last visit with the client can land
+     * between this check and the insert, but that outcome is the same as the legal order "book, then cancel" (the new
+     * visit keeps the client in scope), so the race grants nothing the master could not get by acting a moment
+     * earlier. A client-row lock here would not serialise anything, as cancellations lock the visit row only.
+     */
+    private void assertMasterMayBookClient(UUID clientId, UUID specialistId) {
+        if (clientId != null && isMaster() && !appointments.hasActiveVisit(clientId, specialistId)) {
+            throw DomainException.forbidden("FORBIDDEN_RESOURCE", "Master can book only clients with a visit with them");
         }
     }
 

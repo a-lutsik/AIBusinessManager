@@ -91,7 +91,7 @@ class BookingStatusCorrectionTest {
         AppointmentView view = new AppointmentView(
                 APPOINTMENT, SPECIALIST, UUID.randomUUID(), CLIENT, status,
                 VISIT_START, VISIT_START.plusSeconds(2700), VISIT_START, VISIT_START.plusSeconds(3300),
-                "Haircut", 8000, 45, 5, 10, "GEL", 500, null, "Mariam", null, "CONSOLE", "Mariam", null, null
+                "Haircut", 8000, 45, 5, 10, "GEL", 500, null, "Mariam", null, "CONSOLE", "Mariam", null, null, false
         );
         when(appointments.findForUpdate(APPOINTMENT)).thenReturn(Optional.of(view));
     }

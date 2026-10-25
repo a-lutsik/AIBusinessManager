@@ -179,6 +179,17 @@ npm run web
 
 i18n catalogs: `frontend/src/i18n/locales/{en,ru,ka,uk,cs}.json` (ru/en complete for UI; ka/uk/cs files exist so adding copy does not require code changes). Dark theme toggle lives in the console sidebar (`data-theme` on web).
 
+## Continuous integration
+
+`.github/workflows/ci.yml` runs on every push and pull request:
+
+- **backend**: Gradle on JDK 21 with the JDK 25 toolchain, `./gradlew build --no-build-cache` (jOOQ codegen, ArchUnit, unit tests and Testcontainers ITs). The build cache is off so cached results never hide a test run. A per-module test summary goes to the job summary; reports are uploaded on failure. Two guards keep a runner without a working Docker daemon from going green with the Testcontainers ITs skipped: with `CI` set (GitHub sets it) `AbstractTimescaleIT` fails instead of skipping when Docker is unreachable (on a developer machine without Docker the ITs are still skipped), and `.github/scripts/junit_summary.py --fail-on-skipped --min-tests 400 --require-class 'IT$'` fails the job when any test case was skipped, fewer than 400 ran (430 at the time of writing; lower the number only when tests were removed on purpose) or no `*IT` class executed.
+- **frontend**: Node 22, `npm ci`, `npm run typecheck`, `npx expo export --platform web`.
+- **compose**: the production compose file must reject `.env.prod.example` (empty secrets) and accept a fully generated env file.
+- **docker**: builds `backend/Dockerfile` without pushing.
+
+Dependabot (`.github/dependabot.yml`) proposes weekly updates for Gradle, npm, GitHub Actions and Docker base images; Expo/React majors are held back until an SDK upgrade.
+
 ## Production deployment
 
 `docker-compose.prod.yml` is a standalone single-host stack for a pilot (it is not an override of the dev
@@ -199,6 +210,7 @@ docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
 | `keycloak` | `quay.io/keycloak/keycloak:26.2.5`, `start --import-realm` | `127.0.0.1:8081` | production mode, plain HTTP behind the proxy (`KC_PROXY_HEADERS=xforwarded`, `KC_HOSTNAME` = public URL) |
 | `timescaledb` | `timescale/timescaledb:2.30.0-pg16` | none | application database, compose network only |
 | `keycloak-db` | `postgres:16.9-alpine` | none | Keycloak's own database, separate from the application database |
+| `backup` | `timescale/timescaledb:2.30.0-pg16` (client tools only) | none | scheduled `pg_dump` of both databases into `BACKUP_DIR` (see [Backups and restore](#backups-and-restore)) |
 
 Nothing is published on 5432/5433. The two published ports are bound to loopback only, for the reverse proxy.
 
@@ -292,6 +304,41 @@ The seed is off, so a tenant and its first user are created by hand (no onboardi
 5. Replace the bootstrap admin with a named admin and a strong password; remove `KC_BOOTSTRAP_ADMIN_*` from `.env.prod`
    afterwards if you like (it is read only on the first start).
 
+### Smoke check of a deployment
+
+`scripts/deploy-smoke.sh` checks a running deployment from the outside, through the public URLs. Run it after the first deploy
+and after every change of the proxy, `KC_HOSTNAME` or `CADENCE_WEB_ORIGIN`; it needs only `bash` and `curl` (`openssl` for the
+token and port checks) and changes nothing on the target.
+
+```bash
+ACCESS_TOKEN=<bearer token of the first owner> \
+scripts/deploy-smoke.sh --app-url https://api.example.com --kc-url https://auth.example.com \
+                        --web-origin https://app.example.com --strict
+# on the server itself, additionally: --check-ports
+```
+
+`--kc-url` is `KC_HOSTNAME`, `--web-origin` is `CADENCE_WEB_ORIGIN`. The token is optional but needed once: sign in to the console as
+the first owner and copy the bearer token from the browser's network tab (valid for 5 minutes; use `--token-file FILE` or the
+environment variable, not a command-line value). The script never puts the token on a command line: it is sent from a `0600`
+header file in the script's private temp directory (removed on exit), so it does not show up in `ps`. An unreadable `--token-file`
+is a `[FAIL]`; without `openssl` the token issuer check cannot run, which is a `[FAIL]` with `--strict` and a `[WARN]` otherwise.
+Checks, each printed as `[PASS]`/`[FAIL]`/`[WARN]`:
+
+| Area | Expectation |
+|------|-------------|
+| URLs | both public URLs are `https` (plain `http` is only accepted on loopback) |
+| API | `/actuator/health` 200 `UP`; `/actuator/env`, `/metrics`, `/beans` not 200; `/api/app/me` without or with a garbage token 401 |
+| CORS | preflight from the console origin 200 with `Access-Control-Allow-Origin` = the origin; from a foreign origin 403 |
+| Keycloak | discovery `issuer` equals `<KC_HOSTNAME>/realms/cadence` and all its endpoints start with `KC_HOSTNAME` (proves the proxy's `X-Forwarded-*` handling); password grant for `cadence-app` and `admin-cli` answers `unauthorized_client` |
+| Admin surface | `/realms/master/...` and `/admin/...` answer 403/404 through the public URL; any other answer is a `[WARN]` (a `[FAIL]` with `--strict`) |
+| Token | token `iss` equals the expected issuer, and `/api/app/me` with it answers 200 |
+| Ports (`--check-ports`) | nothing on 5432/5433 on a non-loopback address; 8080/8081 bound to loopback only |
+
+Exit status 0 = no failed check (and, with `--strict`, no warning); the last line is `DEPLOY SMOKE: PASS` or `FAIL`. Run against a
+local prod stack (no proxy) the admin-surface checks, the plain-`http` notes and a foreign process on 5432 show up as warnings:
+that is expected there and is why the real production run should use `--strict`. The script does not check the `kcadm.sh` step for
+realm `master` (it needs admin credentials) or the Expo build for the production URL; do both by hand.
+
 ### Rate limits behind the proxy
 
 The client IP is the TCP peer unless the peer is listed in `APP_RATE_LIMIT_TRUSTED_PROXIES` (CIDRs, comma-separated). With
@@ -300,10 +347,142 @@ the proxy on the Docker host the peer is the compose network gateway; find it wi
 `APP_RATE_LIMIT_TRUSTED_PROXIES=172.18.0.1/32`. Leave it empty and every client shares the proxy's address (and its
 limit). Do not list ranges clients can reach directly. See [Public API rate limits](#public-api-rate-limits).
 
+### Backups and restore
+
+**What is backed up.** The `backup` service writes one directory per run, `BACKUP_DIR/<UTC timestamp>/` (default
+`./backups/20261025T101500Z/`), holding:
+
+| File | Content |
+|------|---------|
+| `cadence.dump` | `pg_dump -Fc` of the application database (TimescaleDB: tables, hypertables, chunks, RLS policies, grants, the V11 job) |
+| `keycloak.dump` | `pg_dump -Fc` of Keycloak's database (realm, users, credentials, sessions). **Sensitive:** it contains the realm's signing keys, the client secrets and every user's password hash, i.e. everything needed to mint valid tokens or attack passwords offline |
+| `cadence-roles.sql` | `pg_dumpall --roles-only --no-role-passwords` of the application database server (roles are cluster-level and not part of a database dump) |
+| `cadence.manifest`, `keycloak.manifest` | row counts of every table, Flyway version, TimescaleDB version, hypertable/chunk/RLS/job counts, taken in the same snapshot as the dump |
+| `SHA256SUMS` | checksums of the files above |
+
+Role passwords are deliberately **not** in the dump: the file would otherwise carry the SCRAM verifiers of the schema owner
+and of `cadence_app` into every offsite copy. The passwords live in `.env.prod`; back that file up separately and
+encrypted (without it a restored stack cannot be started). Treat the whole `BACKUP_DIR` like `.env.prod`: `keycloak.dump` is token-minting
+material (see the table), so `BACKUP_DIR` may leave the host only encrypted, with a key that never travels with the copy. Each database is dumped inside one exported snapshot
+(`pg_dump --snapshot`), so the dump and its manifest describe the same instant while the application keeps writing. A run is
+written to a temporary directory and renamed when everything succeeded: a timestamp-named directory is always complete.
+
+**Schedule and retention.** The first backup runs when the stack starts, then every `BACKUP_INTERVAL` (default `6h`; seconds or
+`30m`/`6h`/`1d`, minimum 60 s). Backups older than `BACKUP_RETENTION_DAYS` (default 14) are deleted after a successful run (so an erased or anonymised client disappears from local backups after at most that many days, and from offsite copies only after their own retention — state both periods in the privacy notice, PRODUCT_PLAN §10);
+the newest `BACKUP_KEEP_MIN` (default 3) are always kept. A failed run is logged (`ERROR ...` in `docker compose logs backup`),
+retried after 5 minutes, and the service is `unhealthy` in `docker compose ps` until a run succeeds (a failed run never
+removes older backups). The service is also `unhealthy` when the newest complete backup (read from its directory name, so no file has to
+be writable) is older than two intervals plus 15 minutes, which catches a disk that is too full to even record a failure. Worst-case data
+loss is therefore one interval: lower `BACKUP_INTERVAL` if that is too much. A backup
+right now, with the same exit status contract (non-zero on failure):
+
+```bash
+docker compose --env-file .env.prod -f docker-compose.prod.yml run --rm backup once
+```
+
+The first run right after a fresh install fails until the application has applied its migrations (the manifest reads the Flyway
+history); the retry after 5 minutes succeeds. It is created by Docker as root. To own the files as your host user, create it yourself and
+set `BACKUP_UID`/`BACKUP_GID`.
+
+**Disk space.** Put `BACKUP_DIR` on a different disk or volume than the database volumes (`timescaledb_data`, `keycloak_db_data`)
+whenever you can: a backup disk that fills up must not be able to take the databases down with it. Before every dump the service checks
+the free space of `BACKUP_DIR`: it must be at least `BACKUP_MIN_FREE_MB` (default 1024) and at least the size of the newest backup. If
+not, the service first deletes old backups (by retention, then the oldest ones, never going below the newest `BACKUP_KEEP_MIN`) and
+only then dumps; if there is still not enough room the run fails with an `ERROR not enough disk space ...` line, the service turns
+`unhealthy`, and nothing newer than the kept backups is touched. Choose `BACKUP_MIN_FREE_MB` as at least twice the size of one backup,
+and keep `BACKUP_KEEP_MIN` x backup size well below the disk size. Every write of a run is checked and the finished files are read back
+against `SHA256SUMS`, so a short write fails the run instead of leaving a corrupt directory.
+
+**Offsite copy is the operator's job.** Backups on the same host die with the host (disk failure, deletion, ransomware, a
+compromised server). Copy `BACKUP_DIR` and `.env.prod` to storage under a different failure domain, encrypted, on a schedule
+that matches `BACKUP_INTERVAL`, and alert when it fails. One concrete example with [restic](https://restic.net) to
+S3-compatible storage (client-side encrypted, deduplicated; the repository was created once with `restic init`), as a daily
+cron entry of a user that can read `BACKUP_DIR`:
+
+```bash
+0 3 * * *  RESTIC_REPOSITORY=s3:https://s3.example.com/cadence-backups RESTIC_PASSWORD_FILE=/root/.restic-pass \
+           AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... \
+           restic backup /var/backups/cadence /srv/cadence/.env.prod && restic forget --keep-daily 14 --keep-weekly 8 --prune
+```
+
+Do not replace this with a plain `rclone sync` or any copy that stores the files readable by the storage provider: `keycloak.dump` is
+token-minting material. If you prefer rclone, the destination must be an [`rclone crypt`](https://rclone.org/crypt/) remote. This repository does not
+implement the offsite copy. An offsite copy that was never restored is not a backup either: run the drill below on a copy fetched back from it.
+
+**Restore drill: do it before the pilot and then regularly (recommended: after every release that adds a migration, and at least
+monthly).** `scripts/restore-drill.sh` restores a backup into throwaway containers (no network, own anonymous volumes, removed on
+every exit path) and compares the result with the manifest recorded at backup time. It does not touch the running stack, so it
+can run on the production host (needs the `docker` CLI and `openssl`):
+
+```bash
+BACKUP_DIR=/var/backups/cadence scripts/restore-drill.sh            # newest backup
+scripts/restore-drill.sh 20261025T101500Z                            # a timestamp below BACKUP_DIR
+scripts/restore-drill.sh /mnt/restored-from-offsite/20261025T101500Z   # a directory
+```
+
+It prints one `[PASS]`/`[FAIL]`/`[WARN]` line per check and ends with `RESTORE DRILL: PASS` (exit 0) or `RESTORE DRILL: FAIL`
+(exit 1). It checks: file checksums; the TimescaleDB extension version of the restore image equals the one at backup time (a
+logical restore needs the same version); the restore finished without unexpected errors; Flyway version, the row count of every
+`public` table (including `tenant`, `client`, `appointment`, `audit_log`, `outbox_event`), hypertable and chunk counts, RLS
+table and policy counts equal the manifest; all chunks are in schema `cadence_chunks`; the V11 job `cadence_revoke_chunk_privileges`
+exists and is scheduled; `cadence_app` is still subject to RLS (no tenant context: 0 rows; with a tenant context: that
+tenant's rows) and has no privileges on the chunk schema; Keycloak's counts and its realms. A `[WARN]` means the backup had no
+rows in a place the check needs (e.g. an empty install cannot demonstrate RLS); it does not fail the drill.
+
+**Restore for real (disaster recovery).** Procedure for the application database, from the TimescaleDB documentation
+([logical backup and restore, "Entire database"](https://www.tigerdata.com/docs/self-hosted/latest/backup-and-restore/logical-backup)):
+create the roles, create the database with the extension, call `timescaledb_pre_restore()`, `pg_restore` (no `-j`), then
+`timescaledb_post_restore()`. The restore needs the same TimescaleDB version as the backup (`timescale/timescaledb:2.30.0-pg16`
+pinned in the compose file; the manifest records the version). On a new host: install Docker, restore `.env.prod`, copy the
+backup directory back, then start only the databases: `docker compose --env-file .env.prod -f docker-compose.prod.yml up -d timescaledb keycloak-db`.
+
+```bash
+C="docker compose --env-file .env.prod -f docker-compose.prod.yml"
+B=20261025T101500Z                       # the backup to restore
+$C stop app keycloak backup              # nothing may write while the databases are replaced
+# 1. verify, restore roles, application database (this DROPS the current database `cadence` and Keycloak's contents)
+$C run --rm --no-deps --entrypoint sh backup -c '
+  set -e; cd /backups/'$B' && sha256sum -c SHA256SUMS
+  export PGPASSWORD=$APPDB_OWNER_PASSWORD
+  psql -h timescaledb -U cadence -d postgres -f cadence-roles.sql || true      # "role cadence already exists" is expected
+  psql -h timescaledb -U cadence -d postgres -c "DROP DATABASE IF EXISTS cadence WITH (FORCE)" -c "CREATE DATABASE cadence"
+  psql -h timescaledb -U cadence -d cadence -c "CREATE EXTENSION IF NOT EXISTS timescaledb" -c "SELECT timescaledb_pre_restore()"
+  # pg_restore exits 1 when it ignored an error (warnings do not change the exit status). Under `set -e` that would stop the
+  # script BEFORE timescaledb_post_restore() and leave the database in restoring mode, so the status is read explicitly: the one
+  # expected error (the dump re-creates the extension the target already has) is tolerated, anything else stops here.
+  rc=0; pg_restore -h timescaledb -U cadence -d cadence cadence.dump 2>/tmp/restore.err || rc=$?
+  cat /tmp/restore.err
+  if [ "$rc" -ne 0 ] && grep -v -e "ERROR:  extension .timescaledb. already exists" -e "must be owner of extension timescaledb" \
+        -e "^Command was: CREATE EXTENSION" -e "^Command was: COMMENT ON EXTENSION" \
+        -e "errors ignored on restore: [12]$" -e "^$" /tmp/restore.err | grep -q .; then
+    echo "unexpected pg_restore messages above: NOT calling timescaledb_post_restore(); investigate" >&2; exit 1
+  fi
+  psql -h timescaledb -U cadence -d cadence -c "SELECT timescaledb_post_restore()"
+  # 2. Keycloak database
+  export PGPASSWORD=$KCDB_PASSWORD
+  psql -h keycloak-db -U keycloak -d postgres -c "DROP DATABASE IF EXISTS keycloak WITH (FORCE)" -c "CREATE DATABASE keycloak"
+  pg_restore --exit-on-error -h keycloak-db -U keycloak -d keycloak keycloak.dump
+'
+# 3. the roles file has no passwords: set the runtime role's password again (value of APP_DB_PASSWORD in .env.prod).
+#    Quotes around the value are stripped the way compose does; the statement travels on stdin (printf is a shell builtin), so
+#    the password is never an argument of any process and cannot be seen in `ps`. The value cannot contain ' or $ (see .env.prod.example).
+APP_PW=$(sed -n 's/^APP_DB_PASSWORD=//p' .env.prod | head -n 1 | sed -e "s/^[\"']//" -e "s/[\"']\$//")
+case "$APP_PW" in
+  '' | *"'"*) echo "APP_DB_PASSWORD missing or unusable in .env.prod: set the role password by hand" >&2 ;;
+  *) printf "ALTER ROLE cadence_app PASSWORD '%s';\n" "$APP_PW" | $C exec -T timescaledb psql -U cadence -d cadence -v ON_ERROR_STOP=1 ;;
+esac
+unset APP_PW
+$C up -d                                 # app, keycloak and backup again
+```
+
+Afterwards check `/actuator/health`, sign in once, and compare a few counts with `$B/cadence.manifest`. `pg_restore` prints
+nothing on success; the `NOTICE`/`WARNING` lines of `psql` are harmless, an `ERROR` is not (stop and investigate before starting
+the app). `pg_restore` warnings never change its exit status; when it exits non-zero, the step-1 script goes on to
+`timescaledb_post_restore()` only if every message is the expected "extension already exists" one, and otherwise stops before it. Do not use `pg_restore -j` with TimescaleDB. The drill performs exactly steps 1 and 2 in an empty server.
+
 ### Out of scope
 
-Backups and restore (both volumes, `timescaledb_data` and `keycloak_db_data`, need a `pg_dump` or snapshot schedule and a
-restore drill), log shipping, monitoring and alerting, TLS certificates and the proxy configuration, SMTP for Keycloak
+The offsite copy of the backups (see [Backups and restore](#backups-and-restore)), log shipping, monitoring and alerting, TLS certificates and the proxy configuration, SMTP for Keycloak
 (password reset e-mails), image vulnerability scanning, a non-superuser schema owner (TD-05), upgrades of pinned images.
 
 ## Phase 0 / 6 waitlist landing

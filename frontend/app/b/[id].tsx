@@ -8,7 +8,7 @@ import {
   API_BASE,
   LUMEN_SLUG,
   shortRef,
-  type AppointmentView,
+  type PublicVisitView,
 } from '@/src/api/client';
 import { t } from '@/src/i18n';
 import { statusColor, tokens } from '@/src/theme/tokens';
@@ -27,7 +27,7 @@ export default function BookingLinkScreen() {
     token?: string;
     slug?: string;
   }>();
-  const [visit, setVisit] = useState<AppointmentView | null>(null);
+  const [visit, setVisit] = useState<PublicVisitView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [rescheduleOpen, setRescheduleOpen] = useState(false);
@@ -100,6 +100,21 @@ export default function BookingLinkScreen() {
     }
   };
 
+  const [consentWithdrawn, setConsentWithdrawn] = useState(false);
+  const doWithdrawConsent = async () => {
+    if (!id || !token || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.publicWithdrawConsent(id, token);
+      setConsentWithdrawn(true);
+    } catch (e: unknown) {
+      setError(String((e as Error).message ?? e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const doCancel = async () => {
     if (!id || !token || busy) return;
     setBusy(true);
@@ -143,10 +158,11 @@ export default function BookingLinkScreen() {
         <Text style={styles.rowValue}>{whenLabel}</Text>
         <Text style={styles.rowLabel}>{t('visit.status')}</Text>
         <Text style={styles.rowValue}>{t(`status.${visit.status}`)}</Text>
-        {visit.clientDisplayName ? (
+        {/* Only the name typed at booking: the link never shows a stored client name (or phone, or trust). */}
+        {visit.enteredName ? (
           <>
             <Text style={styles.rowLabel}>{t('book.name')}</Text>
-            <Text style={styles.rowValue}>{visit.clientDisplayName}</Text>
+            <Text style={styles.rowValue}>{visit.enteredName}</Text>
           </>
         ) : null}
         {visit.priceSnapshot != null ? (
@@ -175,6 +191,13 @@ export default function BookingLinkScreen() {
           <Button label={t('visit.reschedule')} variant="ghost" onPress={openReschedule} disabled={busy} />
           <Button label={t('action.cancel')} variant="ghost" onPress={doCancel} disabled={busy} />
         </View>
+      ) : null}
+      {token ? (
+        consentWithdrawn ? (
+          <Text style={styles.muted}>{t('visit.consentWithdrawn')}</Text>
+        ) : (
+          <Button label={t('visit.withdrawConsent')} variant="ghost" onPress={doWithdrawConsent} disabled={busy} />
+        )
       ) : null}
 
       {rescheduleOpen ? (

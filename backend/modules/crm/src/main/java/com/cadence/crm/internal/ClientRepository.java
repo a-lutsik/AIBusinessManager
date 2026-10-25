@@ -69,25 +69,31 @@ class ClientRepository {
                 .fetchOptional(this::toView);
     }
 
+    /** Owner search: names and phones, at most {@link #SEARCH_LIMIT} rows. */
     List<ClientView> search(String query) {
-        return search(query, null);
+        return search(query, null, true, SEARCH_LIMIT);
     }
 
-    /** {@code clientIds}, when not null, limits the search to those clients before the result limit applies. */
-    List<ClientView> search(String query, Collection<UUID> clientIds) {
+    static final int SEARCH_LIMIT = 100;
+
+    /**
+     * {@code clientIds}, when not null, limits the search to those clients before the result limit applies;
+     * {@code matchPhone} also matches the query against the phone, otherwise only the display name is matched.
+     */
+    List<ClientView> search(String query, Collection<UUID> clientIds, boolean matchPhone, int limit) {
         var condition = TenantAwareDsl.tenantEquals(CLIENT.TENANT_ID).and(CLIENT.ANONYMIZED_AT.isNull());
         if (clientIds != null) {
             condition = condition.and(CLIENT.ID.in(clientIds));
         }
         if (query != null && !query.isBlank()) {
             String like = "%" + query.trim() + "%";
-            condition = condition.and(CLIENT.DISPLAY_NAME.likeIgnoreCase(like)
-                    .or(CLIENT.NORMALIZED_PHONE.like("%" + query.trim() + "%")));
+            var match = CLIENT.DISPLAY_NAME.likeIgnoreCase(like);
+            condition = condition.and(matchPhone ? match.or(CLIENT.NORMALIZED_PHONE.like(like)) : match);
         }
         return dsl.selectFrom(CLIENT)
                 .where(condition)
                 .orderBy(CLIENT.LAST_VISIT_AT.desc().nullsLast(), CLIENT.DISPLAY_NAME.asc())
-                .limit(100)
+                .limit(limit)
                 .fetch(this::toView);
     }
 

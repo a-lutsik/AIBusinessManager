@@ -2,8 +2,11 @@ package com.cadence.crm.internal;
 
 import com.cadence.crm.api.ClientView;
 import com.cadence.crm.api.CrmService;
+import com.cadence.platform.audit.AuditLogger;
 import com.cadence.platform.error.DomainException;
 import com.cadence.platform.persistence.SqlStates;
+import com.cadence.platform.phone.PhoneShape;
+import com.cadence.platform.tenancy.ActorContext;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
@@ -24,15 +27,21 @@ public class CrmServiceImpl implements CrmService {
 
     private static final int NOTES_MAX = 4096;
     private static final int TAGS_MAX = 1024;
+    /** {@code client.consent_version} is VARCHAR(32). */
+    private static final int CONSENT_VERSION_MAX = 32;
+    /** A master's query with this many digits or more is a phone query and finds nothing (TD-18). */
+    static final int MAX_MASTER_QUERY_DIGITS = 3;
 
     /** Unique index on (tenant_id, normalized_phone), see V3. */
     static final String PHONE_CONSTRAINT = "client_phone_uq";
 
     private final ClientRepository repository;
     private final TransactionTemplate savepoint;
+    private final AuditLogger auditLogger;
 
-    public CrmServiceImpl(ClientRepository repository, PlatformTransactionManager transactionManager) {
+    public CrmServiceImpl(ClientRepository repository, PlatformTransactionManager transactionManager, AuditLogger auditLogger) {
         this.repository = repository;
+        this.auditLogger = auditLogger;
         this.savepoint = new TransactionTemplate(transactionManager);
         this.savepoint.setPropagationBehavior(TransactionDefinition.PROPAGATION_NESTED);
     }
@@ -82,8 +91,16 @@ public class CrmServiceImpl implements CrmService {
         return repository.findById(created.id()).orElse(created);
     }
 
+    /**
+     * Decision D (stage 03): a booking that matches this client by phone only adds to the profile. Consent {@code true}
+     * is recorded with the booking's consent version and time; {@code false} never revokes a consent and leaves the
+     * stored one untouched. The locale is set only when the client has none; the stored name is kept.
+     */
     private ClientView refresh(ClientView row, String locale, boolean marketingConsent, String consentVersion) {
-        repository.updateProfile(row.id(), row.displayName(), null, null, locale, marketingConsent, consentVersion);
+        String newLocale = row.preferredLocale() == null ? locale : null;
+        Boolean consent = marketingConsent ? Boolean.TRUE : null;
+        repository.updateProfile(row.id(), row.displayName(), null, null, newLocale, consent,
+                marketingConsent ? consentVersion : null);
         return repository.findById(row.id()).orElse(row);
     }
 
@@ -132,10 +149,19 @@ public class CrmServiceImpl implements CrmService {
     @Override
     @Transactional(readOnly = true)
     public List<ClientView> searchAmong(String query, Collection<UUID> clientIds) {
-        if (clientIds.isEmpty()) {
+        if (clientIds.isEmpty() || digitCount(query) >= MAX_MASTER_QUERY_DIGITS) {
             return List.of();
         }
-        return repository.search(query, clientIds);
+        // Names only: the phone is hidden from masters, so it must not be searchable as an oracle either (TD-18).
+        // The whole scope is fetched (it bounds the rows), clients named by a phone are dropped, then the limit applies.
+        return repository.search(query, clientIds, false, clientIds.size()).stream()
+                .filter(c -> !PhoneShape.showsPhone(c.displayName(), c.normalizedPhone()))
+                .limit(ClientRepository.SEARCH_LIMIT)
+                .toList();
+    }
+
+    private static int digitCount(String query) {
+        return query == null ? 0 : (int) query.chars().filter(ch -> ch >= '0' && ch <= '9').count();
     }
 
     @Override
@@ -144,6 +170,28 @@ public class CrmServiceImpl implements CrmService {
         ClientView existing = repository.findById(clientId)
                 .orElseThrow(() -> DomainException.notFound("CLIENT_NOT_FOUND", "Client not found"));
         repository.updateProfile(clientId, existing.displayName(), notes, tags, null, null, null);
+        return repository.findById(clientId).orElse(existing);
+    }
+
+    @Override
+    @Transactional
+    public ClientView withdrawMarketingConsent(UUID clientId, String source) {
+        ClientView existing = repository.findById(clientId)
+                .orElseThrow(() -> DomainException.notFound("CLIENT_NOT_FOUND", "Client not found"));
+        String version = "withdrawn:" + source;
+        repository.updateProfile(clientId, existing.displayName(), null, null, null, false,
+                version.length() > CONSENT_VERSION_MAX ? version.substring(0, CONSENT_VERSION_MAX) : version);
+        auditLogger.record(
+                ActorContext.current().map(ActorContext.Actor::actorId).orElse("public"),
+                ActorContext.current().map(a -> a.role().name()).orElse("PUBLIC"),
+                "client.consent.withdraw",
+                "client",
+                clientId,
+                "{\"marketingConsent\":" + existing.marketingConsent() + "}",
+                "{\"marketingConsent\":false}",
+                source,
+                null
+        );
         return repository.findById(clientId).orElse(existing);
     }
 

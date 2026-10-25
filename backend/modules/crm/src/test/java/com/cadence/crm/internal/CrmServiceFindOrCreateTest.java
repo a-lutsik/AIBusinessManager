@@ -63,7 +63,7 @@ class CrmServiceFindOrCreateTest {
     void setUp() {
         repository = mock(ClientRepository.class);
         transactions = new RecordingTransactionManager();
-        service = new CrmServiceImpl(repository, transactions);
+        service = new CrmServiceImpl(repository, transactions, mock(com.cadence.platform.audit.AuditLogger.class));
     }
 
     private static ClientView client(UUID id, String name) {
@@ -105,8 +105,8 @@ class CrmServiceFindOrCreateTest {
         assertThat(result).isSameAs(winner);
         assertThat(transactions.propagations).containsExactly(TransactionDefinition.PROPAGATION_NESTED);
         assertThat(transactions.outcomes).containsExactly("rollback");
-        // the winner keeps its name; only locale and consent are refreshed, as for any returning client
-        verify(repository).updateProfile(winnerId, "Mariam K.", null, null, "ka", true, "v1");
+        // the winner keeps its name and its locale ("en"); consent is only added, as for any returning client
+        verify(repository).updateProfile(winnerId, "Mariam K.", null, null, null, true, "v1");
     }
 
     @Test
@@ -150,7 +150,8 @@ class CrmServiceFindOrCreateTest {
 
         assertThat(result).isSameAs(existing);
         verify(repository, never()).insert(any());
-        verify(repository).updateProfile(eq(id), eq("Mariam"), isNull(), isNull(), eq("en"), eq(true), eq("v1"));
+        // name and locale stay; consent is added with the new version (decision D)
+        verify(repository).updateProfile(eq(id), eq("Mariam"), isNull(), isNull(), isNull(), eq(true), eq("v1"));
         assertThat(transactions.propagations).isEmpty();
     }
 }

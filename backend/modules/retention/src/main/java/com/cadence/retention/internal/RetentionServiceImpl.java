@@ -16,7 +16,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -84,34 +83,12 @@ public class RetentionServiceImpl implements RetentionService {
     private TrustView computeInternal(UUID clientId) {
         ClientView client = crmService.findById(clientId)
                 .orElseThrow(() -> DomainException.notFound("CLIENT_NOT_FOUND", "Client not found"));
-        List<String> reasons = new ArrayList<>();
-        String level;
-        if (client.completedVisitCount() == 0) {
-            level = "NEW";
-            reasons.add("No completed visits yet");
-        } else {
-            int recentNoShows = client.noShowCount();
-            int lateCancels = client.lateCancelCount();
-            if (recentNoShows >= 2 || (recentNoShows >= 1 && client.completedVisitCount() <= 5)) {
-                level = "LOW";
-                reasons.add(recentNoShows + " no-shows recorded");
-            } else if (lateCancels >= 2) {
-                level = "LOW";
-                reasons.add(lateCancels + " late cancellations");
-            } else if (recentNoShows == 0 && lateCancels == 0 && client.completedVisitCount() >= 3) {
-                level = "HIGH";
-                reasons.add(client.completedVisitCount() + " completed visits, 0 no-shows");
-            } else {
-                level = "NORMAL";
-                reasons.add(client.completedVisitCount() + " completed visits");
-            }
-        }
         var stored = dsl.selectFrom(TRUST_STATE)
                 .where(TenantAwareDsl.tenantEquals(TRUST_STATE.TENANT_ID).and(TRUST_STATE.CLIENT_ID.eq(clientId)))
                 .fetchOptional();
         String overrideLevel = stored.map(r -> r.get(TRUST_STATE.OVERRIDE_LEVEL)).orElse(null);
         String overrideReason = stored.map(r -> r.get(TRUST_STATE.OVERRIDE_REASON)).orElse(null);
-        return new TrustView(clientId, level, reasons, overrideLevel, overrideReason);
+        return TrustRules.assess(client, overrideLevel, overrideReason);
     }
 
     private void persist(TrustView trust) {

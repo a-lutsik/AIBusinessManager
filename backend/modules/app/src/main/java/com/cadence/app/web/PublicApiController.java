@@ -11,6 +11,7 @@ import com.cadence.catalog.api.SpecialistView;
 import com.cadence.app.ratelimit.ClientIpResolver;
 import com.cadence.app.ratelimit.PublicRateLimiter;
 import com.cadence.app.web.dto.CreatePublicBookingRequest;
+import com.cadence.app.web.dto.PublicVisitView;
 import com.cadence.platform.error.DomainException;
 import com.cadence.platform.tenancy.TenantContext;
 import com.cadence.platform.tenant.TenantDirectory;
@@ -151,27 +152,28 @@ public class PublicApiController {
         return body;
     }
 
+    /** The visit behind a manage link: visit facts and the typed name only (no stored client name, phone or trust). */
     @GetMapping("/bookings/{id}")
-    public AppointmentView booking(@PathVariable UUID id, @RequestParam String token) {
+    public PublicVisitView booking(@PathVariable UUID id, @RequestParam String token) {
         AppointmentView view = bookingService.findByAccessToken(token)
                 .orElseThrow(() -> DomainException.notFound("TOKEN_INVALID", "Booking link is invalid"));
         if (!view.id().equals(id)) {
             throw DomainException.forbidden("TOKEN_INVALID", "Token does not match this visit");
         }
-        return view;
+        return PublicVisitView.of(view);
     }
 
     @PostMapping("/bookings/{id}/cancel")
-    public AppointmentView cancel(@PathVariable UUID id, @RequestParam String token) {
+    public PublicVisitView cancel(@PathVariable UUID id, @RequestParam String token) {
         AppointmentView view = bookingService.cancelByAccessToken(token, true);
         if (!view.id().equals(id)) {
             throw DomainException.forbidden("TOKEN_INVALID", "Token does not match this visit");
         }
-        return view;
+        return PublicVisitView.of(view);
     }
 
     @PostMapping("/bookings/{id}/reschedule")
-    public AppointmentView reschedule(
+    public PublicVisitView reschedule(
             @PathVariable UUID id,
             @RequestParam String token,
             @RequestParam Instant start
@@ -180,7 +182,20 @@ public class PublicApiController {
         if (!view.id().equals(id)) {
             throw DomainException.forbidden("TOKEN_INVALID", "Token does not match this visit");
         }
-        return view;
+        return PublicVisitView.of(view);
+    }
+
+    /**
+     * Withdraws the marketing consent of the client behind this manage link (PRODUCT_PLAN §10). Audited; there are no
+     * marketing sends yet, so it records the choice that later sends must honour.
+     */
+    @PostMapping("/bookings/{id}/consent/withdraw")
+    public Map<String, Object> withdrawConsent(@PathVariable UUID id, @RequestParam String token) {
+        AppointmentView view = bookingService.withdrawConsentByAccessToken(id, token);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("id", view.id());
+        body.put("marketingConsent", false);
+        return body;
     }
 
     @GetMapping("/bookings/{id}/calendar.ics")

@@ -100,6 +100,8 @@ class MasterCreateRulesTest {
         when(catalog.weeklySchedule(SPECIALIST)).thenReturn(week);
         when(catalog.exceptions(eq(SPECIALIST), any(), any())).thenReturn(List.of());
         when(appointments.occupying(eq(SPECIALIST), any(), any(), any())).thenReturn(List.of());
+        // The client already has a live visit with this master, so booking them by id stays in the master's scope.
+        when(appointments.hasActiveVisit(CLIENT, SPECIALIST)).thenReturn(true);
         tenantScope = TenantContext.open(TENANT);
     }
 
@@ -115,7 +117,11 @@ class MasterCreateRulesTest {
     }
 
     private static CreateBookingCommand command(AppointmentStatus statusOverride, boolean skipRules) {
-        return new CreateBookingCommand(SPECIALIST, SERVICE, START, CLIENT, null, "Mariam", "en", false, null,
+        return command(statusOverride, skipRules, START);
+    }
+
+    private static CreateBookingCommand command(AppointmentStatus statusOverride, boolean skipRules, Instant start) {
+        return new CreateBookingCommand(SPECIALIST, SERVICE, start, CLIENT, null, "Mariam", "en", false, null,
                 null, "CONSOLE", statusOverride, skipRules);
     }
 
@@ -197,7 +203,8 @@ class MasterCreateRulesTest {
     void ownerAndSystemKeepBothSwitches(ActorContext.Role role) {
         actAs(role);
 
-        service.create(command(AppointmentStatus.COMPLETED, true));
+        // A settled visit is recorded only for a start that has passed (TD-17); a past start needs the rule bypass.
+        service.create(command(AppointmentStatus.COMPLETED, true, NOW.minusSeconds(3600 * 24)));
 
         assertThat(insertedStatus()).isEqualTo(AppointmentStatus.COMPLETED);
     }
@@ -205,7 +212,7 @@ class MasterCreateRulesTest {
     private static AppointmentView visit(AppointmentStatus status, UUID specialistId) {
         return new AppointmentView(UUID.randomUUID(), specialistId, SERVICE, CLIENT, status, START,
                 START.plusSeconds(3600), START, START.plusSeconds(3600), "Haircut", 8000, 60, 0, 0, "GEL", 0, null,
-                "Mariam", null, "CONSOLE", "Mariam", null, null);
+                "Mariam", null, "CONSOLE", "Mariam", null, null, false);
     }
 
     private AppointmentView stored(AppointmentStatus status, UUID specialistId) {

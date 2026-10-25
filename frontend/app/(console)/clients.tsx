@@ -51,10 +51,15 @@ export default function ClientsScreen() {
               marginBottom: space.sm,
             }}
           >
-            <Text style={{ fontWeight: '700', color: color.ink }}>{c.displayName}</Text>
-            <Text style={{ color: color.muted, marginTop: 4 }}>
-              {c.normalizedPhone} · {c.completedVisitCount} visits
-            </Text>
+            <Text style={{ fontWeight: '700', color: color.ink }}>{c.displayName ?? '—'}</Text>
+            {/* A master gets no phone and no visit counters (null): show only what is there. */}
+            {c.normalizedPhone || c.completedVisitCount != null ? (
+              <Text style={{ color: color.muted, marginTop: 4 }}>
+                {[c.normalizedPhone, c.completedVisitCount != null ? `${c.completedVisitCount} visits` : null]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </Text>
+            ) : null}
           </Pressable>
         </Link>
       ))}

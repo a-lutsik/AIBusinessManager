@@ -47,3 +47,6 @@ backend/modules/platform/build/generated-sources/
 
 # Downloaded reference/design assets
 *.zip
+
+# Local database backups (contain personal data)
+backups/

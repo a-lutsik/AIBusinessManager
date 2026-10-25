@@ -10,6 +10,7 @@ import {
   type AppointmentView,
   type SpecialistView,
 } from '@/src/api/client';
+import { useConsoleSession } from '@/src/auth/ConsoleSession';
 import { t } from '@/src/i18n';
 import { statusColor, useThemeTokens } from '@/src/theme/tokens';
 
@@ -49,6 +50,7 @@ function trustFromDetail(raw: unknown, fallback?: string | null): string | null 
 
 export default function CalendarScreen() {
   const { color, space, radius } = useThemeTokens();
+  const { role } = useConsoleSession();
   const [mode, setMode] = useState<'day' | 'week'>('week');
   const [visits, setVisits] = useState<AppointmentView[]>([]);
   const [specialists, setSpecialists] = useState<SpecialistView[]>([]);
@@ -109,9 +111,13 @@ export default function CalendarScreen() {
     }
   };
 
-  const actionsFor = (status: string) => {
+  const actionsFor = (status: string, serviceStart?: string, hiddenFromMaster?: boolean) => {
+    // A visit is completed or marked no-show only once it has started (the API answers 409 VISIT_NOT_STARTED).
+    const started = !serviceStart || new Date(serviceStart).getTime() <= Date.now();
+    // A master's phone booking hidden until the owner confirms it: only the owner confirms (the API answers 403).
+    if (status === 'PENDING' && role === 'MASTER' && hiddenFromMaster) return ['CANCELLED_BY_BUSINESS'];
     if (status === 'PENDING') return ['CONFIRMED', 'CANCELLED_BY_BUSINESS'];
-    if (status === 'CONFIRMED') return ['COMPLETED', 'NO_SHOW', 'CANCELLED_BY_BUSINESS'];
+    if (status === 'CONFIRMED') return started ? ['COMPLETED', 'NO_SHOW', 'CANCELLED_BY_BUSINESS'] : ['CANCELLED_BY_BUSINESS'];
     if (status === 'NO_SHOW') return ['COMPLETED'];
     if (status === 'COMPLETED') return ['NO_SHOW'];
     return [];
@@ -264,7 +270,7 @@ export default function CalendarScreen() {
           <Text style={{ fontSize: 20, fontWeight: '600', color: color.ink, fontFamily: 'Plus Jakarta Sans', marginBottom: space.sm }}>
             {selected.serviceNameSnapshot}
           </Text>
-          <Text style={{ color: color.ink }}>{selected.clientDisplayName}</Text>
+          <Text style={{ color: color.ink }}>{selected.clientDisplayName ?? '—'}</Text>
           <TrustBadge level={selectedTrust ?? selected.trustLevel} />
           <Text style={{ color: color.muted, marginTop: 4 }}>{t(`status.${selected.status}`)}</Text>
           <Text style={{ color: color.muted, marginTop: 4 }}>
@@ -273,16 +279,22 @@ export default function CalendarScreen() {
           {selected.clientPhone ? <Text style={{ color: color.muted, marginTop: 4 }}>{selected.clientPhone}</Text> : null}
           {selected.note ? <Text style={{ color: color.ink, marginTop: 4 }}>{selected.note}</Text> : null}
           <View style={{ marginTop: space.md, gap: space.sm }}>
-            {actionsFor(selected.status).map((st) => (
+            {selected.clientHiddenFromMaster && role === 'MASTER' ? (
+              <Text style={{ color: color.muted }}>{t('calendar.awaitingOwnerConfirmation')}</Text>
+            ) : null}
+            {actionsFor(selected.status, selected.serviceStart, selected.clientHiddenFromMaster).map((st) => (
               <Button
                 key={st}
                 label={t(`status.${st}`)}
                 onPress={() =>
-                  api.transition(LUMEN_TENANT_ID, selected.id, st).then((next) => {
-                    setSelected(next);
-                    setSelectedTrust(next.trustLevel);
-                    load();
-                  })
+                  api
+                    .transition(LUMEN_TENANT_ID, selected.id, st)
+                    .then((next) => {
+                      setSelected(next);
+                      setSelectedTrust(next.trustLevel);
+                      load();
+                    })
+                    .catch((e: unknown) => setError(String((e as Error).message ?? e)))
                 }
               />
             ))}

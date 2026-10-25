@@ -7,12 +7,14 @@ import com.cadence.platform.persistence.SqlStates;
 import com.cadence.platform.persistence.TenantAwareDsl;
 import com.cadence.platform.tenancy.TenantContext;
 import com.cadence.platform.time.Utc;
+import org.jooq.Condition;
 import org.jooq.DSLContext;
 import org.jooq.Record;
 import org.jooq.impl.DSL;
 import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -69,6 +71,7 @@ class AppointmentRepository {
                 .set(APPOINTMENT.ENTERED_NAME, row.enteredName())
                 .set(APPOINTMENT.NOTE, row.note())
                 .set(APPOINTMENT.SOURCE, row.source())
+                .set(APPOINTMENT.CLIENT_HIDDEN_FROM_MASTER, row.clientHiddenFromMaster())
                 .set(APPOINTMENT.CREATED_AT, Utc.toLocal(Instant.now()))
                 .set(APPOINTMENT.UPDATED_AT, Utc.toLocal(Instant.now()))
                 .execute();
@@ -78,7 +81,8 @@ class AppointmentRepository {
      * Updates status and times, but only while the stored status is still {@code expectedStatus}: a concurrent writer
      * that got there first leaves zero matching rows, reported as {@code CONCURRENT_MODIFICATION} (409) so the caller
      * does not apply its side effects (CRM aggregates) a second time. Moving or reviving a visit into an occupied
-     * slot is reported as {@code SLOT_OCCUPIED}.
+     * slot is reported as {@code SLOT_OCCUPIED}. Writes {@code clientHiddenFromMaster} as given (decision A: the
+     * owner's confirmation clears it), so every caller passes the current flag on unless it means to change it.
      */
     void updateStatusAndTimes(AppointmentView row, AppointmentStatus expectedStatus) {
         int updated;
@@ -100,6 +104,7 @@ class AppointmentRepository {
                 .set(APPOINTMENT.OCCUPIED_START, Utc.toLocal(row.occupiedStart()))
                 .set(APPOINTMENT.OCCUPIED_END, Utc.toLocal(row.occupiedEnd()))
                 .set(APPOINTMENT.NOTE, row.note())
+                .set(APPOINTMENT.CLIENT_HIDDEN_FROM_MASTER, row.clientHiddenFromMaster())
                 .set(APPOINTMENT.UPDATED_AT, Utc.toLocal(Instant.now()))
                 .where(TenantAwareDsl.tenantEquals(APPOINTMENT.TENANT_ID)
                         .and(APPOINTMENT.ID.eq(row.id()))
@@ -173,18 +178,67 @@ class AppointmentRepository {
                 .fetch(this::toView);
     }
 
+    /** Statuses that give a master access to the client: every status except the two cancellations (TD-19). */
+    private static final List<String> SCOPE_STATUSES = Arrays.stream(AppointmentStatus.values())
+            .filter(s -> s != AppointmentStatus.CANCELLED_BY_CLIENT && s != AppointmentStatus.CANCELLED_BY_BUSINESS)
+            .map(Enum::name)
+            .toList();
+
+    /**
+     * Visits that put their client into the master's scope: not cancelled (TD-19) and not hidden from the master
+     * (decision A: a phone booking onto a client outside the scope waits for the owner's confirmation).
+     */
+    private static Condition inMasterScope() {
+        return APPOINTMENT.STATUS.in(SCOPE_STATUSES).and(APPOINTMENT.CLIENT_HIDDEN_FROM_MASTER.isFalse());
+    }
+
+    /**
+     * Decision A: the owner confirmed one of the master's hidden phone bookings with this client, so the client is now
+     * in that master's scope and the master's other hidden visits with the client are revealed too. Returns how many.
+     */
+    int revealToMaster(UUID clientId, UUID specialistId) {
+        return dsl.update(APPOINTMENT)
+                .set(APPOINTMENT.CLIENT_HIDDEN_FROM_MASTER, false)
+                .set(APPOINTMENT.UPDATED_AT, Utc.toLocal(Instant.now()))
+                .where(TenantAwareDsl.tenantEquals(APPOINTMENT.TENANT_ID)
+                        .and(APPOINTMENT.CLIENT_ID.eq(clientId))
+                        .and(APPOINTMENT.SPECIALIST_ID.eq(specialistId))
+                        .and(APPOINTMENT.CLIENT_HIDDEN_FROM_MASTER.isTrue()))
+                .execute();
+    }
+
+    /** Distinct clients with at least one scope-giving visit with {@code specialistId} (a master's client scope). */
     List<UUID> clientIdsOf(UUID specialistId) {
         return dsl.selectDistinct(APPOINTMENT.CLIENT_ID)
                 .from(APPOINTMENT)
-                .where(TenantAwareDsl.tenantEquals(APPOINTMENT.TENANT_ID).and(APPOINTMENT.SPECIALIST_ID.eq(specialistId)))
+                .where(TenantAwareDsl.tenantEquals(APPOINTMENT.TENANT_ID)
+                        .and(APPOINTMENT.SPECIALIST_ID.eq(specialistId))
+                        .and(inMasterScope()))
                 .fetch(APPOINTMENT.CLIENT_ID);
     }
 
-    /** Visits of one client, oldest first; {@code specialistId} narrows them to one specialist when not null. */
-    List<AppointmentView> byClient(UUID clientId, UUID specialistId) {
+    /** Whether {@code clientId} has a scope-giving visit with {@code specialistId}, i.e. is in that master's scope. */
+    boolean hasActiveVisit(UUID clientId, UUID specialistId) {
+        return dsl.fetchExists(dsl.selectOne()
+                .from(APPOINTMENT)
+                .where(TenantAwareDsl.tenantEquals(APPOINTMENT.TENANT_ID)
+                        .and(APPOINTMENT.CLIENT_ID.eq(clientId))
+                        .and(APPOINTMENT.SPECIALIST_ID.eq(specialistId))
+                        .and(inMasterScope())));
+    }
+
+    /**
+     * Visits of one client, oldest first; {@code specialistId} narrows them to one specialist when not null, and
+     * {@code masterScopeOnly} keeps only the visits that give a master access (no cancellations, nothing hidden from
+     * the master): a master's view of the client.
+     */
+    List<AppointmentView> byClient(UUID clientId, UUID specialistId, boolean masterScopeOnly) {
         var condition = TenantAwareDsl.tenantEquals(APPOINTMENT.TENANT_ID).and(APPOINTMENT.CLIENT_ID.eq(clientId));
         if (specialistId != null) {
             condition = condition.and(APPOINTMENT.SPECIALIST_ID.eq(specialistId));
+        }
+        if (masterScopeOnly) {
+            condition = condition.and(inMasterScope());
         }
         return dsl.selectFrom(APPOINTMENT)
                 .where(condition)
@@ -269,7 +323,8 @@ class AppointmentRepository {
                 r.get(APPOINTMENT.SOURCE),
                 r.get(APPOINTMENT.ENTERED_NAME),
                 null,
-                null
+                null,
+                Boolean.TRUE.equals(r.get(APPOINTMENT.CLIENT_HIDDEN_FROM_MASTER))
         );
     }
 }

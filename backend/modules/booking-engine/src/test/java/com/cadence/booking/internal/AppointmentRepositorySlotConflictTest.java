@@ -71,7 +71,7 @@ class AppointmentRepositorySlotConflictTest {
         return new AppointmentView(
                 UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
                 AppointmentStatus.CONFIRMED, START, START.plusSeconds(2700), START.minusSeconds(300), START.plusSeconds(3300),
-                "Haircut", 8000, 45, 5, 10, "GEL", 0, null, "Mariam", null, "PUBLIC", "Mariam", null, null);
+                "Haircut", 8000, 45, 5, 10, "GEL", 0, null, "Mariam", null, "PUBLIC", "Mariam", null, null, false);
     }
 
     private static void assertSlotOccupied(Throwable thrown) {

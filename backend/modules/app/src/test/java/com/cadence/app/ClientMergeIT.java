@@ -33,8 +33,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /**
  * Client merge and owner status corrections against the real schema (RLS role {@code cadence_app}). Visits are
- * created through the console API far in the future (skipNoticeAndHorizon) so they never collide with the demo
- * schedule; JDBC checks run as the owner role {@code cadence}, which sees every tenant.
+ * created through the console API far in the past (skipNoticeAndHorizon), so they never collide with the demo
+ * schedule and may be settled (TD-17: a visit is completed or marked no-show only after it starts); JDBC checks run as
+ * the owner role {@code cadence}, which sees every tenant.
  */
 @SpringBootTest
 @RelaxedPublicRateLimits
@@ -42,7 +43,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class ClientMergeIT extends AbstractTimescaleIT {
 
     private static final int HAIRCUT_PRICE = 8000;
-    private static final Instant BASE = Instant.now().plus(300, ChronoUnit.DAYS).truncatedTo(ChronoUnit.DAYS);
+    private static final Instant BASE = Instant.now().minus(300, ChronoUnit.DAYS).truncatedTo(ChronoUnit.DAYS);
     private static final AtomicLong SLOT = new AtomicLong();
 
     @Autowired

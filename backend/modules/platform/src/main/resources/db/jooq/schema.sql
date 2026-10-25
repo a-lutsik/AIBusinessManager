@@ -192,6 +192,7 @@ CREATE TABLE appointment (
     entered_name                VARCHAR(256),
     note                        VARCHAR(4096),
     source                      VARCHAR(32) NOT NULL,
+    client_hidden_from_master   BOOLEAN NOT NULL DEFAULT false,
     created_at                  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at                  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT appointment_pk PRIMARY KEY (id),
