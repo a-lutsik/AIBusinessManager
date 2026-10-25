@@ -2,7 +2,7 @@
 spring-boot = "4.1.0"
 java = "25"
 archunit = "1.4.1"
-jooq-codegen-plugin = "3.21.5"
+jooq-codegen-plugin = "3.21.9"
 libphonenumber = "9.0.16"
 testcontainers = "1.21.3"
 spring-batch = "6.0.1"
