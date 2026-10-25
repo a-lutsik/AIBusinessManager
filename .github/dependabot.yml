@@ -5,32 +5,56 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    ignore:
+      # Gradle majors change the supported JDKs and the build DSL (Gradle 8.14 runs on JDK 21 and compiles with the
+      # JDK 25 toolchain; see backend/Dockerfile and .github/workflows/ci.yml). Upgrade the wrapper deliberately,
+      # together with the JDK wiring, not from a bot PR.
+      - dependency-name: "gradle-wrapper"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: npm
     directory: /frontend
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
-    # Expo SDK pins compatible react / react-native / expo-* versions; majors move only with an SDK upgrade.
+    # Packages pinned by the Expo SDK (57) take patch updates only. Minor and major versions move together with an
+    # SDK upgrade (`npx expo install --fix`); react-native 0.x minors are breaking, and eslint-config-expo follows
+    # the SDK major.
     ignore:
-      - dependency-name: "expo*"
-        update-types: ["version-update:semver-major"]
+      - dependency-name: "expo"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "expo-*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "@expo/*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "eslint-config-expo"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
       - dependency-name: "react"
-        update-types: ["version-update:semver-major"]
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
       - dependency-name: "react-dom"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "react-native*"
-        update-types: ["version-update:semver-major"]
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "@types/react"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "react-native"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "react-native-*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "@react-native/*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
       - dependency-name: "typescript"
-        update-types: ["version-update:semver-major"]
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
 
-  # backend/Dockerfile base images (eclipse-temurin)
+  # backend/Dockerfile base images (eclipse-temurin). The JDK major is a deliberate choice per stage (JDK 21 runs
+  # Gradle, JDK 25 compiles and runs the app); only patch/minor updates of the same JDK major are proposed.
   - package-ecosystem: docker
     directory: /backend
     schedule:
       interval: weekly
+    ignore:
+      - dependency-name: "eclipse-temurin"
+        update-types: ["version-update:semver-major"]
