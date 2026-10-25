@@ -175,7 +175,7 @@ jobs:
       # (they run in the backend job). Layer cache goes to the GitHub Actions cache; the BuildKit `--mount=type=cache`
       # Gradle cache is not exported, so dependency downloads repeat on a cold build.
       - name: Build image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: backend
           file: backend/Dockerfile
