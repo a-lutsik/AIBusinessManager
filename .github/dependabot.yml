@@ -19,8 +19,14 @@ updates:
     open-pull-requests-limit: 5
     # Packages pinned by the Expo SDK (57) take patch updates only. Minor and major versions move together with an
     # SDK upgrade (`npx expo install --fix`); react-native 0.x minors are breaking, and eslint-config-expo follows
-    # the SDK major.
+    # the SDK major. Packages the SDK pins to an EXACT version (react and react-dom must stay identical; native
+    # modules match the SDK's native build) get no updates at all — only with the SDK upgrade.
     ignore:
+      - dependency-name: "react"
+      - dependency-name: "react-dom"
+      - dependency-name: "react-native"
+      - dependency-name: "react-native-reanimated"
+      - dependency-name: "react-native-worklets"
       - dependency-name: "expo"
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
       - dependency-name: "expo-*"
@@ -29,13 +35,7 @@ updates:
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
       - dependency-name: "eslint-config-expo"
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
-      - dependency-name: "react"
-        update-types: ["version-update:semver-major", "version-update:semver-minor"]
-      - dependency-name: "react-dom"
-        update-types: ["version-update:semver-major", "version-update:semver-minor"]
       - dependency-name: "@types/react"
-        update-types: ["version-update:semver-major", "version-update:semver-minor"]
-      - dependency-name: "react-native"
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
       - dependency-name: "react-native-*"
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
