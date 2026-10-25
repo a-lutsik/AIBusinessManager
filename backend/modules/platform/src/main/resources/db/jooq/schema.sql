@@ -218,6 +218,7 @@ CREATE TABLE appointment_event (
 );
 
 CREATE INDEX appointment_event_appt_idx ON appointment_event (appointment_id, created_at);
+CREATE INDEX appointment_event_tenant_appt_idx ON appointment_event (tenant_id, appointment_id, created_at);
 
 CREATE TABLE booking_access_token (
     id                  UUID NOT NULL,
@@ -351,7 +352,10 @@ CREATE TABLE ai_prompt_log (
 CREATE TABLE growth_signal (
     id                  UUID NOT NULL,
     tenant_id           UUID NOT NULL,
+    dedupe_key          VARCHAR(256) NOT NULL,
     signal_key          VARCHAR(64) NOT NULL,
+    specialist_id       UUID NULL,
+    period              VARCHAR(7) NOT NULL,
     title               VARCHAR(256) NOT NULL,
     evidence            VARCHAR(1024) NOT NULL,
     suggested_action    VARCHAR(1024) NOT NULL,
@@ -359,7 +363,10 @@ CREATE TABLE growth_signal (
     action_type         VARCHAR(64),
     action_payload      VARCHAR(2048),
     dismissed_at        TIMESTAMP,
-    created_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT growth_signal_pk PRIMARY KEY (id, created_at),
+    resolved_at         TIMESTAMP NULL,
+    created_at          TIMESTAMP NOT NULL,
+    updated_at          TIMESTAMP NOT NULL,
+    CONSTRAINT growth_signal_pk PRIMARY KEY (id),
+    CONSTRAINT growth_signal_dedupe_uq UNIQUE (tenant_id, dedupe_key),
     CONSTRAINT growth_signal_tenant_fk FOREIGN KEY (tenant_id) REFERENCES tenant (id)
 );

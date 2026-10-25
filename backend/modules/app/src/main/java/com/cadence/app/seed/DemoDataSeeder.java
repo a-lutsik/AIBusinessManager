@@ -176,7 +176,8 @@ public class DemoDataSeeder implements ApplicationRunner {
                 }
             }
             try {
-                growth.recalculate(LocalDate.now(zone).minusDays(90), LocalDate.now(zone));
+                // As of now: the seed is the only writer at startup and has committed its visits (review D1).
+                growth.recalculateForSeed();
             } catch (Exception ex) {
                 log.warn("Metrics seed recalculation skipped: {}", ex.getMessage());
             }

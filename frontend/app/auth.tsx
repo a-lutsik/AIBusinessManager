@@ -32,6 +32,8 @@ function WebCallback() {
   const { color, space, radius } = useThemeTokens();
   const [failure, setFailure] = useState<RedirectFailure | null>(null);
   const routerRef = useRef(router);
+  // Latest-value ref so the one-shot redirect effect below does not depend on the router identity.
+  // eslint-disable-next-line react-hooks/refs
   routerRef.current = router;
   const handled = useRef(false);
 

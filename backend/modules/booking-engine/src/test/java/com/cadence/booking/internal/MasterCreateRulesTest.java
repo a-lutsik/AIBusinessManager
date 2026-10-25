@@ -82,7 +82,8 @@ class MasterCreateRulesTest {
                 mock(AuditLogger.class),
                 mock(OwnerTaskService.class),
                 mock(PhoneNormalizer.class),
-                Clock.fixed(NOW, ZoneOffset.UTC)
+                Clock.fixed(NOW, ZoneOffset.UTC),
+                TestMessages.catalog()
         );
         TenantRecord tenant = new TenantRecord();
         tenant.setId(TENANT);
@@ -127,7 +128,7 @@ class MasterCreateRulesTest {
 
     private AppointmentStatus insertedStatus() {
         ArgumentCaptor<AppointmentView> row = ArgumentCaptor.forClass(AppointmentView.class);
-        verify(appointments).insert(row.capture());
+        verify(appointments).record(row.capture(), JournalRecords.created(), any());
         return row.getValue().status();
     }
 
@@ -165,7 +166,7 @@ class MasterCreateRulesTest {
 
         assertForbidden(() -> service.create(command(AppointmentStatus.CONFIRMED, false)));
 
-        verify(appointments, never()).insert(any());
+        verify(appointments, never()).record(any(), JournalRecords.created(), any());
     }
 
     @Test
@@ -229,8 +230,7 @@ class MasterCreateRulesTest {
 
         assertForbidden(() -> service.transition(pending.id(), AppointmentStatus.CONFIRMED, null));
 
-        verify(appointments, never()).updateStatusAndTimes(any(), any());
-        verify(appointments, never()).insertEvent(any(), any(), any());
+        verify(appointments, never()).record(any(), any(), JournalRecords.anyStatusChange());
     }
 
     @Test
@@ -242,7 +242,7 @@ class MasterCreateRulesTest {
         AppointmentView result = service.transition(pending.id(), AppointmentStatus.CONFIRMED, null);
 
         assertThat(result.status()).isEqualTo(AppointmentStatus.CONFIRMED);
-        verify(appointments).updateStatusAndTimes(any(), eq(AppointmentStatus.PENDING));
+        verify(appointments).record(any(), any(), JournalRecords.statusFrom(AppointmentStatus.PENDING));
     }
 
     @Test

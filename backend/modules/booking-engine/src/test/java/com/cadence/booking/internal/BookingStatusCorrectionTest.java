@@ -69,7 +69,8 @@ class BookingStatusCorrectionTest {
                 audit,
                 mock(OwnerTaskService.class),
                 mock(PhoneNormalizer.class),
-                Clock.systemUTC()
+                Clock.systemUTC(),
+                TestMessages.catalog()
         );
     }
 
@@ -173,7 +174,7 @@ class BookingStatusCorrectionTest {
                     });
         }
         verifyNoInteractions(crm, audit);
-        verify(appointments, never()).updateStatusAndTimes(any(), any());
+        verify(appointments, never()).record(any(), any(), JournalRecords.anyStatusChange());
     }
 
     @Test
@@ -211,7 +212,7 @@ class BookingStatusCorrectionTest {
 
         InOrder order = inOrder(appointments);
         order.verify(appointments).findForUpdate(APPOINTMENT);
-        order.verify(appointments).updateStatusAndTimes(any(), eq(AppointmentStatus.COMPLETED));
+        order.verify(appointments).record(any(), any(), JournalRecords.statusFrom(AppointmentStatus.COMPLETED));
         verify(appointments, never()).find(any());
     }
 
@@ -220,7 +221,7 @@ class BookingStatusCorrectionTest {
         actAsOwner();
         visitWithStatus(AppointmentStatus.COMPLETED);
         doThrow(DomainException.conflict("CONCURRENT_MODIFICATION", "changed"))
-                .when(appointments).updateStatusAndTimes(any(), eq(AppointmentStatus.COMPLETED));
+                .when(appointments).record(any(), any(), JournalRecords.statusFrom(AppointmentStatus.COMPLETED));
 
         assertThatThrownBy(() -> service.transition(APPOINTMENT, AppointmentStatus.NO_SHOW, null))
                 .isInstanceOfSatisfying(DomainException.class, ex -> {

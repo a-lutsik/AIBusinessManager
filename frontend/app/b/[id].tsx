@@ -51,14 +51,15 @@ export default function BookingLinkScreen() {
   const pending = visit?.status === 'PENDING';
   const headline = pending ? t('book.pending') : cancelled ? t(`status.${visit!.status}`) : t('book.success');
 
+  const serviceStart = visit?.serviceStart;
   const whenLabel = useMemo(() => {
-    if (!visit?.serviceStart) return '—';
+    if (!serviceStart) return '—';
     try {
-      return new Date(visit.serviceStart).toLocaleString();
+      return new Date(serviceStart).toLocaleString();
     } catch {
-      return visit.serviceStart;
+      return serviceStart;
     }
-  }, [visit?.serviceStart]);
+  }, [serviceStart]);
 
   const openReschedule = async () => {
     setRescheduleOpen(true);

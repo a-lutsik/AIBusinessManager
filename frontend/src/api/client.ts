@@ -239,13 +239,13 @@ export type AiChatResponse = {
 
 export type ConversationHistoryView = {
   conversationId: string;
-  messages?: Array<{
+  messages?: {
     at?: string;
     role?: string;
     content?: string;
     provider?: string;
     model?: string;
-  }>;
+  }[];
   drafts?: AiDraftAction[];
 };
 

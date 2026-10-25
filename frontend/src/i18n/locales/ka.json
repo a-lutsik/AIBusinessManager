@@ -57,5 +57,11 @@
   "role.owner": "მფლობელი",
   "role.master": "ოსტატი",
   "ai.placeholder": "იკითხეთ დღევანდელზე ან გაუქმების მონახაზზე",
-  "ai.send": "გაგზავნა"
+  "ai.send": "გაგზავნა",
+  "client.visits": "{count, plural, one {# ვიზიტი} other {# ვიზიტი}}",
+  "unit.minutes": "{count, number} წთ",
+  "unit.minutesWord": "წთ",
+  "unit.hoursWord": "სთ",
+  "unit.daysWord": "{count, plural, one {დღე} other {დღე}}",
+  "service.buffer": "+{before}/{after} ბუფერი"
 }

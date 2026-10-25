@@ -24,6 +24,94 @@ const DEFAULT_RULES: BookingRulesView = {
   timeFormat24h: true,
 };
 
+// Module-level components (not defined inside RulesScreen): a component created during render is a new type on every
+// render, so React would remount every field - and a TextInput would lose focus - on each keystroke.
+function Field({ label, children }: { label: string; children: ReactNode }) {
+  const { color, space } = useThemeTokens();
+  return (
+    <View style={{ marginBottom: space.lg }}>
+      <Text style={{ color: color.ink, fontWeight: '600', marginBottom: space.sm }}>{label}</Text>
+      {children}
+    </View>
+  );
+}
+
+function Toggle({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) {
+  const { color, space } = useThemeTokens();
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: space.md,
+        marginBottom: space.lg,
+      }}
+    >
+      <Text style={{ flex: 1, color: color.ink, fontWeight: '600' }}>{label}</Text>
+      <Switch
+        value={value}
+        onValueChange={onChange}
+        trackColor={{ false: color.line, true: `${color.primary}88` }}
+        thumbColor={value ? color.primary : color.mist}
+      />
+    </View>
+  );
+}
+
+function Segment<V>({ options, value, onChange }: { options: { value: V; label: string }[]; value: V; onChange: (v: V) => void }) {
+  const { color, space, radius } = useThemeTokens();
+  return (
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>
+      {options.map((opt) => {
+        const active = value === opt.value;
+        return (
+          <Pressable
+            key={String(opt.value)}
+            onPress={() => onChange(opt.value)}
+            style={{
+              paddingVertical: space.sm,
+              paddingHorizontal: space.md,
+              borderRadius: radius.control,
+              borderWidth: 1,
+              borderColor: active ? color.primary : color.line,
+              backgroundColor: active ? `${color.primary}14` : color.surface,
+            }}
+          >
+            <Text style={{ color: active ? color.primary : color.muted, fontWeight: active ? '700' : '500' }}>{opt.label}</Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+function NumberInput({ value, onChange, suffix }: { value: number; onChange: (n: number) => void; suffix?: string }) {
+  const { color, space, radius } = useThemeTokens();
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
+      <TextInput
+        keyboardType="number-pad"
+        style={{
+          borderWidth: 1,
+          borderColor: color.line,
+          padding: space.md,
+          borderRadius: radius.control,
+          backgroundColor: color.surface,
+          minWidth: 120,
+          color: color.ink,
+        }}
+        value={String(value)}
+        onChangeText={(text) => {
+          const n = Number(text.replace(/[^\d]/g, ''));
+          onChange(Number.isFinite(n) ? n : 0);
+        }}
+      />
+      {suffix ? <Text style={{ color: color.muted }}>{suffix}</Text> : null}
+    </View>
+  );
+}
+
 export default function RulesScreen() {
   const { color, space, radius } = useThemeTokens();
   const [draft, setDraft] = useState<BookingRulesView | null>(null);
@@ -68,80 +156,6 @@ export default function RulesScreen() {
     }
   };
 
-  const Field = ({ label, children }: { label: string; children: ReactNode }) => (
-    <View style={{ marginBottom: space.lg }}>
-      <Text style={{ color: color.ink, fontWeight: '600', marginBottom: space.sm }}>{label}</Text>
-      {children}
-    </View>
-  );
-
-  const Toggle = ({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) => (
-    <View
-      style={{
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: space.md,
-        marginBottom: space.lg,
-      }}
-    >
-      <Text style={{ flex: 1, color: color.ink, fontWeight: '600' }}>{label}</Text>
-      <Switch
-        value={value}
-        onValueChange={onChange}
-        trackColor={{ false: color.line, true: `${color.primary}88` }}
-        thumbColor={value ? color.primary : color.mist}
-      />
-    </View>
-  );
-
-  const Segment = <V,>({ options, value, onChange }: { options: { value: V; label: string }[]; value: V; onChange: (v: V) => void }) => (
-    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>
-      {options.map((opt) => {
-        const active = value === opt.value;
-        return (
-          <Pressable
-            key={String(opt.value)}
-            onPress={() => onChange(opt.value)}
-            style={{
-              paddingVertical: space.sm,
-              paddingHorizontal: space.md,
-              borderRadius: radius.control,
-              borderWidth: 1,
-              borderColor: active ? color.primary : color.line,
-              backgroundColor: active ? `${color.primary}14` : color.surface,
-            }}
-          >
-            <Text style={{ color: active ? color.primary : color.muted, fontWeight: active ? '700' : '500' }}>{opt.label}</Text>
-          </Pressable>
-        );
-      })}
-    </View>
-  );
-
-  const NumberInput = ({ value, onChange, suffix }: { value: number; onChange: (n: number) => void; suffix?: string }) => (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
-      <TextInput
-        keyboardType="number-pad"
-        style={{
-          borderWidth: 1,
-          borderColor: color.line,
-          padding: space.md,
-          borderRadius: radius.control,
-          backgroundColor: color.surface,
-          minWidth: 120,
-          color: color.ink,
-        }}
-        value={String(value)}
-        onChangeText={(text) => {
-          const n = Number(text.replace(/[^\d]/g, ''));
-          onChange(Number.isFinite(n) ? n : 0);
-        }}
-      />
-      {suffix ? <Text style={{ color: color.muted }}>{suffix}</Text> : null}
-    </View>
-  );
-
   if (loading || !draft) {
     return (
       <ScrollView>
@@ -175,19 +189,19 @@ export default function RulesScreen() {
       <View style={card}>
         <Field label={t('rules.slotStep')}>
           <Segment
-            options={SLOT_STEPS.map((step) => ({ value: step, label: `${step} min` }))}
+            options={SLOT_STEPS.map((step) => ({ value: step, label: t('unit.minutes', { count: step }) }))}
             value={draft.slotStepMinutes}
             onChange={(v) => patch('slotStepMinutes', v)}
           />
         </Field>
         <Field label={t('rules.minNotice')}>
-          <NumberInput value={draft.minNoticeMinutes} onChange={(n) => patch('minNoticeMinutes', n)} suffix="min" />
+          <NumberInput value={draft.minNoticeMinutes} onChange={(n) => patch('minNoticeMinutes', n)} suffix={t('unit.minutesWord')} />
         </Field>
         <Field label={t('rules.horizon')}>
-          <NumberInput value={draft.horizonDays} onChange={(n) => patch('horizonDays', n)} suffix="days" />
+          <NumberInput value={draft.horizonDays} onChange={(n) => patch('horizonDays', n)} suffix={t('unit.daysWord', { count: draft.horizonDays })} />
         </Field>
         <Field label={t('rules.lateCancel')}>
-          <NumberInput value={draft.lateCancellationHours} onChange={(n) => patch('lateCancellationHours', n)} suffix="h" />
+          <NumberInput value={draft.lateCancellationHours} onChange={(n) => patch('lateCancellationHours', n)} suffix={t('unit.hoursWord')} />
         </Field>
       </View>
 
@@ -223,8 +237,8 @@ export default function RulesScreen() {
           <Field label={t('rules.timeFormat')}>
             <Segment
               options={[
-                { value: true, label: '24h' },
-                { value: false, label: '12h' },
+                { value: true, label: t('rules.timeFormat.h24') },
+                { value: false, label: t('rules.timeFormat.h12') },
               ]}
               value={draft.timeFormat24h}
               onChange={(v) => patch('timeFormat24h', v)}

@@ -1,5 +1,6 @@
 package com.cadence.booking.internal;
 
+import com.cadence.booking.api.AppointmentEventType;
 import com.cadence.booking.api.AppointmentStatus;
 import com.cadence.booking.api.AppointmentView;
 import com.cadence.platform.error.DomainException;
@@ -18,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.support.SQLErrorCodeSQLExceptionTranslator;
 
 import java.sql.SQLException;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -58,7 +60,7 @@ class AppointmentRepositorySlotConflictTest {
                 }
             }));
         }
-        return new AppointmentRepository(dsl);
+        return new AppointmentRepository(dsl, Clock.systemUTC());
     }
 
     private static SQLException exclusion() {
@@ -74,6 +76,17 @@ class AppointmentRepositorySlotConflictTest {
                 "Haircut", 8000, 45, 5, 10, "GEL", 0, null, "Mariam", null, "PUBLIC", "Mariam", null, null, false);
     }
 
+    /** The CREATED write path (row insert plus journal event). */
+    private static void create(AppointmentRepository repository) {
+        AppointmentView visit = visit();
+        repository.record(visit, AppointmentEventType.CREATED, JournalPayloads.Created.of(visit));
+    }
+
+    /** A move: the status-guarded update expects the visit's unchanged status (CONFIRMED). */
+    private static void move(AppointmentRepository repository) {
+        repository.record(visit(), AppointmentEventType.RESCHEDULED, new JournalPayloads.Rescheduled(START, START));
+    }
+
     private static void assertSlotOccupied(Throwable thrown) {
         assertThat(thrown).isInstanceOfSatisfying(DomainException.class, e -> {
             assertThat(e.code()).isEqualTo("SLOT_OCCUPIED");
@@ -86,7 +99,7 @@ class AppointmentRepositorySlotConflictTest {
     void insertExclusionViolationBecomesSlotOccupied() {
         for (boolean spring : new boolean[]{false, true}) {
             var repository = repositoryFailingWith(exclusion(), spring);
-            assertThatThrownBy(() -> repository.insert(visit())).satisfies(AppointmentRepositorySlotConflictTest::assertSlotOccupied);
+            assertThatThrownBy(() -> create(repository)).satisfies(AppointmentRepositorySlotConflictTest::assertSlotOccupied);
         }
     }
 
@@ -94,16 +107,16 @@ class AppointmentRepositorySlotConflictTest {
     void rescheduleUpdateExclusionViolationBecomesSlotOccupied() {
         for (boolean spring : new boolean[]{false, true}) {
             var repository = repositoryFailingWith(exclusion(), spring);
-            assertThatThrownBy(() -> repository.updateStatusAndTimes(visit(), AppointmentStatus.CONFIRMED)).satisfies(AppointmentRepositorySlotConflictTest::assertSlotOccupied);
+            assertThatThrownBy(() -> move(repository)).satisfies(AppointmentRepositorySlotConflictTest::assertSlotOccupied);
         }
     }
 
     @Test
     void statusGuardedUpdateThatMatchesNoRowIsAConcurrentModificationConflict() {
         DSLContext dsl = DSL.using(new MockConnection(ctx -> new MockResult[]{new MockResult(0)}), SQLDialect.POSTGRES);
-        var repository = new AppointmentRepository(dsl);
+        var repository = new AppointmentRepository(dsl, Clock.systemUTC());
 
-        assertThatThrownBy(() -> repository.updateStatusAndTimes(visit(), AppointmentStatus.CONFIRMED))
+        assertThatThrownBy(() -> move(repository))
                 .isInstanceOfSatisfying(DomainException.class, e -> {
                     assertThat(e.code()).isEqualTo("CONCURRENT_MODIFICATION");
                     assertThat(e.status()).isEqualTo(409);
@@ -115,13 +128,22 @@ class AppointmentRepositorySlotConflictTest {
         var sql = new java.util.ArrayList<String>();
         DSLContext dsl = DSL.using(new MockConnection(ctx -> {
             sql.add(ctx.sql());
+            if (ctx.sql().toLowerCase().startsWith("select")) {
+                // No earlier event of the visit (the time floor of review m2).
+                return new MockResult[]{new MockResult(0, DSL.using(SQLDialect.POSTGRES).newResult(
+                        DSL.field("max", org.jooq.impl.SQLDataType.LOCALDATETIME)))};
+            }
             return new MockResult[]{new MockResult(1)};
         }), SQLDialect.POSTGRES);
-        var repository = new AppointmentRepository(dsl);
+        var repository = new AppointmentRepository(dsl, Clock.systemUTC());
 
-        repository.updateStatusAndTimes(visit(), AppointmentStatus.CONFIRMED);
+        move(repository);
 
-        assertThat(sql).singleElement().asString().contains("\"status\" = ?").containsIgnoringCase("where");
+        // The guarded row update first, then the visit's last event time, then the journal event in the same write.
+        assertThat(sql).hasSize(3);
+        assertThat(sql.get(0)).startsWithIgnoringCase("update").contains("\"status\" = ?").containsIgnoringCase("where");
+        assertThat(sql.get(1)).startsWithIgnoringCase("select").contains("appointment_event");
+        assertThat(sql.get(2)).startsWithIgnoringCase("insert").contains("appointment_event");
     }
 
     @Test
@@ -132,7 +154,7 @@ class AppointmentRepositorySlotConflictTest {
             return new MockResult[]{new MockResult(0, DSL.using(SQLDialect.POSTGRES).newResult())};
         }), SQLDialect.POSTGRES);
 
-        assertThat(new AppointmentRepository(dsl).findForUpdate(UUID.randomUUID())).isEmpty();
+        assertThat(new AppointmentRepository(dsl, Clock.systemUTC()).findForUpdate(UUID.randomUUID())).isEmpty();
 
         assertThat(sql).singleElement().asString().containsIgnoringCase("for update");
     }
@@ -141,7 +163,7 @@ class AppointmentRepositorySlotConflictTest {
     void originalFailureIsKeptAsCauseForDiagnostics() {
         var repository = repositoryFailingWith(exclusion(), true);
 
-        assertThatThrownBy(() -> repository.insert(visit()))
+        assertThatThrownBy(() -> create(repository))
                 .hasRootCauseInstanceOf(SQLException.class)
                 .hasRootCauseMessage(exclusion().getMessage());
     }
@@ -151,8 +173,8 @@ class AppointmentRepositorySlotConflictTest {
         var foreignKey = new SQLException("ERROR: insert violates foreign key constraint \"appointment_client_fk\"", "23503");
         for (boolean spring : new boolean[]{false, true}) {
             var repository = repositoryFailingWith(foreignKey, spring);
-            assertThatThrownBy(() -> repository.insert(visit())).isNotInstanceOf(DomainException.class);
-            assertThatThrownBy(() -> repository.updateStatusAndTimes(visit(), AppointmentStatus.CONFIRMED)).isNotInstanceOf(DomainException.class);
+            assertThatThrownBy(() -> create(repository)).isNotInstanceOf(DomainException.class);
+            assertThatThrownBy(() -> move(repository)).isNotInstanceOf(DomainException.class);
         }
     }
 
@@ -161,6 +183,6 @@ class AppointmentRepositorySlotConflictTest {
         var other = new SQLException("ERROR: conflicting key value violates exclusion constraint \"some_other_ex\"", "23P01");
         var repository = repositoryFailingWith(other, true);
 
-        assertThatThrownBy(() -> repository.insert(visit())).isNotInstanceOf(DomainException.class);
+        assertThatThrownBy(() -> create(repository)).isNotInstanceOf(DomainException.class);
     }
 }

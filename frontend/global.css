@@ -19,8 +19,8 @@
   --color-status-completed: #6366F1;
   --color-status-noshow: #DC2626;
   --color-status-cancelled: #94A3B8;
-  --font-sans: "Inter", "Noto Sans", system-ui, sans-serif;
-  --font-display: "Plus Jakarta Sans", "Inter", "Noto Sans", system-ui, sans-serif;
+  --font-sans: "Inter", "Noto Sans Georgian", "Noto Sans", system-ui, sans-serif;
+  --font-display: "Plus Jakarta Sans", "Inter", "Noto Sans Georgian", "Noto Sans", system-ui, sans-serif;
   --radius-control: 0.5rem;
   --radius-card: 1rem;
   --radius-pill: 9999px;

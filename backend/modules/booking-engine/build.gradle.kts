@@ -10,6 +10,7 @@ dependencies {
     api(project(":modules:crm"))
     implementation(project(":modules:retention"))
     implementation(project(":modules:notification"))
+    implementation(libs.jackson.databind)
     testImplementation(platform(libs.spring.boot.dependencies))
     testImplementation(libs.spring.boot.starter.test)
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")

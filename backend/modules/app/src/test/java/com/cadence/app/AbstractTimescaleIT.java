@@ -75,5 +75,8 @@ public abstract class AbstractTimescaleIT {
         registry.add("app.outbox.enabled", () -> "false");
         registry.add("spring.batch.job.enabled", () -> "false");
         registry.add("app.ai.provider", () -> "stub");
+        // ADR 0001 / review M3: recalculations fold the journal as of now minus this lag. Short in ITs, so a test only
+        // waits a moment for its writes to fall before the as-of instant (MetricsJournalReplayIT.AS_OF_LAG).
+        registry.add("app.metrics.as-of-lag", () -> "PT2S");
     }
 }

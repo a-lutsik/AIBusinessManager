@@ -55,7 +55,7 @@ export default function ClientsScreen() {
             {/* A master gets no phone and no visit counters (null): show only what is there. */}
             {c.normalizedPhone || c.completedVisitCount != null ? (
               <Text style={{ color: color.muted, marginTop: 4 }}>
-                {[c.normalizedPhone, c.completedVisitCount != null ? `${c.completedVisitCount} visits` : null]
+                {[c.normalizedPhone, c.completedVisitCount != null ? t('client.visits', { count: c.completedVisitCount }) : null]
                   .filter(Boolean)
                   .join(' · ')}
               </Text>

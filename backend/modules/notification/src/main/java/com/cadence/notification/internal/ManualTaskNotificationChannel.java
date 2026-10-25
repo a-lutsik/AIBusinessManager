@@ -2,6 +2,7 @@ package com.cadence.notification.internal;
 
 import com.cadence.notification.api.NotificationChannel;
 import com.cadence.notification.api.OwnerTaskService;
+import com.cadence.platform.i18n.MessageCatalog;
 import com.cadence.platform.tenancy.TenantContext;
 import com.cadence.platform.time.Utc;
 import org.jooq.DSLContext;
@@ -19,10 +20,12 @@ public class ManualTaskNotificationChannel implements NotificationChannel {
 
     private final OwnerTaskService ownerTaskService;
     private final DSLContext dsl;
+    private final MessageCatalog messages;
 
-    public ManualTaskNotificationChannel(OwnerTaskService ownerTaskService, DSLContext dsl) {
+    public ManualTaskNotificationChannel(OwnerTaskService ownerTaskService, DSLContext dsl, MessageCatalog messages) {
         this.ownerTaskService = ownerTaskService;
         this.dsl = dsl;
+        this.messages = messages;
     }
 
     @Override
@@ -35,7 +38,7 @@ public class ManualTaskNotificationChannel implements NotificationChannel {
     public void send(String tenantScopedPayloadJson) {
         ownerTaskService.create(
                 "MANUAL_MESSAGE",
-                "Send message to client",
+                messages.forOwner("owner.task.manualMessage.title"),
                 tenantScopedPayloadJson,
                 tenantScopedPayloadJson,
                 null,

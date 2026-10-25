@@ -133,9 +133,9 @@ export default function SpecialistMatrix() {
                 <Text style={[td, colOffered, { color: r.offered ? color.primary : color.muted, fontWeight: r.offered ? '700' : '400' }]}>
                   {r.offered ? t('catalog.yes') : t('catalog.no')}
                 </Text>
-                <Text style={[td, colNum]}>{fmtNum(r.defaultDuration, 'min')}</Text>
+                <Text style={[td, colNum]}>{fmtMinutes(r.defaultDuration)}</Text>
                 <Text style={[td, colNum, r.durationOverride != null ? { color: color.secondary, fontWeight: '700' } : null]}>
-                  {fmtNum(r.durationOverride, 'min')}
+                  {fmtMinutes(r.durationOverride)}
                 </Text>
                 <Text style={[td, colMoney]}>{r.defaultPrice != null ? formatMoney(r.defaultPrice, currency) : '—'}</Text>
                 <Text style={[td, colMoney, r.priceOverride != null ? { color: color.secondary, fontWeight: '700' } : null]}>
@@ -156,9 +156,9 @@ export default function SpecialistMatrix() {
   );
 }
 
-function fmtNum(n: number | null, suffix: string): string {
+function fmtMinutes(n: number | null): string {
   if (n == null) return '—';
-  return `${n} ${suffix}`;
+  return t('unit.minutes', { count: n });
 }
 
 function fmtBuf(before: number | null, after: number | null): string {

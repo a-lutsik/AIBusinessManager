@@ -1,10 +1,19 @@
 package com.cadence.app.architecture;
 
+import com.cadence.platform.jooq.tables.Appointment;
+import com.cadence.platform.jooq.tables.AppointmentEvent;
+import com.cadence.platform.jooq.tables.GrowthSignal;
+import com.cadence.platform.jooq.tables.MetricSnapshot;
+import com.cadence.platform.jooq.tables.records.AppointmentEventRecord;
+import com.cadence.platform.jooq.tables.records.AppointmentRecord;
+import com.cadence.platform.jooq.tables.records.GrowthSignalRecord;
+import com.cadence.platform.jooq.tables.records.MetricSnapshotRecord;
 import com.tngtech.archunit.core.importer.ImportOption;
 import com.tngtech.archunit.junit.AnalyzeClasses;
 import com.tngtech.archunit.junit.ArchTest;
 import com.tngtech.archunit.lang.ArchRule;
 
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 
 @AnalyzeClasses(
@@ -74,6 +83,49 @@ class ModuleBoundaryArchTest {
                     .that().resideOutsideOfPackage("com.cadence.notification.internal..")
                     .should().dependOnClassesThat()
                     .resideInAPackage("com.cadence.notification.internal..");
+
+    /**
+     * ADR 0001: the booking journal and the visit rows are written and read by booking-engine only (single write path
+     * {@code AppointmentRepository.record}, read port {@code BookingJournal}); metric snapshots and signals by growth
+     * only. The generated jOOQ catalog itself ({@code Tables}, keys, indexes) is exempt.
+     */
+    @ArchTest
+    static final ArchRule appointmentTablesBelongToBookingEngine =
+            noClasses()
+                    .that().resideOutsideOfPackages("com.cadence.booking.internal..", "com.cadence.platform.jooq..")
+                    .should().dependOnClassesThat()
+                    .belongToAnyOf(Appointment.class, AppointmentRecord.class, AppointmentEvent.class, AppointmentEventRecord.class)
+                    .because("appointment and appointment_event are booking-engine tables (ADR 0001)");
+
+    @ArchTest
+    static final ArchRule growthTablesBelongToGrowth =
+            noClasses()
+                    .that().resideOutsideOfPackages("com.cadence.growth.internal..", "com.cadence.platform.jooq..")
+                    .should().dependOnClassesThat()
+                    .belongToAnyOf(MetricSnapshot.class, MetricSnapshotRecord.class, GrowthSignal.class, GrowthSignalRecord.class)
+                    .because("metric_snapshot and growth_signal are growth tables (ADR 0001)");
+
+    /** Review D1: the lag-free recalculation is for the demo seed only, never for HTTP or the nightly job. */
+    @ArchTest
+    static final ArchRule seedRecalculationOnlyFromTheSeeder =
+            noClasses()
+                    .that().doNotHaveFullyQualifiedName("com.cadence.app.seed.DemoDataSeeder")
+                    .and().resideOutsideOfPackage("com.cadence.growth..")
+                    .should().callMethod(com.cadence.growth.api.GrowthService.class, "recalculateForSeed")
+                    .because("only the single writer at startup may fold the journal without the as-of lag");
+
+    /** Positive controls: the two rules above do see a table dependency where one is allowed. */
+    @ArchTest
+    static final ArchRule appointmentRuleSeesTheBookingRepository =
+            classes()
+                    .that().haveFullyQualifiedName("com.cadence.booking.internal.AppointmentRepository")
+                    .should().dependOnClassesThat().belongToAnyOf(Appointment.class, AppointmentEvent.class);
+
+    @ArchTest
+    static final ArchRule growthRuleSeesTheSnapshotRepository =
+            classes()
+                    .that().haveFullyQualifiedName("com.cadence.growth.internal.MetricSnapshotRepository")
+                    .should().dependOnClassesThat().belongToAnyOf(MetricSnapshot.class);
 
     @ArchTest
     static final ArchRule aiMustNotTouchJooqTables =

@@ -16,7 +16,6 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.transaction.PlatformTransactionManager;
 
-import java.time.LocalDate;
 import java.util.UUID;
 
 @Configuration
@@ -55,11 +54,12 @@ public class MetricsBatchConfig {
     private void recalculateTenant(UUID tenantId) {
         try (var ignored = TenantContext.open(tenantId)) {
             ActorContext.set(ActorContext.system());
-            LocalDate end = LocalDate.now();
-            growthService.recalculate(end.minusDays(90), end);
+            // Windows (current month to date, previous full month) are derived in the tenant's zone by the service.
+            growthService.recalculate();
             log.info("Recalculated metrics for tenant {}", tenantId);
         } catch (Exception ex) {
-            log.warn("Metrics job failed for {}: {}", tenantId, ex.getMessage());
+            // Loud: an unreadable journal (unknown event type, bad payload) stops this tenant's metrics.
+            log.error("Metrics job failed for tenant {}", tenantId, ex);
         } finally {
             ActorContext.clear();
         }

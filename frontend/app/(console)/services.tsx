@@ -54,9 +54,9 @@ export default function ServicesScreen() {
               {formatMoney(s.priceMinor, currency)}
             </Text>
             <Text style={{ color: color.muted, fontSize: 13, marginBottom: space.md }}>
-              {s.durationMinutes} min
+              {t('unit.minutes', { count: s.durationMinutes })}
               {s.bufferBeforeMinutes || s.bufferAfterMinutes
-                ? ` · +${s.bufferBeforeMinutes ?? 0}/${s.bufferAfterMinutes ?? 0} buffer`
+                ? ` · ${t('service.buffer', { before: s.bufferBeforeMinutes ?? 0, after: s.bufferAfterMinutes ?? 0 })}`
                 : ''}
             </Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>

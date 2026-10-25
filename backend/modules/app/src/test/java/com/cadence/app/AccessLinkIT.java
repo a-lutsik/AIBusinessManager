@@ -57,6 +57,10 @@ class AccessLinkIT extends AbstractTimescaleIT {
     }
 
     private Booking bookPublicly(String phone, String name) throws Exception {
+        return bookPublicly(phone, name, "en");
+    }
+
+    private Booking bookPublicly(String phone, String name, String locale) throws Exception {
         String firstSlot = TestSlots.firstFree(mvc, mapper, DemoIds.HAIRCUT, DemoIds.NINO, 2);
         MvcResult created = mvc.perform(post("/api/public/tenants/lumen-studio/bookings")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -67,10 +71,10 @@ class AccessLinkIT extends AbstractTimescaleIT {
                                   "serviceStart": "%s",
                                   "phone": "%s",
                                   "name": "%s",
-                                  "locale": "en",
+                                  "locale": "%s",
                                   "marketingConsent": false
                                 }
-                                """.formatted(DemoIds.HAIRCUT, DemoIds.NINO, firstSlot, phone, name)))
+                                """.formatted(DemoIds.HAIRCUT, DemoIds.NINO, firstSlot, phone, name, locale)))
                 .andExpect(status().isOk())
                 .andReturn();
         JsonNode booking = mapper.readTree(created.getResponse().getContentAsByteArray());
@@ -119,6 +123,37 @@ class AccessLinkIT extends AbstractTimescaleIT {
         assertNoRawTokensInDatabase();
         // The client still gets the raw token exactly once, in the booking response.
         assertTokenOpensBooking(booking.id(), booking.token());
+    }
+
+    private JsonNode newBookingTask(Booking booking) throws Exception {
+        MvcResult tasks = mvc.perform(get("/api/app/tasks").with(owner(DemoIds.LUMEN)))
+                .andExpect(status().isOk())
+                .andReturn();
+        for (JsonNode t : mapper.readTree(tasks.getResponse().getContentAsByteArray())) {
+            if ("NEW_BOOKING".equals(t.path("kind").asText()) && booking.id().equals(t.path("appointmentId").asText())) {
+                return t;
+            }
+        }
+        throw new AssertionError("NEW_BOOKING task for the booking is missing");
+    }
+
+    @Test
+    void clientTextFollowsTheClientLocaleWhileTheOwnerTitleStaysInTheOwnerLocale() throws Exception {
+        Booking first = bookPublicly("+995555700015", "Locale Guest", "ru");
+        JsonNode task = newBookingTask(first);
+        assertThat(task.path("copyText").asText()).startsWith("Ваш визит").endsWith(": {manageLink}")
+                .contains("Управление записью");
+        // Owner locale defaults to en (app.i18n.owner-locale), whatever the client's language is.
+        assertThat(task.path("title").asText()).isEqualTo("New booking — send confirmation manually");
+
+        // The stored profile locale wins: the same client booking again in English is still written to in Russian.
+        Booking second = bookPublicly("+995555700015", "Locale Guest", "en");
+        assertThat(newBookingTask(second).path("copyText").asText()).startsWith("Ваш визит");
+
+        // A client without a supported language gets English.
+        Booking german = bookPublicly("+995555700016", "Locale Guest 2", "de");
+        assertThat(newBookingTask(german).path("copyText").asText())
+                .startsWith("Your visit is").endsWith("Manage it here: {manageLink}");
     }
 
     @Test

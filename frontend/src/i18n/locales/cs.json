@@ -57,5 +57,11 @@
   "role.owner": "Majitel",
   "role.master": "Mistr",
   "ai.placeholder": "Zeptejte se na dnešek nebo návrh zrušení",
-  "ai.send": "Odeslat"
+  "ai.send": "Odeslat",
+  "client.visits": "{count, plural, one {# návštěva} few {# návštěvy} many {# návštěvy} other {# návštěv}}",
+  "unit.minutes": "{count, number} min",
+  "unit.minutesWord": "min",
+  "unit.hoursWord": "h",
+  "unit.daysWord": "{count, plural, one {den} few {dny} many {dne} other {dní}}",
+  "service.buffer": "+{before}/{after} rezerva"
 }

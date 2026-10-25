@@ -6,7 +6,7 @@ import { api, LUMEN_TENANT_ID } from '@/src/api/client';
 import { useAuth } from '@/src/auth/AuthContext';
 import { ConsoleSessionProvider, useConsoleSession } from '@/src/auth/ConsoleSession';
 import { AuthLoading, SignInScreen } from '@/src/auth/SignInScreen';
-import { currentLocale, setLocale, t, type AppLocale } from '@/src/i18n';
+import { setLocale, t, useLocale, type AppLocale } from '@/src/i18n';
 import { useThemeTokens } from '@/src/theme/tokens';
 import { useTheme } from '@/src/theme/ThemeContext';
 
@@ -52,16 +52,14 @@ function ConsoleShell() {
   const { width } = useWindowDimensions();
   const desktop = width >= 768;
   const [, bump] = useState(0);
+  const activeLocale = useLocale();
   const [railExpanded, setRailExpanded] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [search, setSearch] = useState('');
   const { theme, toggle } = useTheme();
   const { color, space, radius } = useThemeTokens();
 
-  const switchLocale = (locale: AppLocale) => {
-    setLocale(locale);
-    bump((n) => n + 1);
-  };
+  const switchLocale = (locale: AppLocale) => setLocale(locale);
 
   const visibleNav = NAV.filter((item) => role === 'OWNER' || !item.ownerOnly);
   const activeItem = visibleNav.find((item) => path.startsWith(item.href));
@@ -255,10 +253,10 @@ function ConsoleShell() {
                     paddingVertical: 5,
                     paddingHorizontal: space.md,
                     borderRadius: radius.pill,
-                    backgroundColor: currentLocale() === loc ? color.primary : 'transparent',
+                    backgroundColor: activeLocale === loc ? color.primary : 'transparent',
                   }}
                 >
-                  <Text style={{ fontSize: 12, fontWeight: '700', color: currentLocale() === loc ? '#FFFFFF' : color.muted }}>
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: activeLocale === loc ? '#FFFFFF' : color.muted }}>
                     {loc.toUpperCase()}
                   </Text>
                 </Pressable>

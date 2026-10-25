@@ -74,6 +74,9 @@ class MoneyFieldClassifierTest {
         NOT_MONEY.put("WeeklyInterval.endMinute", "minute of day");
         NOT_MONEY.put("WeeklyInterval.startMinute", "minute of day");
         NOT_MONEY.put("WeeklyInterval.weekday", "weekday number");
+        NOT_MONEY.put("VisitFact.durationMinutes", "visit duration in minutes (journal fact, owner/system only)");
+        NOT_MONEY.put("WorkingHours.Window.endMinute", "minute of day");
+        NOT_MONEY.put("WorkingHours.Window.startMinute", "minute of day");
     }
 
     private static final int MIN_SCANNED_RECORDS = 10;

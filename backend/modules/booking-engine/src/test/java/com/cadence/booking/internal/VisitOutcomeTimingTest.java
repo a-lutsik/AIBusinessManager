@@ -76,7 +76,8 @@ class VisitOutcomeTimingTest {
                 audit,
                 mock(OwnerTaskService.class),
                 mock(PhoneNormalizer.class),
-                Clock.fixed(NOW, ZoneOffset.UTC)
+                Clock.fixed(NOW, ZoneOffset.UTC),
+                TestMessages.catalog()
         );
         TenantRecord tenant = new TenantRecord();
         tenant.setId(TENANT);
@@ -119,9 +120,8 @@ class VisitOutcomeTimingTest {
                     assertThat(ex.code()).isEqualTo("VISIT_NOT_STARTED");
                 });
         verifyNoInteractions(crm, audit);
-        verify(appointments, never()).updateStatusAndTimes(any(), any());
-        verify(appointments, never()).insertEvent(any(), any(), any());
-        verify(appointments, never()).insert(any());
+        verify(appointments, never()).record(any(), any(), JournalRecords.anyStatusChange());
+        verify(appointments, never()).record(any(), JournalRecords.created(), any());
     }
 
     @ParameterizedTest
@@ -196,7 +196,7 @@ class VisitOutcomeTimingTest {
             });
         }
         verifyNoInteractions(crm, audit);
-        verify(appointments, never()).updateStatusAndTimes(any(), any());
+        verify(appointments, never()).record(any(), any(), JournalRecords.anyStatusChange());
     }
 
     @Test

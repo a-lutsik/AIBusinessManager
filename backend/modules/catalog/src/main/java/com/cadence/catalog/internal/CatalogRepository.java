@@ -230,7 +230,10 @@ class CatalogRepository {
         if (to != null) {
             condition = condition.and(SCHEDULE_EXCEPTION.EXCEPTION_DATE.le(to));
         }
-        return dsl.selectFrom(SCHEDULE_EXCEPTION).where(condition).fetch(r -> new ScheduleExceptionView(
+        // A stable listing; which exception of a date applies does not depend on it (WorkingHours.appliedException).
+        return dsl.selectFrom(SCHEDULE_EXCEPTION).where(condition)
+                .orderBy(SCHEDULE_EXCEPTION.EXCEPTION_DATE, SCHEDULE_EXCEPTION.ID)
+                .fetch(r -> new ScheduleExceptionView(
                 r.get(SCHEDULE_EXCEPTION.ID),
                 r.get(SCHEDULE_EXCEPTION.SPECIALIST_ID),
                 r.get(SCHEDULE_EXCEPTION.EXCEPTION_DATE),

@@ -1,5 +1,6 @@
 import { Text, View } from 'react-native';
-import { t } from '@/src/i18n';
+import { currentLocale, formatPercent, t } from '@/src/i18n';
+import { formatMoney } from '@/src/utils/money';
 import { useThemeTokens } from '@/src/theme/tokens';
 
 type Props = {
@@ -11,15 +12,17 @@ type Props = {
   deltaMoM?: number | null;
   unit?: string | null;
   windowLabel?: string | null;
+  /** Tenant ISO-4217 currency for CURRENCY_PER_HOUR values (minor units per hour). */
+  currencyCode?: string | null;
 };
 
-export function MetricCard({ label, value, explanation, insufficientData, deltaMoM, unit, windowLabel }: Props) {
+export function MetricCard({ label, value, explanation, insufficientData, deltaMoM, unit, windowLabel, currencyCode }: Props) {
   const { color, space, radius } = useThemeTokens();
   const display =
     insufficientData || value == null || value === ''
       ? t('metric.pending')
       : typeof value === 'number'
-        ? formatMetricValue(value, unit)
+        ? formatMetricValue(value, unit, currencyCode)
         : String(value);
 
   return (
@@ -60,8 +63,7 @@ export function MetricCard({ label, value, explanation, insufficientData, deltaM
       </Text>
       {deltaMoM != null && !insufficientData ? (
         <Text style={{ fontSize: 12, fontWeight: '600', color: deltaMoM >= 0 ? color.primary : color.status.noShow }}>
-          {deltaMoM >= 0 ? '+' : ''}
-          {(deltaMoM * 100).toFixed(1)}% MoM
+          {t('metric.deltaMoM', { delta: formatPercent(deltaMoM, { signed: true }) })}
         </Text>
       ) : null}
       {windowLabel ? <Text style={{ fontSize: 11, color: color.muted }}>{windowLabel}</Text> : null}
@@ -79,9 +81,14 @@ function humanizeKey(key: string): string {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-function formatMetricValue(value: number, unit?: string | null): string {
-  if (unit === 'percent' || unit === '%') {
-    return `${(value * 100).toFixed(1)}%`;
+function formatMetricValue(value: number, unit?: string | null, currencyCode?: string | null): string {
+  if (unit === 'RATIO' || unit === 'percent' || unit === '%') {
+    return formatPercent(value);
+  }
+  if (unit === 'CURRENCY_PER_HOUR') {
+    // No tenant currency known (profile not loaded): show no amount rather than guess a currency (PRODUCT_PLAN §9).
+    if (!currencyCode) return '—';
+    return t('unit.perHour', { amount: formatMoney(Math.round(value), currencyCode, currentLocale()) });
   }
   if (unit === 'currency' || unit === 'money') {
     return value.toLocaleString(undefined, { maximumFractionDigits: 0 });

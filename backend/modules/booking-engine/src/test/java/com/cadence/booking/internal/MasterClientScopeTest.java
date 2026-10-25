@@ -78,7 +78,7 @@ class MasterClientScopeTest {
         PhoneNormalizer phones = mock(PhoneNormalizer.class);
         service = new BookingServiceImpl(catalog, crm, retention, appointments, tenants,
                 mock(OutboxPublisher.class), mock(AuditLogger.class), mock(OwnerTaskService.class), phones,
-                Clock.fixed(NOW, ZoneOffset.UTC));
+                Clock.fixed(NOW, ZoneOffset.UTC), TestMessages.catalog());
         TenantRecord tenant = new TenantRecord();
         tenant.setId(TENANT);
         tenant.setTimezone("Asia/Tbilisi");
@@ -138,7 +138,7 @@ class MasterClientScopeTest {
                     assertThat(ex.status()).isEqualTo(403);
                     assertThat(ex.code()).isEqualTo("FORBIDDEN_RESOURCE");
                 });
-        verify(appointments, never()).insert(any());
+        verify(appointments, never()).record(any(), JournalRecords.created(), any());
         verifyNoInteractions(crm, retention);
     }
 
@@ -150,7 +150,7 @@ class MasterClientScopeTest {
         AppointmentView created = service.create(byClientId(EXISTING));
 
         assertThat(created.clientId()).isEqualTo(EXISTING);
-        verify(appointments).insert(any());
+        verify(appointments).record(any(), JournalRecords.created(), any());
     }
 
     @Test
@@ -160,7 +160,7 @@ class MasterClientScopeTest {
         service.create(byClientId(EXISTING));
 
         verify(appointments, never()).hasActiveVisit(any(), any());
-        verify(appointments).insert(any());
+        verify(appointments).record(any(), JournalRecords.created(), any());
     }
 
     @Test
@@ -231,7 +231,7 @@ class MasterClientScopeTest {
         service.create(byPhone("Typed By Master"));
 
         ArgumentCaptor<AppointmentView> row = ArgumentCaptor.forClass(AppointmentView.class);
-        verify(appointments).insert(row.capture());
+        verify(appointments).record(row.capture(), JournalRecords.created(), any());
         assertThat(row.getValue().enteredName()).isEqualTo("Typed By Master");
     }
 }

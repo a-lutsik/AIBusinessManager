@@ -9,6 +9,7 @@ dependencies {
     implementation(project(":modules:booking-engine"))
     implementation(project(":modules:crm"))
     implementation(project(":modules:catalog"))
+    implementation(libs.jackson.databind)
     testImplementation(platform(libs.spring.boot.dependencies))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")

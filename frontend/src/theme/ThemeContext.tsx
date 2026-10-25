@@ -16,6 +16,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const stored = Platform.OS === 'web' ? globalThis.localStorage?.getItem('cadence.theme') : null;
     if (stored === 'dark' || stored === 'light') {
+      // Restores the stored choice after mount: reading browser storage during render would differ between the
+      // server render and the client.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setTheme(stored);
     }
   }, []);

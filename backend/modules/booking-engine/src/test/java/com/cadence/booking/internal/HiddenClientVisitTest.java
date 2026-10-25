@@ -86,7 +86,7 @@ class HiddenClientVisitTest {
         PhoneNormalizer phones = mock(PhoneNormalizer.class);
         service = new BookingServiceImpl(catalog, crm, retention, appointments, tenants,
                 mock(OutboxPublisher.class), mock(AuditLogger.class), ownerTasks, phones,
-                Clock.fixed(NOW, ZoneOffset.UTC));
+                Clock.fixed(NOW, ZoneOffset.UTC), TestMessages.catalog());
         TenantRecord tenant = new TenantRecord();
         tenant.setId(TENANT);
         tenant.setTimezone("Asia/Tbilisi");
@@ -146,7 +146,7 @@ class HiddenClientVisitTest {
 
     private AppointmentView inserted() {
         ArgumentCaptor<AppointmentView> row = ArgumentCaptor.forClass(AppointmentView.class);
-        verify(appointments).insert(row.capture());
+        verify(appointments).record(row.capture(), JournalRecords.created(), any());
         return row.getValue();
     }
 
@@ -292,7 +292,7 @@ class HiddenClientVisitTest {
                     assertThat(ex.status()).isEqualTo(403);
                     assertThat(ex.code()).isEqualTo("FORBIDDEN_RESOURCE");
                 });
-        verify(appointments, never()).updateStatusAndTimes(any(), any());
+        verify(appointments, never()).record(any(), any(), JournalRecords.anyStatusChange());
     }
 
     @Test
@@ -303,7 +303,7 @@ class HiddenClientVisitTest {
         AppointmentView confirmed = service.transition(hidden.id(), AppointmentStatus.CONFIRMED, null);
 
         ArgumentCaptor<AppointmentView> written = ArgumentCaptor.forClass(AppointmentView.class);
-        verify(appointments).updateStatusAndTimes(written.capture(), eq(AppointmentStatus.PENDING));
+        verify(appointments).record(written.capture(), any(), JournalRecords.statusFrom(AppointmentStatus.PENDING));
         assertThat(written.getValue().clientHiddenFromMaster()).isFalse();
         assertThat(confirmed.clientHiddenFromMaster()).isFalse();
 
@@ -326,7 +326,7 @@ class HiddenClientVisitTest {
         service.transition(byOwner.id(), AppointmentStatus.CANCELLED_BY_CLIENT, null);
 
         ArgumentCaptor<AppointmentView> written = ArgumentCaptor.forClass(AppointmentView.class);
-        verify(appointments, org.mockito.Mockito.times(2)).updateStatusAndTimes(written.capture(), eq(AppointmentStatus.PENDING));
+        verify(appointments, org.mockito.Mockito.times(2)).record(written.capture(), any(), JournalRecords.statusFrom(AppointmentStatus.PENDING));
         assertThat(written.getAllValues()).allSatisfy(row -> assertThat(row.clientHiddenFromMaster()).isTrue());
         // Review minor 7: the owner's task about the phone booking closes on any cancellation; nothing is revealed.
         verify(ownerTasks).completeForAppointment(byMaster.id(), "MASTER_PHONE_BOOKING");

@@ -1,8 +1,11 @@
 package com.cadence.booking.internal;
 
+import com.cadence.catalog.api.ScheduleExceptionView;
+import com.cadence.catalog.api.WeeklyInterval;
+import com.cadence.catalog.api.WorkingHours;
+
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -87,19 +90,21 @@ public final class SlotCalculator {
         );
     }
 
+    /** Delegates to the shared day rule in {@link WorkingHours} (also used by the growth metrics). */
     static List<WeeklyWindow> windowsFor(LocalDate date, List<WeeklyWindow> weekly, List<ExceptionDay> exceptions) {
-        ExceptionDay match = exceptions.stream().filter(e -> e.date().equals(date)).findFirst().orElse(null);
-        if (match != null && "DAY_OFF".equals(match.kind())) {
-            return List.of();
-        }
-        if (match != null && "SHIFT".equals(match.kind()) && match.startMinute() != null && match.endMinute() != null) {
-            return List.of(new WeeklyWindow(date.getDayOfWeek().getValue(), match.startMinute(), match.endMinute()));
-        }
+        List<WeeklyInterval> intervals = weekly.stream()
+                .map(w -> new WeeklyInterval(null, null, w.isoWeekday(), w.startMinute(), w.endMinute()))
+                .toList();
+        List<ScheduleExceptionView> days = exceptions.stream()
+                .map(e -> new ScheduleExceptionView(null, null, e.date(), e.kind(), e.startMinute(), e.endMinute(), null))
+                .toList();
         int weekday = date.getDayOfWeek().getValue();
-        return weekly.stream().filter(w -> w.isoWeekday() == weekday).toList();
+        return WorkingHours.windowsFor(date, intervals, days).stream()
+                .map(w -> new WeeklyWindow(weekday, w.startMinute(), w.endMinute()))
+                .toList();
     }
 
     static Instant local(LocalDate date, int minuteOfDay, ZoneId zone) {
-        return date.atStartOfDay(zone).plusMinutes(minuteOfDay).toInstant();
+        return WorkingHours.instantAt(date, minuteOfDay, zone);
     }
 }

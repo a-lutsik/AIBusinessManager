@@ -188,6 +188,27 @@ paths:
           schema: { type: string }
       responses:
         "200": { description: "Cancelled visit: visit facts and the typed name only, as GET /api/public/bookings/{id}" }
+  /api/public/bookings/{id}/reschedule:
+    post:
+      summary: Move the visit to another start by opaque token
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+        - in: query
+          name: token
+          required: true
+          schema: { type: string }
+        - in: query
+          name: start
+          required: true
+          schema: { type: string, format: date-time }
+      responses:
+        "200": { description: "Moved visit: visit facts and the typed name only, as GET /api/public/bookings/{id}" }
+        "403": { description: "TOKEN_INVALID - the token belongs to another visit" }
+        "404": { description: "TOKEN_INVALID - unknown, revoked or expired token" }
+        "409": { description: "Slot occupied or rule violation (problem+json with a machine code)" }
   /api/public/bookings/{id}/consent/withdraw:
     post:
       summary: Withdraw the client's marketing consent by the manage link
@@ -228,27 +249,81 @@ paths:
       summary: App health
       responses:
         "200": { description: OK }
+        "401": { $ref: "#/components/responses/Unauthorized" }
   /api/app/me:
     get:
       summary: Current actor
       responses:
         "200": { description: Actor + tenant }
+        "401": { $ref: "#/components/responses/Unauthorized" }
   /api/app/dashboard:
     get:
       summary: Owner/master dashboard
       responses:
         "200": { description: "Dashboard. MASTER: only own visits, money fields null, no metrics, tasks or signals" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
   /api/app/masters/me/today:
     get:
       summary: Master's visits today with trust and packages (MASTER only)
       responses:
         "200": { description: "Own visits of the tenant day; visit money and package valueMinor are null (package name and sessions stay). A visit hidden from the master has trust null and no packages" }
         "403": { description: "FORBIDDEN_RESOURCE - caller is not a master" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
   /api/app/services:
     get:
       summary: Service catalog
       responses:
         "200": { description: "Services. MASTER: priceMinor is null" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    put:
+      summary: Create or update a service (owner only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Service; an id that is null creates, a known id updates
+              properties:
+                id: { type: string, format: uuid, nullable: true }
+                name: { type: string }
+                description: { type: string, nullable: true }
+                durationMinutes: { type: integer }
+                priceMinor: { type: integer }
+                bufferBeforeMinutes: { type: integer }
+                bufferAfterMinutes: { type: integer }
+                color: { type: string, nullable: true }
+                active: { type: boolean }
+                publicVisible: { type: boolean }
+      responses:
+        "200": { description: Saved service }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
+  /api/app/specialists:
+    get:
+      summary: Specialists (owner - all; MASTER - only their own record)
+      responses:
+        "200": { description: Specialists }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    put:
+      summary: Create or update a specialist (owner only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Specialist; an id that is null creates, a known id updates
+              properties:
+                id: { type: string, format: uuid, nullable: true }
+                displayName: { type: string }
+                keycloakUserId: { type: string, nullable: true }
+                calendarColor: { type: string, nullable: true }
+                active: { type: boolean }
+      responses:
+        "200": { description: Saved specialist }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
   /api/app/specialists/{id}/matrix:
     get:
       summary: Services matrix of a specialist
@@ -260,6 +335,33 @@ paths:
       responses:
         "200": { description: "Matrix rows. MASTER: defaultPriceMinor and priceMinorOverride are null" }
         "403": { description: "FORBIDDEN_RESOURCE - a master asked for another specialist" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    put:
+      summary: Create or update one service row of a specialist's matrix (owner only)
+      description: The specialist is taken from the path; specialistId in the body is ignored.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                id: { type: string, format: uuid, nullable: true }
+                serviceId: { type: string, format: uuid }
+                offered: { type: boolean }
+                durationMinutesOverride: { type: integer, nullable: true }
+                priceMinorOverride: { type: integer, nullable: true }
+                bufferBeforeMinutesOverride: { type: integer, nullable: true }
+                bufferAfterMinutesOverride: { type: integer, nullable: true }
+      responses:
+        "200": { description: Saved matrix row }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
   /api/app/specialists/{id}/schedule:
     get:
       summary: Weekly schedule of a specialist
@@ -271,11 +373,85 @@ paths:
       responses:
         "200": { description: Weekly intervals }
         "403": { description: "FORBIDDEN_RESOURCE - a master asked for another specialist" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    put:
+      summary: Replace the weekly schedule of a specialist (owner only)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: object
+                properties:
+                  id: { type: string, format: uuid, nullable: true }
+                  weekday: { type: integer }
+                  startMinute: { type: integer, description: Minutes from midnight }
+                  endMinute: { type: integer, description: Minutes from midnight }
+      responses:
+        "200": { description: The weekly intervals after the replacement }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
+  /api/app/specialists/{id}/exceptions:
+    put:
+      summary: Create or update a schedule exception (day off or changed hours) of a specialist (owner only)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: The specialist is taken from the path; specialistId in the body is ignored.
+              properties:
+                id: { type: string, format: uuid, nullable: true }
+                date: { type: string, format: date }
+                kind: { type: string }
+                startMinute: { type: integer, nullable: true }
+                endMinute: { type: integer, nullable: true }
+                note: { type: string, nullable: true }
+      responses:
+        "200": { description: Saved exception }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
   /api/app/rules:
     get:
       summary: Tenant booking rules (owner only)
       responses:
         "200": { description: Booking rules }
+        "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    put:
+      summary: Save tenant booking rules (owner only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                slotStepMinutes: { type: integer }
+                minNoticeMinutes: { type: integer }
+                horizonDays: { type: integer }
+                clientRescheduleAllowed: { type: boolean }
+                lateCancellationHours: { type: integer }
+                newClientRequiresConfirmation: { type: boolean }
+                deductPackageOnNoShow: { type: boolean }
+                weekStartsOn: { type: integer }
+                timeFormat24h: { type: boolean }
+      responses:
+        "200": { description: Saved booking rules }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
   /api/app/calendar:
     get:
@@ -295,6 +471,7 @@ paths:
           schema: { type: string, format: uuid }
       responses:
         "200": { description: "Visits. MASTER: own visits only, money fields null" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
   /api/app/appointments/{id}:
     get:
       summary: Visit with the client's trust
@@ -306,6 +483,7 @@ paths:
       responses:
         "200": { description: "Visit. MASTER: money fields null; trust null on a visit hidden from the master, whose client fields show only the typed name" }
         "403": { description: "FORBIDDEN_RESOURCE - a master asked for another specialist's visit" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
   /api/app/appointments:
     post:
       summary: Create a console visit
@@ -326,6 +504,7 @@ paths:
         "200": { description: "Created visit. MASTER: money fields null, client fields as typed" }
         "403": { description: "FORBIDDEN_RESOURCE - master booking for another specialist, bypassing the rules, or a clientId outside the master's clients" }
         "409": { description: "SLOT_OCCUPIED, MIN_NOTICE, BEYOND_HORIZON, VISIT_NOT_STARTED" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
   /api/app/appointments/{id}/transition:
     post:
       summary: Status machine transition
@@ -340,10 +519,15 @@ paths:
           schema:
             type: string
             enum: [PENDING, CONFIRMED, COMPLETED, NO_SHOW, CANCELLED_BY_CLIENT, CANCELLED_BY_BUSINESS]
+        - in: query
+          name: note
+          required: false
+          schema: { type: string }
       responses:
         "200": { description: Updated visit }
         "403": { description: "FORBIDDEN_RESOURCE - master on another specialist's visit, or confirming a visit of a client who needs the owner's confirmation" }
         "409": { description: "INVALID_TRANSITION, or VISIT_NOT_STARTED - COMPLETED or NO_SHOW before serviceStart" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
       description: >
         COMPLETED and NO_SHOW are reachable only once the visit has started (serviceStart not in the future), for every
         role including the owner; earlier attempts get 409 VISIT_NOT_STARTED.
@@ -379,11 +563,30 @@ paths:
         "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
         "404": { description: "APPOINTMENT_NOT_FOUND - no such visit in the current tenant" }
         "409": { description: "APPOINTMENT_CANCELLED - cancelled visits cannot be managed" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/app/appointments/{id}/reschedule:
+    post:
+      summary: Move a visit to another start
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+        - in: query
+          name: start
+          required: true
+          schema: { type: string, format: date-time }
+      responses:
+        "200": { description: Updated visit }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "FORBIDDEN_RESOURCE - master on another specialist's visit" }
+        "409": { description: "Slot occupied or rule violation (problem+json with a machine code)" }
   /api/app/clients:
     get:
       summary: Search clients
       responses:
         "200": { description: "Clients. MASTER: only clients with a non-cancelled, not hidden visit with them, id and displayName only; q matches the name only, never the phone; a q with 3 or more digits finds nothing and clients whose name shows a phone are left out" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
   /api/app/clients/{id}:
     get:
       summary: Client card with trust and full visit history
@@ -396,6 +599,7 @@ paths:
         "200": { description: "Card. MASTER: client id and displayName, trust (level, overrideLevel, reasonCodes), history only of their non-cancelled, not hidden visits; other client fields and money null" }
         "403": { description: "FORBIDDEN_RESOURCE - a master asked for a client without a non-cancelled, not hidden visit with them" }
         "404": { description: "NOT_FOUND - no such client in the current tenant" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
   /api/app/clients/{id}/consent/withdraw:
     post:
       summary: Withdraw a client's marketing consent on their request (owner only)
@@ -411,6 +615,7 @@ paths:
         "200": { description: Updated client }
         "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
         "404": { description: "CLIENT_NOT_FOUND" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
   /api/app/clients/{id}/merge:
     post:
       summary: Merge a duplicate client into this one (owner only)
@@ -436,23 +641,180 @@ paths:
         "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
         "404": { description: "CLIENT_NOT_FOUND - no such client in the current tenant" }
         "409": { description: "CLIENT_ALREADY_MERGED - the absorbed client is already anonymized or merged" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/app/clients/{id}/trust:
+    post:
+      summary: Override the trust level of a client (owner only)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+        - in: query
+          name: level
+          required: true
+          schema: { type: string }
+        - in: query
+          name: reason
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Updated trust }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
+  /api/app/clients/{id}/packages:
+    post:
+      summary: Sell a session package to a client (owner only)
+      description: The currency is the tenant's currency.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+        - in: query
+          name: name
+          required: true
+          schema: { type: string }
+        - in: query
+          name: sessions
+          required: true
+          schema: { type: integer }
+        - in: query
+          name: valueMinor
+          required: true
+          schema: { type: integer }
+      responses:
+        "200": { description: The sold package }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
+  /api/app/tasks:
+    get:
+      summary: Open owner tasks (owner only)
+      responses:
+        "200": { description: Open tasks }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
+  /api/app/tasks/{id}/complete:
+    post:
+      summary: Complete an owner task (owner only)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: Completed, empty body }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
   /api/app/metrics:
     get:
       summary: Six metrics (owner only)
       responses:
         "200": { description: Metric snapshots }
         "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/app/metrics/definitions:
+    get:
+      summary: Definitions of the six metrics (owner only)
+      responses:
+        "200": { description: Metric definitions }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
   /api/app/metrics/recalculate:
     post:
-      summary: Recalculate metrics for last 30 days
+      summary: Recalculate metrics from the booking journal for the current month to date and the previous full month, in the tenant time zone (owner only)
       responses:
         "200": { description: Metrics }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
+  /api/app/signals:
+    get:
+      summary: Growth signals (owner only)
+      responses:
+        "200": { description: Signals }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
+  /api/app/signals/{id}/dismiss:
+    post:
+      summary: Dismiss a growth signal (owner only)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: Dismissed signal }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
   /api/app/ai/chat:
     post:
       summary: AI chat (owner only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                conversationId: { type: string, format: uuid, nullable: true }
+                locale: { type: string, description: Defaults to en }
+                message: { type: string, description: Defaults to an empty string }
       responses:
         "200": { description: Reply + drafts }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
+  /api/app/ai/conversations/{id}:
+    get:
+      summary: Conversation history (owner only)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: Conversation history }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
+  /api/app/ai/drafts:
+    get:
+      summary: Drafted actions awaiting confirmation (owner only)
+      parameters:
+        - in: query
+          name: status
+          required: false
+          schema: { type: string }
+      responses:
+        "200": { description: Drafts }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
+  /api/app/ai/drafts/{id}/confirm:
+    post:
+      summary: Confirm a drafted action (owner only)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: Reply after the action ran }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
+  /api/app/ai/drafts/{id}/reject:
+    post:
+      summary: Reject a drafted action (owner only)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: Reply after the rejection }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
 components:
+  responses:
+    Unauthorized:
+      description: No valid bearer token (problem+json)
   securitySchemes:
     bearerAuth:
       type: http

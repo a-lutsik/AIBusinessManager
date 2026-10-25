@@ -88,7 +88,7 @@ jobs:
           retention-days: 7
 
   frontend:
-    name: Frontend (typecheck, web export)
+    name: Frontend (lint, i18n, typecheck, web export)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
@@ -105,6 +105,14 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - run: npm ci
+
+      # ESLint with zero warnings; includes the ban on hardcoded text in JSX (all text comes from the i18n catalogs).
+      - run: npm run lint
+
+      # The literal ban must keep catching what it should: this fails if the rule is weakened or switched off.
+      - run: npm run lint:selftest
+
+      - run: npm run i18n:check
 
       - run: npm run typecheck
 

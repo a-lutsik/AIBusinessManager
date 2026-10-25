@@ -1,5 +1,6 @@
 package com.cadence.booking.internal;
 
+import com.cadence.booking.api.AppointmentEventType;
 import com.cadence.booking.api.AppointmentStatus;
 import com.cadence.booking.api.AppointmentView;
 import com.cadence.platform.error.DomainException;
@@ -13,7 +14,9 @@ import org.jooq.Record;
 import org.jooq.impl.DSL;
 import org.springframework.stereotype.Repository;
 
+import java.time.Clock;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
@@ -30,9 +33,68 @@ class AppointmentRepository {
     static final String NO_OVERLAP_CONSTRAINT = "no_overlapping_active_appointments";
 
     private final DSLContext dsl;
+    private final Clock clock;
 
-    AppointmentRepository(DSLContext dsl) {
+    AppointmentRepository(DSLContext dsl, Clock clock) {
         this.dsl = dsl;
+        this.clock = clock;
+    }
+
+    /** Write time of rows and journal events: the injected clock, at the microsecond precision of {@code TIMESTAMP}. */
+    private Instant now() {
+        return clock.instant().truncatedTo(ChronoUnit.MICROS);
+    }
+
+    /**
+     * The single entry point for a change of visit facts (ADR 0001 §1): writes the {@code appointment} row change and
+     * its journal event together, with one write time. {@code after} is the row as it is to be stored.
+     * <ul>
+     *   <li>{@code CREATED} ({@link JournalPayloads.Created}) inserts the row; the exclusion constraint is reported as
+     *   {@code SLOT_OCCUPIED} (409);</li>
+     *   <li>{@code CONFIRMED | COMPLETED | NO_SHOW | CANCELLED} ({@link JournalPayloads.StatusChange}) and
+     *   {@code RESCHEDULED} ({@link JournalPayloads.Rescheduled}) update status, times, note and the decision-A flag
+     *   while the stored status is still the expected one (the change's {@code from}, or the unchanged status of a
+     *   move); zero rows is {@code CONCURRENT_MODIFICATION} (409), an occupied slot {@code SLOT_OCCUPIED};</li>
+     *   <li>{@code CLIENT_CHANGED} ({@link JournalPayloads.ClientChanged}) moves the visit to {@code after.clientId()}
+     *   while it still belongs to the change's {@code from}.</li>
+     * </ul>
+     * The event time is the clock (micro precision), and for every event after CREATED at least 1 µs after the
+     * visit's previous event ({@link #notBeforePreviousEvent}).
+     * Not facts, written elsewhere without an event: {@link #revealToMaster} (decision-A flag) and the visit
+     * {@code note} on its own. Every caller passes the current {@code clientHiddenFromMaster} on unless it means to
+     * change it (the owner's confirmation clears it).
+     */
+    void record(AppointmentView after, AppointmentEventType type, JournalPayloads.Payload payload) {
+        JournalPayloads.requireFits(type, payload);
+        Instant at = now();
+        switch (payload) {
+            case JournalPayloads.Created ignored -> insert(after, at);
+            case JournalPayloads.StatusChange change -> updateStatusAndTimes(after, change.from(), at);
+            case JournalPayloads.Rescheduled ignored -> updateStatusAndTimes(after, after.status(), at);
+            case JournalPayloads.ClientChanged change -> updateClient(after.id(), change.from(), after.clientId(), at);
+        }
+        insertEvent(after.id(), type, JournalPayloads.toJson(payload), type == AppointmentEventType.CREATED
+                ? at
+                : notBeforePreviousEvent(after.id(), at));
+    }
+
+    /**
+     * Review m2: events of a visit are ordered by {@code (created_at, id)}, so a later event must never be stamped
+     * earlier than the one before, even if the clock steps back. Runs after the row write, so the visit row is locked
+     * (by {@code findForUpdate} or by the update itself) and no other event of the visit can slip in between.
+     */
+    private Instant notBeforePreviousEvent(UUID appointmentId, Instant at) {
+        var max = DSL.max(APPOINTMENT_EVENT.CREATED_AT);
+        var last = dsl.select(max)
+                .from(APPOINTMENT_EVENT)
+                .where(TenantAwareDsl.tenantEquals(APPOINTMENT_EVENT.TENANT_ID)
+                        .and(APPOINTMENT_EVENT.APPOINTMENT_ID.eq(appointmentId)))
+                .fetchOne(0, java.time.LocalDateTime.class);
+        if (last == null) {
+            return at;
+        }
+        Instant floor = Utc.toInstant(last).plus(1, ChronoUnit.MICROS);
+        return at.isBefore(floor) ? floor : at;
     }
 
     /**
@@ -40,15 +102,15 @@ class AppointmentRepository {
      * the exclusion constraint then rejects the later writer. That rejection is reported as {@code SLOT_OCCUPIED}
      * (409), the same answer the loser would have got had it arrived a moment later.
      */
-    void insert(AppointmentView row) {
+    private void insert(AppointmentView row, Instant at) {
         try {
-            doInsert(row);
+            doInsert(row, at);
         } catch (RuntimeException ex) {
             throw slotConflictOrSame(ex);
         }
     }
 
-    private void doInsert(AppointmentView row) {
+    private void doInsert(AppointmentView row, Instant at) {
         dsl.insertInto(APPOINTMENT)
                 .set(APPOINTMENT.ID, row.id())
                 .set(APPOINTMENT.TENANT_ID, TenantContext.require())
@@ -72,8 +134,8 @@ class AppointmentRepository {
                 .set(APPOINTMENT.NOTE, row.note())
                 .set(APPOINTMENT.SOURCE, row.source())
                 .set(APPOINTMENT.CLIENT_HIDDEN_FROM_MASTER, row.clientHiddenFromMaster())
-                .set(APPOINTMENT.CREATED_AT, Utc.toLocal(Instant.now()))
-                .set(APPOINTMENT.UPDATED_AT, Utc.toLocal(Instant.now()))
+                .set(APPOINTMENT.CREATED_AT, Utc.toLocal(at))
+                .set(APPOINTMENT.UPDATED_AT, Utc.toLocal(at))
                 .execute();
     }
 
@@ -84,10 +146,10 @@ class AppointmentRepository {
      * slot is reported as {@code SLOT_OCCUPIED}. Writes {@code clientHiddenFromMaster} as given (decision A: the
      * owner's confirmation clears it), so every caller passes the current flag on unless it means to change it.
      */
-    void updateStatusAndTimes(AppointmentView row, AppointmentStatus expectedStatus) {
+    private void updateStatusAndTimes(AppointmentView row, AppointmentStatus expectedStatus, Instant at) {
         int updated;
         try {
-            updated = doUpdateStatusAndTimes(row, expectedStatus);
+            updated = doUpdateStatusAndTimes(row, expectedStatus, at);
         } catch (RuntimeException ex) {
             throw slotConflictOrSame(ex);
         }
@@ -96,7 +158,7 @@ class AppointmentRepository {
         }
     }
 
-    private int doUpdateStatusAndTimes(AppointmentView row, AppointmentStatus expectedStatus) {
+    private int doUpdateStatusAndTimes(AppointmentView row, AppointmentStatus expectedStatus, Instant at) {
         return dsl.update(APPOINTMENT)
                 .set(APPOINTMENT.STATUS, row.status().name())
                 .set(APPOINTMENT.SERVICE_START, Utc.toLocal(row.serviceStart()))
@@ -105,7 +167,7 @@ class AppointmentRepository {
                 .set(APPOINTMENT.OCCUPIED_END, Utc.toLocal(row.occupiedEnd()))
                 .set(APPOINTMENT.NOTE, row.note())
                 .set(APPOINTMENT.CLIENT_HIDDEN_FROM_MASTER, row.clientHiddenFromMaster())
-                .set(APPOINTMENT.UPDATED_AT, Utc.toLocal(Instant.now()))
+                .set(APPOINTMENT.UPDATED_AT, Utc.toLocal(at))
                 .where(TenantAwareDsl.tenantEquals(APPOINTMENT.TENANT_ID)
                         .and(APPOINTMENT.ID.eq(row.id()))
                         .and(APPOINTMENT.STATUS.eq(expectedStatus.name())))
@@ -121,12 +183,45 @@ class AppointmentRepository {
         return ex;
     }
 
+    /**
+     * Client merge: moves every visit of client {@code from} to {@code to}, one {@code CLIENT_CHANGED} event per visit
+     * (ADR 0001), and returns how many moved. The visits are locked first, so a concurrent change of one of them waits.
+     */
     int reassignClient(UUID from, UUID to) {
-        return dsl.update(APPOINTMENT)
-                .set(APPOINTMENT.CLIENT_ID, to)
-                .set(APPOINTMENT.UPDATED_AT, Utc.toLocal(Instant.now()))
+        List<AppointmentView> visits = dsl.selectFrom(APPOINTMENT)
                 .where(TenantAwareDsl.tenantEquals(APPOINTMENT.TENANT_ID).and(APPOINTMENT.CLIENT_ID.eq(from)))
+                .orderBy(APPOINTMENT.ID)
+                .forUpdate()
+                .fetch(this::toView);
+        for (AppointmentView visit : visits) {
+            record(withClient(visit, to), AppointmentEventType.CLIENT_CHANGED,
+                    new JournalPayloads.ClientChanged(from, to, JournalPayloads.MERGE));
+        }
+        return visits.size();
+    }
+
+    private void updateClient(UUID appointmentId, UUID from, UUID to, Instant at) {
+        int updated = dsl.update(APPOINTMENT)
+                .set(APPOINTMENT.CLIENT_ID, to)
+                .set(APPOINTMENT.UPDATED_AT, Utc.toLocal(at))
+                .where(TenantAwareDsl.tenantEquals(APPOINTMENT.TENANT_ID)
+                        .and(APPOINTMENT.ID.eq(appointmentId))
+                        .and(APPOINTMENT.CLIENT_ID.eq(from)))
                 .execute();
+        if (updated == 0) {
+            throw DomainException.conflict("CONCURRENT_MODIFICATION", "The visit was changed by someone else, reload and retry");
+        }
+    }
+
+    private static AppointmentView withClient(AppointmentView v, UUID clientId) {
+        return new AppointmentView(
+                v.id(), v.specialistId(), v.serviceId(), clientId, v.status(),
+                v.serviceStart(), v.serviceEnd(), v.occupiedStart(), v.occupiedEnd(),
+                v.serviceNameSnapshot(), v.priceSnapshot(), v.durationSnapshot(),
+                v.bufferBeforeSnapshot(), v.bufferAfterSnapshot(), v.currencyCode(),
+                v.discountAmount(), v.amountReceived(), v.enteredName(), v.note(), v.source(),
+                v.clientDisplayName(), v.clientPhone(), v.trustLevel(), v.clientHiddenFromMaster()
+        );
     }
 
     /** Earliest and latest service start among the client's COMPLETED visits, leaving one visit out. */
@@ -199,7 +294,7 @@ class AppointmentRepository {
     int revealToMaster(UUID clientId, UUID specialistId) {
         return dsl.update(APPOINTMENT)
                 .set(APPOINTMENT.CLIENT_HIDDEN_FROM_MASTER, false)
-                .set(APPOINTMENT.UPDATED_AT, Utc.toLocal(Instant.now()))
+                .set(APPOINTMENT.UPDATED_AT, Utc.toLocal(now()))
                 .where(TenantAwareDsl.tenantEquals(APPOINTMENT.TENANT_ID)
                         .and(APPOINTMENT.CLIENT_ID.eq(clientId))
                         .and(APPOINTMENT.SPECIALIST_ID.eq(specialistId))
@@ -264,14 +359,14 @@ class AppointmentRepository {
                 ));
     }
 
-    void insertEvent(UUID appointmentId, String type, String payload) {
+    private void insertEvent(UUID appointmentId, AppointmentEventType type, String payload, Instant at) {
         dsl.insertInto(APPOINTMENT_EVENT)
                 .set(APPOINTMENT_EVENT.ID, UUID.randomUUID())
                 .set(APPOINTMENT_EVENT.TENANT_ID, TenantContext.require())
                 .set(APPOINTMENT_EVENT.APPOINTMENT_ID, appointmentId)
-                .set(APPOINTMENT_EVENT.EVENT_TYPE, type)
+                .set(APPOINTMENT_EVENT.EVENT_TYPE, type.name())
                 .set(APPOINTMENT_EVENT.PAYLOAD, payload)
-                .set(APPOINTMENT_EVENT.CREATED_AT, Utc.toLocal(Instant.now()))
+                .set(APPOINTMENT_EVENT.CREATED_AT, Utc.toLocal(at))
                 .execute();
     }
 
@@ -282,7 +377,7 @@ class AppointmentRepository {
                 .set(BOOKING_ACCESS_TOKEN.APPOINTMENT_ID, appointmentId)
                 .set(BOOKING_ACCESS_TOKEN.TOKEN_HASH, tokenHash)
                 .set(BOOKING_ACCESS_TOKEN.EXPIRES_AT, Utc.toLocal(expiresAt))
-                .set(BOOKING_ACCESS_TOKEN.CREATED_AT, Utc.toLocal(Instant.now()))
+                .set(BOOKING_ACCESS_TOKEN.CREATED_AT, Utc.toLocal(now()))
                 .execute();
     }
 

@@ -57,5 +57,11 @@
   "role.owner": "Власник",
   "role.master": "Майстер",
   "ai.placeholder": "Запитайте про сьогодні або чернетку скасування",
-  "ai.send": "Надіслати"
+  "ai.send": "Надіслати",
+  "client.visits": "{count, plural, one {# візит} few {# візити} many {# візитів} other {# візиту}}",
+  "unit.minutes": "{count, number} хв",
+  "unit.minutesWord": "хв",
+  "unit.hoursWord": "год",
+  "unit.daysWord": "{count, plural, one {день} few {дні} many {днів} other {дня}}",
+  "service.buffer": "+{before}/{after} буфер"
 }

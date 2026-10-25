@@ -29,6 +29,14 @@ spring:
       enabled: false
 
 app:
+  metrics:
+    # ADR 0001 (review M3): a recalculation folds the booking journal as of now minus this lag. The lag must exceed the
+    # longest write transaction (booking writes are short, well under a second; one minute leaves a wide margin), so
+    # every event stamped up to that instant is committed when the recalculation reads it. Without it, an event stamped
+    # before T but committed after the recalculation's snapshot would be missing from the snapshot and present in a
+    # later replay of it. Snapshots therefore lag reality by this much. The demo seed alone recalculates without the
+    # lag (GrowthService.recalculateForSeed: single writer at startup, all writes committed).
+    as-of-lag: ${APP_METRICS_AS_OF_LAG:PT1M}
   security:
     # Default: OAuth2 resource server (JWT from Keycloak). Tenant and role come from token claims only.
     oauth2-enabled: true
@@ -56,6 +64,11 @@ app:
     # CIDRs of reverse proxies whose X-Forwarded-For is trusted (env: APP_RATE_LIMIT_TRUSTED_PROXIES=10.0.0.0/8,...).
     # Empty (default): the header is ignored and the TCP peer address is the client IP.
     # trusted-proxies: []
+  i18n:
+    # Locale of owner-facing server texts (owner task titles and hints; the catalog is messages_<locale>.properties).
+    # No per-owner locale exists yet, so one value serves every tenant. Client-facing texts ignore it: they use the
+    # client's preferred_locale and fall back to en. One of en, ru, ka, uk, cs (env: APP_I18N_OWNER_LOCALE).
+    owner-locale: ${APP_I18N_OWNER_LOCALE:en}
   seed:
     enabled: true
   outbox:

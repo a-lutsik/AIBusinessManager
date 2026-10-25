@@ -4,7 +4,7 @@ import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { Button } from '@/components/ui/Button';
 import { MaterialIcon } from '@/components/ui/MaterialIcon';
 import { api, API_BASE } from '@/src/api/client';
-import { currentLocale, setLocale, t, type AppLocale } from '@/src/i18n';
+import { currentLocale, setLocale, t, useLocale, type AppLocale } from '@/src/i18n';
 import { useThemeTokens } from '@/src/theme/tokens';
 
 const COUNTRIES = [
@@ -30,7 +30,7 @@ export default function PublicBookScreen() {
   const [consent, setConsent] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
-  const [, bump] = useState(0);
+  const activeLocale = useLocale();
 
   useEffect(() => {
     if (!slug) return;
@@ -46,8 +46,11 @@ export default function PublicBookScreen() {
   useEffect(() => {
     if (!slug || !serviceId) return;
     api.publicSpecialists(slug, serviceId).then(setSpecialists).catch(() => setSpecialists([]));
+    // A new service invalidates the chosen specialist and slot.
+    /* eslint-disable react-hooks/set-state-in-effect */
     setSpecialistId(null);
     setSlot(null);
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, [slug, serviceId]);
 
   const windowRange = useMemo(() => {
@@ -140,8 +143,8 @@ export default function PublicBookScreen() {
         </Text>
         <View style={{ flexDirection: 'row', gap: space.sm }}>
           {(['en', 'ru', 'ka', 'uk', 'cs'] as AppLocale[]).map((loc) => (
-            <Pressable key={loc} onPress={() => { setLocale(loc); bump((n) => n + 1); }}>
-              <Text style={chip(currentLocale() === loc)}>{loc.toUpperCase()}</Text>
+            <Pressable key={loc} onPress={() => setLocale(loc)}>
+              <Text style={chip(activeLocale === loc)}>{loc.toUpperCase()}</Text>
             </Pressable>
           ))}
         </View>

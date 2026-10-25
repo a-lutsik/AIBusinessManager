@@ -365,11 +365,11 @@ public class AppApiController {
         return growthService.definitions();
     }
 
+    /** Current month to date and the previous full month, in the tenant's zone (ADR 0001 §5). */
     @PostMapping("/metrics/recalculate")
     public List<MetricView> recalculate() {
         assertOwner();
-        LocalDate end = LocalDate.now();
-        return growthService.recalculate(end.minusDays(90), end);
+        return growthService.recalculate();
     }
 
     @GetMapping("/signals")

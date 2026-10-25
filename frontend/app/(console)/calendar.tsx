@@ -113,6 +113,8 @@ export default function CalendarScreen() {
 
   const actionsFor = (status: string, serviceStart?: string, hiddenFromMaster?: boolean) => {
     // A visit is completed or marked no-show only once it has started (the API answers 409 VISIT_NOT_STARTED).
+    // The current time is read on purpose each time the action list is built.
+    // eslint-disable-next-line react-hooks/purity
     const started = !serviceStart || new Date(serviceStart).getTime() <= Date.now();
     // A master's phone booking hidden until the owner confirms it: only the owner confirms (the API answers 403).
     if (status === 'PENDING' && role === 'MASTER' && hiddenFromMaster) return ['CANCELLED_BY_BUSINESS'];

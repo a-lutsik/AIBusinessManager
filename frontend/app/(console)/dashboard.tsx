@@ -35,7 +35,7 @@ export default function DashboardScreen() {
   const [data, setData] = useState<DashboardView | null>(null);
   const [defs, setDefs] = useState<Record<string, MetricDefinitionView>>({});
   const [error, setError] = useState<string | null>(null);
-  const { role, ready } = useConsoleSession();
+  const { role, ready, me } = useConsoleSession();
   const [copyState, setCopyState] = useState<Record<string, CopyState>>({});
   const copyTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
@@ -97,8 +97,11 @@ export default function DashboardScreen() {
 
   useEffect(() => {
     if (!ready) return;
+    // Clears the previous role's data before loading the new one.
+    /* eslint-disable react-hooks/set-state-in-effect */
     setData(null);
     setError(null);
+    /* eslint-enable react-hooks/set-state-in-effect */
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, role]);
@@ -239,6 +242,7 @@ export default function DashboardScreen() {
                   insufficientData={m.insufficientData}
                   deltaMoM={m.deltaMoM}
                   unit={m.unit ?? def?.unit}
+                  currencyCode={me?.currencyCode}
                   windowLabel={
                     m.windowStart && m.windowEnd ? `${m.windowStart} → ${m.windowEnd}` : undefined
                   }

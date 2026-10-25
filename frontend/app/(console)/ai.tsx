@@ -69,6 +69,8 @@ export default function AiScreen() {
     const stored =
       typeof localStorage !== 'undefined' ? localStorage.getItem('cadence.aiConversationId') : null;
     if (!stored) return;
+    // Restores the remembered conversation id from browser storage once on mount.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setConversationId(stored);
     api
       .aiConversation(LUMEN_TENANT_ID, stored)

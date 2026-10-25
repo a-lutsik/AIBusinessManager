@@ -1,6 +1,7 @@
 package com.cadence.booking.internal;
 
 import com.cadence.booking.api.AccessLinkView;
+import com.cadence.booking.api.AppointmentEventType;
 import com.cadence.booking.api.AppointmentStatus;
 import com.cadence.booking.api.AppointmentView;
 import com.cadence.booking.api.BookingService;
@@ -17,6 +18,7 @@ import com.cadence.crm.api.CrmService;
 import com.cadence.notification.api.OwnerTaskService;
 import com.cadence.platform.audit.AuditLogger;
 import com.cadence.platform.error.DomainException;
+import com.cadence.platform.i18n.MessageCatalog;
 import com.cadence.platform.outbox.OutboxPublisher;
 import com.cadence.platform.phone.PhoneNormalizer;
 import com.cadence.platform.tenancy.ActorContext;
@@ -51,6 +53,8 @@ public class BookingServiceImpl implements BookingService {
     private final OwnerTaskService ownerTasks;
     private final PhoneNormalizer phones;
     private final Clock clock;
+    private final MessageCatalog messages;
+    private final ClientMessages clientMessages;
 
     public BookingServiceImpl(
             CatalogService catalogService,
@@ -62,7 +66,8 @@ public class BookingServiceImpl implements BookingService {
             AuditLogger auditLogger,
             OwnerTaskService ownerTasks,
             PhoneNormalizer phones,
-            Clock clock
+            Clock clock,
+            MessageCatalog messages
     ) {
         this.catalogService = catalogService;
         this.crmService = crmService;
@@ -74,6 +79,8 @@ public class BookingServiceImpl implements BookingService {
         this.ownerTasks = ownerTasks;
         this.phones = phones;
         this.clock = clock;
+        this.messages = messages;
+        this.clientMessages = new ClientMessages(messages);
     }
 
     @Override
@@ -171,6 +178,9 @@ public class BookingServiceImpl implements BookingService {
         // reads it (enrich), so no public or master answer can carry a stored name through this column.
         String enteredName = command.displayName();
         boolean hideClient = false;
+        // Locale of the client-facing confirmation text: the stored profile locale wins (set once, first booking),
+        // the locale sent with this booking is the hint for a path that never reads the profile.
+        String clientLocale = command.locale();
         if (clientId == null) {
             String region = tenant.getCountryCode();
             String e164 = phones.toE164(command.phone(), region);
@@ -182,6 +192,7 @@ public class BookingServiceImpl implements BookingService {
                     command.consentVersion()
             );
             clientId = client.id();
+            clientLocale = client.preferredLocale() != null ? client.preferredLocale() : command.locale();
             // Decision A: a master's phone booking onto a client outside their scope (known or just created, the
             // master cannot tell) hides that client from the master until the owner confirms the visit.
             hideClient = isMaster() && !appointments.hasActiveVisit(clientId, command.specialistId());
@@ -226,8 +237,7 @@ public class BookingServiceImpl implements BookingService {
                 null,
                 hideClient
         );
-        appointments.insert(row);
-        appointments.insertEvent(id, "CREATED", "{\"status\":\"" + status + "\"}");
+        appointments.record(row, AppointmentEventType.CREATED, JournalPayloads.Created.of(row));
         outbox.publish("BOOKING_CREATED", "appointment", id, "{\"status\":\"" + status + "\"}");
         auditLogger.record(
                 ActorContext.current().map(ActorContext.Actor::actorId).orElse("public"),
@@ -247,9 +257,8 @@ public class BookingServiceImpl implements BookingService {
                     .orElse("A master");
             ownerTasks.create(
                     MASTER_PHONE_BOOKING_TASK,
-                    "Master " + master + " booked a client by phone — confirm",
-                    "Confirm the visit to show this client to the master. Until then the master sees only the name "
-                            + "they typed on it, and cancelling the visit keeps the client hidden.",
+                    messages.forOwner("owner.task.masterPhoneBooking.title", master),
+                    messages.forOwner("owner.task.masterPhoneBooking.body"),
                     null,
                     null,
                     id,
@@ -261,10 +270,10 @@ public class BookingServiceImpl implements BookingService {
             raw = BookingTokens.raw();
             appointments.insertToken(id, BookingTokens.hash(raw), clock.instant().plus(ACCESS_TOKEN_TTL));
             // The raw token reaches the client once (response below); owner tasks carry only a placeholder.
-            String copy = ClientMessages.bookingConfirmation(status);
+            String copy = clientMessages.bookingConfirmation(status, clientLocale);
             ownerTasks.create(
                     "NEW_BOOKING",
-                    "New booking — send confirmation manually",
+                    messages.forOwner("owner.task.newBooking.title"),
                     copy,
                     copy,
                     null,
@@ -356,7 +365,8 @@ public class BookingServiceImpl implements BookingService {
         boolean ownerConfirms = target == AppointmentStatus.CONFIRMED && isOwner();
         boolean hidden = current.clientHiddenFromMaster() && !ownerConfirms;
         AppointmentView updated = withStatus(current, target, note == null ? current.note() : note, hidden);
-        appointments.updateStatusAndTimes(updated, current.status());
+        appointments.record(updated, JournalPayloads.eventTypeFor(target),
+                new JournalPayloads.StatusChange(current.status(), target, correction));
         if (current.clientHiddenFromMaster() && ownerConfirms) {
             // The client is now in the master's scope, so the master's other hidden visits with them are revealed too.
             appointments.revealToMaster(current.clientId(), current.specialistId());
@@ -366,14 +376,6 @@ public class BookingServiceImpl implements BookingService {
             // The owner's "confirm the master's phone booking" task is done once the visit is confirmed or cancelled.
             ownerTasks.completeForAppointment(appointmentId, MASTER_PHONE_BOOKING_TASK);
         }
-        String event = switch (target) {
-            case CONFIRMED -> "CONFIRMED";
-            case COMPLETED -> "COMPLETED";
-            case NO_SHOW -> "NO_SHOW";
-            case CANCELLED_BY_CLIENT, CANCELLED_BY_BUSINESS -> "CANCELLED";
-            default -> target.name();
-        };
-        appointments.insertEvent(appointmentId, event, "{\"from\":\"" + current.status() + "\",\"to\":\"" + target + "\"}");
         int valueMinor = current.priceSnapshot() - current.discountAmount();
         if (correction && current.status() == AppointmentStatus.COMPLETED) {
             // COMPLETED -> NO_SHOW: take the visit back out of the aggregates, then count the no-show.
@@ -481,8 +483,8 @@ public class BookingServiceImpl implements BookingService {
                 current.trustLevel(),
                 current.clientHiddenFromMaster()
         );
-        appointments.updateStatusAndTimes(updated, current.status());
-        appointments.insertEvent(appointmentId, "RESCHEDULED", "{\"from\":\"" + current.serviceStart() + "\",\"to\":\"" + newStart + "\"}");
+        appointments.record(updated, AppointmentEventType.RESCHEDULED,
+                new JournalPayloads.Rescheduled(current.serviceStart(), newStart));
         return updated;
     }
 
