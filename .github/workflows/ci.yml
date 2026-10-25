@@ -35,7 +35,7 @@ jobs:
       # Both are installed; the LAST listed version becomes JAVA_HOME / PATH java (21, runs Gradle itself), and
       # setup-java exports JAVA_HOME_25_X64 for the other one, which is handed to Gradle below.
       - name: Set up JDK 21 (runs Gradle) and JDK 25 (toolchain)
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: |
