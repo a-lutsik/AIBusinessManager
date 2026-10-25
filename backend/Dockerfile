@@ -6,9 +6,9 @@
 # Gradle on JDK 21 and is pointed at a JDK 25 copied from the matching image (-Porg.gradle.java.installations.paths);
 # toolchain auto-download is disabled in gradle.properties on purpose. The runtime image is a plain JRE 25.
 
-FROM eclipse-temurin:25.0.1_8-jdk-noble AS jdk25
+FROM eclipse-temurin:26.0.2.1_1-jdk-noble AS jdk25
 
-FROM eclipse-temurin:21.0.9_10-jdk-noble AS build
+FROM eclipse-temurin:24.0.2_12-jdk-noble AS build
 COPY --from=jdk25 /opt/java/openjdk /opt/jdk25
 WORKDIR /workspace
 COPY gradlew settings.gradle.kts build.gradle.kts gradle.properties ./
@@ -21,7 +21,7 @@ RUN --mount=type=cache,target=/root/.gradle \
         :modules:app:bootJar -x test \
     && cp modules/app/build/libs/cadence-*.jar /workspace/app.jar
 
-FROM eclipse-temurin:25.0.1_8-jre-noble AS runtime
+FROM eclipse-temurin:26.0.2.1_1-jre-noble AS runtime
 # Non-root user with a fixed uid so volume/secret permissions are predictable.
 RUN groupadd --gid 10001 cadence \
     && useradd --uid 10001 --gid cadence --no-create-home --no-log-init --shell /usr/sbin/nologin cadence
