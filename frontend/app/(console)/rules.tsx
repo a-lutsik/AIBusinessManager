@@ -1,7 +1,8 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { Pressable, ScrollView, Switch, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { Toggle } from '@/components/ui/Toggle';
 import { api, LUMEN_TENANT_ID, type BookingRulesView } from '@/src/api/client';
 import { t } from '@/src/i18n';
 import { useThemeTokens } from '@/src/theme/tokens';
@@ -32,29 +33,6 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
     <View style={{ marginBottom: space.lg }}>
       <Text style={{ color: color.ink, fontWeight: '600', marginBottom: space.sm }}>{label}</Text>
       {children}
-    </View>
-  );
-}
-
-function Toggle({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) {
-  const { color, space } = useThemeTokens();
-  return (
-    <View
-      style={{
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: space.md,
-        marginBottom: space.lg,
-      }}
-    >
-      <Text style={{ flex: 1, color: color.ink, fontWeight: '600' }}>{label}</Text>
-      <Switch
-        value={value}
-        onValueChange={onChange}
-        trackColor={{ false: color.line, true: `${color.primary}88` }}
-        thumbColor={value ? color.primary : color.mist}
-      />
     </View>
   );
 }

@@ -100,6 +100,19 @@ app:
       # Interactive console: disabled. Official samples use enabled + reasoning_effort=high.
       thinking: ${APP_AI_DEEPSEEK_THINKING:disabled}
       timeout: ${APP_AI_DEEPSEEK_TIMEOUT:90s}
+    # Tenant budget when the operator set none (ai_tenant_settings.monthly_token_budget); ADR 0002 §5, §10.
+    default-monthly-token-budget: ${APP_AI_DEFAULT_MONTHLY_TOKEN_BUDGET:1000000}
+    max-tool-iterations: 6
+    max-tool-calls-per-turn: 10
+    max-drafts-per-turn: 3
+    max-tool-result-chars: 4000
+    max-history-messages: 20
+    max-user-message-chars: 4000
+    max-completion-tokens: 1024
+    draft-ttl: PT24H
+    # Nightly drop of conversations idle longer than this (with messages, pseudonyms, drafts); ADR 0002 §7.
+    retention: P30D
+    retention-cron: "0 40 3 * * *"
 
 management:
   endpoints:

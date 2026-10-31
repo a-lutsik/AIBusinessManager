@@ -6,6 +6,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.transaction.PlatformTransactionManager;
 
+import java.util.List;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
@@ -31,7 +32,7 @@ class CrmServiceAbsorbTest {
     @BeforeEach
     void setUp() {
         repository = mock(ClientRepository.class);
-        service = new CrmServiceImpl(repository, mock(PlatformTransactionManager.class), mock(com.cadence.platform.audit.AuditLogger.class));
+        service = new CrmServiceImpl(repository, mock(PlatformTransactionManager.class), mock(com.cadence.platform.audit.AuditLogger.class), List.of());
     }
 
     private static ClientView client(

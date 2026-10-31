@@ -223,31 +223,86 @@ export type MasterTodayView = {
   appointments?: MasterTodayItem[];
 };
 
-export type AiDraftAction = {
+export type DraftType = 'draft_booking' | 'draft_reschedule' | 'draft_cancel';
+
+export type DraftStatus = 'PENDING' | 'CONFIRMED' | 'REJECTED' | 'FAILED' | 'EXPIRED';
+
+/** What the owner confirms. Times are tenant-local `YYYY-MM-DDTHH:MM`; fields of the other draft types are null. */
+export type DraftSummary = {
+  clientName?: string | null;
+  specialistName?: string | null;
+  serviceName?: string | null;
+  durationMinutes?: number | null;
+  priceMinor?: number | null;
+  currencyCode?: string | null;
+  localStart?: string | null;
+  localFrom?: string | null;
+  localTo?: string | null;
+  initiatedBy?: 'business' | 'client' | null;
+  /** Plain text from the model: never render as HTML or a link. */
+  reason?: string | null;
+};
+
+export type DraftAction = {
   id: string;
-  toolName?: string;
-  summary?: string;
-  payloadJson?: string;
-  status?: string;
+  type: DraftType;
+  status: DraftStatus;
+  createdAt: string;
+  expiresAt: string;
+  resolvedAt?: string | null;
+  appliedEntityId?: string | null;
+  failureCode?: string | null;
+  failureMessage?: string | null;
+  /** Null only for a stored payload this version cannot read. */
+  summary?: DraftSummary | null;
 };
 
 export type AiChatResponse = {
-  reply?: string;
-  drafts?: AiDraftAction[];
-  conversationId?: string;
+  reply: string;
+  drafts: DraftAction[];
+  conversationId: string;
+  usage: { monthTokensUsed: number; monthTokenBudget: number };
+};
+
+export type ConversationMessage = {
+  id: string;
+  at: string;
+  role: 'user' | 'assistant';
+  content: string;
+  provider?: string | null;
+  model?: string | null;
+  /** Drafts created in the turn of a user message. */
+  drafts: DraftAction[];
 };
 
 export type ConversationHistoryView = {
   conversationId: string;
-  messages?: {
-    at?: string;
-    role?: string;
-    content?: string;
-    provider?: string;
-    model?: string;
-  }[];
-  drafts?: AiDraftAction[];
+  messages: ConversationMessage[];
+  drafts: DraftAction[];
 };
+
+export type AiSettingsView = {
+  notesToLlm: boolean;
+  monthlyTokenBudget: number;
+  monthTokensUsed: number;
+  period: string;
+  periodResetsAt: string;
+};
+
+/** A non-2xx answer. `code` and `detail` come from the backend's problem+json body; `message` is the detail. */
+export class ApiError extends Error {
+  readonly status: number;
+  readonly code?: string;
+  readonly detail?: string;
+
+  constructor(status: number, code: string | undefined, detail: string | undefined, message: string) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.code = code;
+    this.detail = detail;
+  }
+}
 
 /** Short public ref = last 6 hex chars of UUID (no fake #LM- codes). */
 export function shortRef(id: string | undefined | null): string {
@@ -302,9 +357,15 @@ async function request<T>(path: string, init: RequestInit = {}, tenantId?: strin
   }
   if (!res.ok) {
     const text = await res.text();
-    const err = new Error(text || res.statusText) as Error & { status?: number };
-    err.status = res.status;
-    throw err;
+    let problem: { code?: unknown; detail?: unknown } = {};
+    try {
+      problem = JSON.parse(text) ?? {};
+    } catch {
+      // Not problem+json (a proxy page, an empty body): fall back to the raw text below.
+    }
+    const code = typeof problem.code === 'string' ? problem.code : undefined;
+    const detail = typeof problem.detail === 'string' ? problem.detail : undefined;
+    throw new ApiError(res.status, code, detail, detail || text || res.statusText);
   }
   if (res.headers.get('content-type')?.includes('text/calendar')) {
     return (await res.text()) as T;
@@ -412,17 +473,16 @@ export const api = {
       tenantId
     ),
   confirmDraft: (tenantId: string, id: string) =>
-    request<AiChatResponse>(`/api/app/ai/drafts/${id}/confirm`, { method: 'POST' }, tenantId),
+    request<DraftAction>(`/api/app/ai/drafts/${id}/confirm`, { method: 'POST' }, tenantId),
   rejectDraft: (tenantId: string, id: string) =>
-    optionalRequest<AiChatResponse>(`/api/app/ai/drafts/${id}/reject`, { method: 'POST' }, tenantId),
+    request<DraftAction>(`/api/app/ai/drafts/${id}/reject`, { method: 'POST' }, tenantId),
   aiConversation: (tenantId: string, id: string) =>
-    optionalRequest<ConversationHistoryView>(`/api/app/ai/conversations/${id}`, {}, tenantId),
-  aiDrafts: (tenantId: string, status?: string) =>
-    optionalRequest<AiDraftAction[]>(
-      `/api/app/ai/drafts${status ? `?status=${encodeURIComponent(status)}` : ''}`,
-      {},
-      tenantId
-    ),
+    request<ConversationHistoryView>(`/api/app/ai/conversations/${id}`, {}, tenantId),
+  aiDrafts: (tenantId: string, status?: DraftStatus) =>
+    request<DraftAction[]>(`/api/app/ai/drafts${status ? `?status=${status}` : ''}`, {}, tenantId),
+  aiSettings: (tenantId: string) => request<AiSettingsView>('/api/app/ai/settings', {}, tenantId),
+  saveAiSettings: (tenantId: string, notesToLlm: boolean) =>
+    request<AiSettingsView>('/api/app/ai/settings', { method: 'PUT', body: JSON.stringify({ notesToLlm }) }, tenantId),
 };
 
 export const LUMEN_TENANT_ID = '00000000-0000-4000-8000-000000000001';

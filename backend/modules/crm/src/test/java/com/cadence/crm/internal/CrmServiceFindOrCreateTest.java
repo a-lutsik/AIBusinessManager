@@ -63,7 +63,7 @@ class CrmServiceFindOrCreateTest {
     void setUp() {
         repository = mock(ClientRepository.class);
         transactions = new RecordingTransactionManager();
-        service = new CrmServiceImpl(repository, transactions, mock(com.cadence.platform.audit.AuditLogger.class));
+        service = new CrmServiceImpl(repository, transactions, mock(com.cadence.platform.audit.AuditLogger.class), List.of());
     }
 
     private static ClientView client(UUID id, String name) {

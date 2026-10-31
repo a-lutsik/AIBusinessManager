@@ -4,10 +4,14 @@ import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 /** Public CRM port — clients, history aggregates, packages. */
 public interface CrmService {
+
+    /** Row cap of {@link #findByNameWords}: generous for one chat message, bounded for any tenant. */
+    int NAME_WORD_MATCH_LIMIT = 2000;
 
     String moduleName();
 
@@ -20,6 +24,9 @@ public interface CrmService {
 
     Optional<ClientView> findById(UUID clientId);
 
+    /** {@link #findById} of a client that is neither anonymized nor merged away; empty otherwise. */
+    Optional<ClientView> findActiveById(UUID clientId);
+
     Optional<ClientView> findByPhone(String e164Phone);
 
     List<ClientView> search(String query);
@@ -31,6 +38,14 @@ public interface CrmService {
      * a name is stored with the phone as its name) are left out.
      */
     List<ClientView> searchAmong(String query, Collection<UUID> clientIds);
+
+    /**
+     * A prefilter in one statement: clients (not anonymized) whose display name may have a word matching one of {@code words} by
+     * {@link NameWords#matches}. Never narrower than that rule, in either case of the first letter, and possibly wider, so the
+     * caller decides with it. At most {@link #NAME_WORD_MATCH_LIMIT} rows; a result of exactly the limit may hide further clients,
+     * so a caller that depends on completeness must treat it as truncated.
+     */
+    List<ClientName> findByNameWords(Set<String> words);
 
     ClientView updateNotes(UUID clientId, String notes, String tags);
 

@@ -1,9 +1,25 @@
 package com.cadence.app.architecture;
 
+import com.cadence.platform.jooq.tables.AiConversation;
+import com.cadence.platform.jooq.tables.AiDraft;
+import com.cadence.platform.jooq.tables.AiMessage;
+import com.cadence.platform.jooq.tables.AiPromptLog;
+import com.cadence.platform.jooq.tables.AiPseudonym;
+import com.cadence.platform.jooq.tables.AiTenantSettings;
+import com.cadence.platform.jooq.tables.AiToolCall;
+import com.cadence.platform.jooq.tables.AiUsageMonth;
 import com.cadence.platform.jooq.tables.Appointment;
 import com.cadence.platform.jooq.tables.AppointmentEvent;
 import com.cadence.platform.jooq.tables.GrowthSignal;
 import com.cadence.platform.jooq.tables.MetricSnapshot;
+import com.cadence.platform.jooq.tables.records.AiConversationRecord;
+import com.cadence.platform.jooq.tables.records.AiDraftRecord;
+import com.cadence.platform.jooq.tables.records.AiMessageRecord;
+import com.cadence.platform.jooq.tables.records.AiPromptLogRecord;
+import com.cadence.platform.jooq.tables.records.AiPseudonymRecord;
+import com.cadence.platform.jooq.tables.records.AiTenantSettingsRecord;
+import com.cadence.platform.jooq.tables.records.AiToolCallRecord;
+import com.cadence.platform.jooq.tables.records.AiUsageMonthRecord;
 import com.cadence.platform.jooq.tables.records.AppointmentEventRecord;
 import com.cadence.platform.jooq.tables.records.AppointmentRecord;
 import com.cadence.platform.jooq.tables.records.GrowthSignalRecord;
@@ -105,6 +121,26 @@ class ModuleBoundaryArchTest {
                     .belongToAnyOf(MetricSnapshot.class, MetricSnapshotRecord.class, GrowthSignal.class, GrowthSignalRecord.class)
                     .because("metric_snapshot and growth_signal are growth tables (ADR 0001)");
 
+    /**
+     * ADR 0002 §9: the AI tables are read and written only by the platform AI stores ({@code com.cadence.platform.ai}),
+     * which the {@code ai} module uses through their interfaces. The generated jOOQ catalog itself is exempt.
+     */
+    @ArchTest
+    static final ArchRule aiTablesBelongToPlatformAiStores =
+            noClasses()
+                    .that().resideOutsideOfPackages("com.cadence.platform.ai..", "com.cadence.platform.jooq..")
+                    .should().dependOnClassesThat()
+                    .belongToAnyOf(
+                            AiTenantSettings.class, AiTenantSettingsRecord.class,
+                            AiConversation.class, AiConversationRecord.class,
+                            AiMessage.class, AiMessageRecord.class,
+                            AiPseudonym.class, AiPseudonymRecord.class,
+                            AiUsageMonth.class, AiUsageMonthRecord.class,
+                            AiDraft.class, AiDraftRecord.class,
+                            AiPromptLog.class, AiPromptLogRecord.class,
+                            AiToolCall.class, AiToolCallRecord.class)
+                    .because("the ai_* tables belong to the platform AI stores (ADR 0002 §9)");
+
     /** Review D1: the lag-free recalculation is for the demo seed only, never for HTTP or the nightly job. */
     @ArchTest
     static final ArchRule seedRecalculationOnlyFromTheSeeder =
@@ -126,6 +162,12 @@ class ModuleBoundaryArchTest {
             classes()
                     .that().haveFullyQualifiedName("com.cadence.growth.internal.MetricSnapshotRepository")
                     .should().dependOnClassesThat().belongToAnyOf(MetricSnapshot.class);
+
+    @ArchTest
+    static final ArchRule aiTableRuleSeesTheDraftStore =
+            classes()
+                    .that().haveFullyQualifiedName("com.cadence.platform.ai.JooqAiDraftStore")
+                    .should().dependOnClassesThat().belongToAnyOf(AiDraft.class);
 
     @ArchTest
     static final ArchRule aiMustNotTouchJooqTables =

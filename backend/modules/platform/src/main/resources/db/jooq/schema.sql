@@ -332,6 +332,12 @@ CREATE TABLE ai_draft (
     status              VARCHAR(32) NOT NULL,
     created_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     confirmed_at        TIMESTAMP,
+    expires_at          TIMESTAMP NULL,
+    resolved_at         TIMESTAMP NULL,
+    applied_entity_id   UUID NULL,
+    failure_code        VARCHAR(64) NULL,
+    failure_message     VARCHAR(1024) NULL,
+    message_id          UUID NULL,
     CONSTRAINT ai_draft_pk PRIMARY KEY (id),
     CONSTRAINT ai_draft_tenant_fk FOREIGN KEY (tenant_id) REFERENCES tenant (id)
 );
@@ -342,11 +348,101 @@ CREATE TABLE ai_prompt_log (
     conversation_id     UUID,
     provider            VARCHAR(64) NOT NULL,
     model               VARCHAR(128) NOT NULL,
-    prompt              VARCHAR(8192) NOT NULL,
-    response            VARCHAR(8192),
+    prompt              VARCHAR(65536) NOT NULL,
+    response            VARCHAR(65536),
     created_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    message_id          UUID NULL,
+    prompt_tokens       INT NULL,
+    completion_tokens   INT NULL,
+    finish_reason       VARCHAR(32) NULL,
+    latency_ms          INT NULL,
+    tool_calls_json     VARCHAR(8192) NULL,
     CONSTRAINT ai_prompt_log_pk PRIMARY KEY (id, created_at),
     CONSTRAINT ai_prompt_log_tenant_fk FOREIGN KEY (tenant_id) REFERENCES tenant (id)
+);
+
+-- V15 (ADR 0002). Hypertable, retention policies and RLS of these tables are runtime-only (see the migration).
+CREATE TABLE ai_tenant_settings (
+    tenant_id               UUID NOT NULL,
+    notes_to_llm            BOOLEAN NOT NULL DEFAULT false,
+    monthly_token_budget    BIGINT NULL,
+    updated_at              TIMESTAMP NOT NULL,
+    CONSTRAINT ai_tenant_settings_pk PRIMARY KEY (tenant_id),
+    CONSTRAINT ai_tenant_settings_tenant_fk FOREIGN KEY (tenant_id) REFERENCES tenant (id),
+    CONSTRAINT ai_tenant_settings_budget_ck CHECK (monthly_token_budget IS NULL OR monthly_token_budget >= 0)
+);
+
+CREATE TABLE ai_conversation (
+    id                  UUID NOT NULL,
+    tenant_id           UUID NOT NULL,
+    locale              VARCHAR(8) NOT NULL,
+    created_at          TIMESTAMP NOT NULL,
+    last_message_at     TIMESTAMP NOT NULL,
+    CONSTRAINT ai_conversation_pk PRIMARY KEY (id),
+    CONSTRAINT ai_conversation_tenant_id_uq UNIQUE (tenant_id, id),
+    CONSTRAINT ai_conversation_tenant_fk FOREIGN KEY (tenant_id) REFERENCES tenant (id)
+);
+
+CREATE TABLE ai_message (
+    id                  UUID NOT NULL,
+    tenant_id           UUID NOT NULL,
+    conversation_id     UUID NOT NULL,
+    role                VARCHAR(16) NOT NULL,
+    content             VARCHAR(16384) NOT NULL,
+    provider            VARCHAR(64) NULL,
+    model               VARCHAR(128) NULL,
+    created_at          TIMESTAMP NOT NULL,
+    CONSTRAINT ai_message_pk PRIMARY KEY (id),
+    CONSTRAINT ai_message_conversation_fk FOREIGN KEY (tenant_id, conversation_id)
+        REFERENCES ai_conversation (tenant_id, id) ON DELETE CASCADE,
+    CONSTRAINT ai_message_role_ck CHECK (role IN ('USER', 'ASSISTANT'))
+);
+
+CREATE TABLE ai_pseudonym (
+    tenant_id           UUID NOT NULL,
+    conversation_id     UUID NOT NULL,
+    kind                VARCHAR(16) NOT NULL,
+    token_no            INT NOT NULL,
+    token               VARCHAR(32) NOT NULL,
+    entity_id           UUID NOT NULL,
+    display             VARCHAR(512) NOT NULL,
+    created_at          TIMESTAMP NOT NULL,
+    CONSTRAINT ai_pseudonym_pk PRIMARY KEY (tenant_id, conversation_id, token),
+    CONSTRAINT ai_pseudonym_entity_uq UNIQUE (tenant_id, conversation_id, kind, entity_id),
+    CONSTRAINT ai_pseudonym_conversation_fk FOREIGN KEY (tenant_id, conversation_id)
+        REFERENCES ai_conversation (tenant_id, id) ON DELETE CASCADE,
+    CONSTRAINT ai_pseudonym_kind_ck CHECK (kind IN ('CLIENT', 'MASTER', 'VISIT', 'SERVICE', 'DRAFT')),
+    CONSTRAINT ai_pseudonym_token_no_ck CHECK (token_no >= 1)
+);
+
+CREATE TABLE ai_usage_month (
+    tenant_id           UUID NOT NULL,
+    period              CHAR(7) NOT NULL,
+    prompt_tokens       BIGINT NOT NULL DEFAULT 0,
+    completion_tokens   BIGINT NOT NULL DEFAULT 0,
+    llm_calls           INT NOT NULL DEFAULT 0,
+    tool_calls          INT NOT NULL DEFAULT 0,
+    exceeded_at         TIMESTAMP NULL,
+    updated_at          TIMESTAMP NOT NULL,
+    CONSTRAINT ai_usage_month_pk PRIMARY KEY (tenant_id, period),
+    CONSTRAINT ai_usage_month_tenant_fk FOREIGN KEY (tenant_id) REFERENCES tenant (id)
+);
+
+CREATE TABLE ai_tool_call (
+    id                  UUID NOT NULL,
+    tenant_id           UUID NOT NULL,
+    conversation_id     UUID NOT NULL,
+    llm_call_id         UUID NULL,
+    tool_name           VARCHAR(64) NOT NULL,
+    arguments           VARCHAR(4096) NOT NULL,
+    result              VARCHAR(16384) NULL,
+    status              VARCHAR(16) NOT NULL,
+    error_code          VARCHAR(64) NULL,
+    duration_ms         INT NOT NULL,
+    created_at          TIMESTAMP NOT NULL,
+    CONSTRAINT ai_tool_call_pk PRIMARY KEY (id, created_at),
+    CONSTRAINT ai_tool_call_tenant_fk FOREIGN KEY (tenant_id) REFERENCES tenant (id),
+    CONSTRAINT ai_tool_call_status_ck CHECK (status IN ('OK', 'ERROR'))
 );
 
 CREATE TABLE growth_signal (
@@ -370,3 +466,6 @@ CREATE TABLE growth_signal (
     CONSTRAINT growth_signal_dedupe_uq UNIQUE (tenant_id, dedupe_key),
     CONSTRAINT growth_signal_tenant_fk FOREIGN KEY (tenant_id) REFERENCES tenant (id)
 );
+
+ALTER TABLE ai_draft ADD CONSTRAINT ai_draft_conversation_fk FOREIGN KEY (tenant_id, conversation_id)
+    REFERENCES ai_conversation (tenant_id, id) ON DELETE CASCADE;

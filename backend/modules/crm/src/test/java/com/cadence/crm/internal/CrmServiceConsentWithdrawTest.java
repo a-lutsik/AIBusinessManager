@@ -8,6 +8,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.transaction.PlatformTransactionManager;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -30,7 +31,7 @@ class CrmServiceConsentWithdrawTest {
 
     private final ClientRepository repository = mock(ClientRepository.class);
     private final AuditLogger audit = mock(AuditLogger.class);
-    private final CrmServiceImpl service = new CrmServiceImpl(repository, mock(PlatformTransactionManager.class), audit);
+    private final CrmServiceImpl service = new CrmServiceImpl(repository, mock(PlatformTransactionManager.class), audit, List.of());
 
     @AfterEach
     void clear() {

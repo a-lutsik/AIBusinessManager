@@ -4,6 +4,7 @@ import com.cadence.crm.api.ClientView;
 import org.junit.jupiter.api.Test;
 import org.springframework.transaction.PlatformTransactionManager;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -27,7 +28,7 @@ class CrmServicePhoneMatchProfileTest {
     private static final String PHONE = "+995555000222";
 
     private final ClientRepository repository = mock(ClientRepository.class);
-    private final CrmServiceImpl service = new CrmServiceImpl(repository, mock(PlatformTransactionManager.class), mock(com.cadence.platform.audit.AuditLogger.class));
+    private final CrmServiceImpl service = new CrmServiceImpl(repository, mock(PlatformTransactionManager.class), mock(com.cadence.platform.audit.AuditLogger.class), List.of());
 
     private ClientView existing(String locale, boolean consent) {
         UUID id = UUID.randomUUID();

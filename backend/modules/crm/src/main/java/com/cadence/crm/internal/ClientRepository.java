@@ -1,6 +1,9 @@
 package com.cadence.crm.internal;
 
+import com.cadence.crm.api.ClientName;
 import com.cadence.crm.api.ClientView;
+import com.cadence.crm.api.CrmService;
+import com.cadence.crm.api.NameWords;
 import com.cadence.platform.persistence.TenantAwareDsl;
 import com.cadence.platform.tenancy.TenantContext;
 import com.cadence.platform.time.Utc;
@@ -11,14 +14,20 @@ import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
 import java.util.Collection;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import static com.cadence.platform.jooq.Tables.CLIENT;
 
 @Repository
 class ClientRepository {
+
+    /** {@link NameWords#key} of {@code {0}} in SQL; {@link NameMatchingSelfCheck} proves the two agree at startup. */
+    static final String KEY_SQL = "regexp_replace(normalize(lower(translate({0}, 'İıΣς''’ʼ', 'iiσσ')), NFD), '["
+            + NameWords.MARK_RANGES + "]', '', 'g')";
 
     private final DSLContext dsl;
 
@@ -95,6 +104,32 @@ class ClientRepository {
                 .orderBy(CLIENT.LAST_VISIT_AT.desc().nullsLast(), CLIENT.DISPLAY_NAME.asc())
                 .limit(limit)
                 .fetch(this::toView);
+    }
+
+    /**
+     * The prefilter of {@link NameWords#stems}: a word of the display name equals a stem of a typed word, alone or plus an ending,
+     * in one statement. Never narrower than {@link NameWords#matches}; the caller decides. No index: one read per chat message over
+     * the tenant's clients, a table small per tenant.
+     */
+    List<ClientName> findByNameWords(Collection<String> normalisedWords) {
+        Set<String> stems = new LinkedHashSet<>();
+        normalisedWords.forEach(word -> stems.addAll(NameWords.stems(word)));
+        return dsl.select(CLIENT.ID, CLIENT.DISPLAY_NAME)
+                .from(CLIENT)
+                .where(TenantAwareDsl.tenantEquals(CLIENT.TENANT_ID)
+                        .and(CLIENT.ANONYMIZED_AT.isNull())
+                        .and(DSL.condition(
+                                "exists (select 1 from unnest(regexp_split_to_array(" + KEY_SQL + ", '[^[:alpha:]]+')) as n(word)"
+                                        + " where n.word = any(cast({1} as text[]))"
+                                        + " or exists (select 1 from unnest(cast({2} as text[])) as e(tail)"
+                                        + " where right(n.word, char_length(e.tail)) = e.tail"
+                                        + " and left(n.word, -char_length(e.tail)) = any(cast({1} as text[]))))",
+                                CLIENT.DISPLAY_NAME,
+                                DSL.val(stems.toArray(new String[0])),
+                                DSL.val(NameWords.storedEndings().toArray(new String[0])))))
+                .orderBy(CLIENT.LAST_VISIT_AT.desc().nullsLast(), CLIENT.DISPLAY_NAME.asc())
+                .limit(CrmService.NAME_WORD_MATCH_LIMIT)
+                .fetch(r -> new ClientName(r.get(CLIENT.ID), r.get(CLIENT.DISPLAY_NAME)));
     }
 
     ClientView insert(ClientView client) {

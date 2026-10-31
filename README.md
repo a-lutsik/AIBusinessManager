@@ -153,6 +153,56 @@ curl -sS -X POST http://localhost:8080/api/app/ai/chat \
 
 If `app.ai.provider=deepseek` and the key is missing, startup fails fast instead of silently using the stub.
 
+The assistant runs a tool loop: the model asks for schedule, free slots, client profile and metrics through tools and may only propose changes as drafts; the owner confirms a draft in the UI and the booking engine validates and applies it ([ADR 0002](docs/adr/0002-ai-tool-loop-pseudonymization-drafts.md)). The model never sees client names, phones or UUIDs, only opaque references (`CLIENT_1`, `MASTER_2`, ...).
+
+`app.ai.*` settings (defaults in `application.yml`; a missing, zero or negative value falls back to the default):
+
+| Property | Default | Meaning |
+|---|---|---|
+| `provider`, `fallback-provider`, `model`, `reasoning-effort` | `stub`, none, `deepseek-flash`, `high` | provider id (`APP_AI_PROVIDER`), optional failover id, model name; the effort applies only with `deepseek.thinking` enabled |
+| `deepseek.api-key`, `base-url`, `thinking`, `timeout` | none, `https://api.deepseek.com`, `disabled`, `90s` | `DEEPSEEK_API_KEY`, `DEEPSEEK_BASE_URL`, `APP_AI_DEEPSEEK_THINKING`, `APP_AI_DEEPSEEK_TIMEOUT`; thinking other than `disabled` is refused at startup (not supported with tools) |
+| `default-monthly-token-budget` | `1000000` | tokens per tenant and month when the operator set no budget in `ai_tenant_settings.monthly_token_budget`; the month is in the tenant's time zone; over budget the chat answers 429 `AI_BUDGET_EXCEEDED` |
+| `max-tool-iterations`, `max-tool-calls-per-turn`, `max-drafts-per-turn` | `6`, `10`, `3` | limits of one chat turn; at the limit the model gets one last call without tools to word the answer |
+| `max-tool-result-chars`, `max-history-messages`, `max-user-message-chars`, `max-completion-tokens` | `4000`, `20`, `4000`, `1024` | size of a tool result sent to the model, replies of the history sent, owner message length (longer: 400 `AI_MESSAGE_TOO_LONG`), reply tokens per call |
+| `draft-ttl` | `PT24H` | a pending draft expires after this time |
+| `retention`, `retention-cron` | `P30D`, `0 40 3 * * *` | nightly `AiRetentionJob` deletes conversations idle longer than `retention` with their messages, pseudonyms and drafts, per tenant; `ai_prompt_log` and `ai_tool_call` are dropped by their 30-day TimescaleDB retention policy |
+
+Free text of a visit and client notes are not sent to the model by default; the owner can switch it on in the AI settings (the text is masked, the masking is best effort, see TD-37).
+
+### Live check DeepSeek
+
+The automated tests run against the stub, so the real wire format of DeepSeek is verified only by this manual check. It is the operator's own step: it spends tokens and sends masked data to an external provider. **Never put the key in the chat, in a commit or in a tracked file.**
+
+1. Provide the key outside the repository: `export APP_AI_PROVIDER=deepseek DEEPSEEK_API_KEY=...` in the shell that starts `bootRun`, or put it in the gitignored `backend/modules/app/application-local.yml` (`app.ai.provider: deepseek`, `app.ai.deepseek.api-key: ...`). Keep thinking `disabled` (the default). Start the infrastructure and the backend with the `dev-headers` profile (see Authentication), seeded demo data, and open the console at `/ai` (or use the curl from the smoke test).
+2. Sequence, in one conversation:
+   1. Ask for today's schedule ("what do I have today?"). Expect a `get_schedule` call and an answer that lists the visits by the real names and times.
+   2. Ask to book an existing client by name ("book Anna for a haircut with Nino tomorrow at 11:00", use a client from the seed or your data), then again in an inflected form ("book a visit for Anny", "запиши Анну на завтра"). Expect `find_free_slots` / `draft_booking` and a draft card in the chat, not a booking yet.
+   3. Confirm the card. Expect the visit in the calendar; reject a second card and check it stays unbooked.
+3. What to observe: the answers use real names (the references are restored on the way back); no `CLIENT_1`, `MASTER_1` or UUID text reaches the screen; a draft is created only for the named client; confirming a draft whose slot was taken meanwhile gives a readable error on the card; the token usage in the settings panel grows.
+4. What the provider received and sent is in the database, masked, exactly as sent. Look for names and phones (the two count queries must return 0; replace the patterns with the real name and phone of the client you used):
+
+```bash
+docker exec -i cadence-timescaledb psql -U cadence -d cadence <<'SQL'
+\set name '%Anna%'
+\set phone '%995555123456%'
+-- last calls: finish reason, tokens, latency, tool calls requested by the model
+select created_at, finish_reason, prompt_tokens, completion_tokens, latency_ms, left(tool_calls_json, 120)
+from ai_prompt_log order by created_at desc limit 10;
+-- must return 0: the name or the phone (any spelling you know) in what was sent or received
+select count(*) from ai_prompt_log where prompt ilike :'name' or response ilike :'name' or prompt like :'phone' or response like :'phone';
+select count(*) from ai_tool_call where arguments ilike :'name' or result ilike :'name' or result like :'phone';
+-- tools called in order, with status and duration
+select created_at, tool_name, status, error_code, duration_ms, left(arguments, 100) from ai_tool_call order by created_at desc limit 20;
+SQL
+```
+
+The owner role `cadence` bypasses RLS, so the queries see all tenants.
+
+5. Known unverified points (the unit tests only mock the wire): the shape of `tool_calls` on assistant messages sent back to DeepSeek in the second call (`id`, `type: function`, `function.arguments` as a string) and the `tool` message with `tool_call_id`; `tool_choice: none` together with `tools` in the final forced call; a `system` message after tool results in that final call. A 400 from the provider on the second call of a turn points to one of these (the failed attempt is in `ai_prompt_log` with `finish_reason` `ERROR`, the cause is in the backend log).
+6. If tool calls prove unreliable (the model ignores the tools, invents references, arguments are not valid JSON, or the format is rejected): do not widen the prompt. Follow plan B of ADR 0002 section 11: structured output (JSON the model returns, validated by us) through the same `LlmProvider` port, so only `DeepSeekLlmProvider` changes. Record the finding in `docs/tech-debt.md` (TD-41).
+
+### Tests and code generation
+
 ArchUnit + unit + Testcontainers ITs:
 
 ```bash
@@ -183,7 +233,7 @@ i18n catalogs: `frontend/src/i18n/locales/{en,ru,ka,uk,cs}.json` (ru/en complete
 
 `.github/workflows/ci.yml` runs on every push and pull request:
 
-- **backend**: Gradle on JDK 21 with the JDK 25 toolchain, `./gradlew build --no-build-cache` (jOOQ codegen, ArchUnit, unit tests and Testcontainers ITs). The build cache is off so cached results never hide a test run. A per-module test summary goes to the job summary; reports are uploaded on failure. Two guards keep a runner without a working Docker daemon from going green with the Testcontainers ITs skipped: with `CI` set (GitHub sets it) `AbstractTimescaleIT` fails instead of skipping when Docker is unreachable (on a developer machine without Docker the ITs are still skipped), and `.github/scripts/junit_summary.py --fail-on-skipped --min-tests 400 --require-class 'IT$'` fails the job when any test case was skipped, fewer than 400 ran (430 at the time of writing; lower the number only when tests were removed on purpose) or no `*IT` class executed.
+- **backend**: Gradle on JDK 21 with the JDK 25 toolchain, `./gradlew build --no-build-cache` (jOOQ codegen, ArchUnit, unit tests and Testcontainers ITs). The build cache is off so cached results never hide a test run. A per-module test summary goes to the job summary; reports are uploaded on failure. Two guards keep a runner without a working Docker daemon from going green with the Testcontainers ITs skipped: with `CI` set (GitHub sets it) `AbstractTimescaleIT` fails instead of skipping when Docker is unreachable (on a developer machine without Docker the ITs are still skipped), and `.github/scripts/junit_summary.py --fail-on-skipped --min-tests 400 --require-class 'IT$'` fails the job when any test case was skipped, fewer than 400 ran (1040 at the time of writing; lower the number only when tests were removed on purpose) or no `*IT` class executed.
 - **frontend**: Node 22, `npm ci`, `npm run typecheck`, `npx expo export --platform web`.
 - **compose**: the production compose file must reject `.env.prod.example` (empty secrets) and accept a fully generated env file.
 - **docker**: builds `backend/Dockerfile` without pushing.
@@ -494,7 +544,7 @@ Open `waitlist/index.html` (or any static file server). Submissions stay in `loc
 - **1A Booking Core:** tenancy + RLS SET LOCAL, catalog, slot calculator, status machine, snapshots, GiST exclusion, outbox poller SKIP LOCKED, audit hypertable, public booking + opaque token + .ics + owner task, CRM from public booking, MASTER per-resource checks, problem+details, OpenAPI.
 - **1B:** dark theme, empty states, demo seed (3 masters / 8 services / 40 clients / ~200 visits) + Aura Atelier.
 - **2:** Spring Batch metrics job + six dashboard metrics.
-- **3:** `LlmProvider` Strategy (`stub` default, optional `deepseek` adapter), pseudonymization, draft confirm via Booking Engine, AI chat UI.
+- **3:** AI manager (stage 05, [ADR 0002](docs/adr/0002-ai-tool-loop-pseudonymization-drafts.md)): multi-turn `LlmProvider` port (`stub` default, optional `deepseek` adapter), tool loop (schedule, free slots, client profile, metrics, draft booking / reschedule / cancel), pseudonymization of names, phones and ids with the map in the database, drafts confirmed by the owner and validated by the Booking Engine, monthly token budget, `ai_prompt_log` / `ai_tool_call` logs, nightly `AiRetentionJob`, AI chat UI with draft cards and settings.
 - **4:** `NotificationChannel` port, Trust NEW/HIGH/NORMAL/LOW, packages, Telegram stub + manual owner-task fallback, Spring Integration channel seam.
 - **5:** growth signals persisted from metrics.
 - **6:** waitlist evolved into a marketing landing.
@@ -503,7 +553,8 @@ Open `waitlist/index.html` (or any static file server). Submissions stay in `loc
 ## Gaps (honest)
 
 - Telegram bot is stubbed (no live Bot API / chat_id deep-link).
-- LLM defaults to the stub. Set `APP_AI_PROVIDER=deepseek` plus `DEEPSEEK_API_KEY` (or gitignored `application-local.yml`) to use DeepSeek.
+- LLM defaults to the stub. Set `APP_AI_PROVIDER=deepseek` plus `DEEPSEEK_API_KEY` (or gitignored `application-local.yml`) to use DeepSeek. The DeepSeek tool-call format is confirmed only by the operator's live check ([Live check DeepSeek](#live-check-deepseek), TD-41); thinking mode is not supported with the tool loop.
+- AI: name masking is best effort (an unrecognised or misspelled name in an owner message reaches the provider, TD-36; notes are off by default and masked by denylist and regex, TD-37); the monthly token budget is set by the operator in the database, there is no admin surface (TD-42); no right-to-erasure route yet (`crm.anonymize` has no caller). Full list in `docs/tech-debt.md`.
 - Playwright E2E is not in CI; golden path is covered by `BookingCoreIT` (Testcontainers TimescaleDB).
 - Mobile store builds are not published (in-bounds for MVP).
 - Figma pixel-match was skipped (quota). Calendar is list+panel, not a dense week grid.

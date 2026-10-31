@@ -1,6 +1,7 @@
 package com.cadence.app.web;
 
 import com.cadence.ai.api.AiAssistantService;
+import com.cadence.ai.api.AiSettingsView;
 import com.cadence.app.config.SecurityConfig;
 import com.cadence.app.ratelimit.ClientIpResolver;
 import com.cadence.app.ratelimit.PublicRateLimiter;
@@ -11,6 +12,7 @@ import com.cadence.catalog.api.CatalogService;
 import com.cadence.crm.api.CrmService;
 import com.cadence.growth.api.GrowthService;
 import com.cadence.notification.api.OwnerTaskService;
+import com.cadence.platform.error.DomainException;
 import com.cadence.platform.jooq.tables.records.TenantRecord;
 import com.cadence.platform.tenant.TenantDirectory;
 import com.cadence.retention.api.RetentionService;
@@ -19,17 +21,27 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.MediaType;
 import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 import static org.hamcrest.Matchers.is;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -137,5 +149,87 @@ class AppApiSecurityWebTest {
                                 .claim("tenant_id", DemoIds.LUMEN.toString())
                                 .claim("roles", List.of("OWNER")))))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    void masterIsForbiddenOnEveryAiEndpoint() throws Exception {
+        RequestPostProcessor master = SecurityMockMvcRequestPostProcessors.jwt().jwt(j -> j
+                .claim("tenant_id", DemoIds.LUMEN.toString())
+                .claim("roles", List.of("MASTER"))
+                .claim("specialist_id", DemoIds.NINO.toString()));
+        String draft = UUID.randomUUID().toString();
+
+        List<MockHttpServletRequestBuilder> requests = List.of(
+                post("/api/app/ai/chat").contentType(MediaType.APPLICATION_JSON).content("{\"message\":\"hi\"}"),
+                get("/api/app/ai/conversations/" + UUID.randomUUID()),
+                get("/api/app/ai/drafts"),
+                post("/api/app/ai/drafts/" + draft + "/confirm"),
+                post("/api/app/ai/drafts/" + draft + "/reject"),
+                get("/api/app/ai/settings"),
+                put("/api/app/ai/settings").contentType(MediaType.APPLICATION_JSON).content("{\"notesToLlm\":true}"));
+        for (MockHttpServletRequestBuilder request : requests) {
+            mvc.perform(request.with(master))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.code", is("FORBIDDEN_RESOURCE")));
+        }
+        verifyNoInteractions(aiAssistantService);
+    }
+
+    @Test
+    void ownerReadsAndUpdatesAiSettings() throws Exception {
+        AiSettingsView settings = new AiSettingsView(true, 1_000_000L, 1234L, "2026-10", Instant.parse("2026-10-31T22:00:00Z"));
+        when(aiAssistantService.getSettings()).thenReturn(settings);
+        when(aiAssistantService.setNotesToLlm(true)).thenReturn(settings);
+
+        mvc.perform(get("/api/app/ai/settings").with(owner()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.notesToLlm", is(true)))
+                .andExpect(jsonPath("$.monthlyTokenBudget", is(1_000_000)))
+                .andExpect(jsonPath("$.monthTokensUsed", is(1234)))
+                .andExpect(jsonPath("$.period", is("2026-10")))
+                .andExpect(jsonPath("$.periodResetsAt", is("2026-10-31T22:00:00Z")));
+
+        mvc.perform(put("/api/app/ai/settings").with(owner())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"notesToLlm\":true}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.notesToLlm", is(true)))
+                .andExpect(jsonPath("$.period", is("2026-10")));
+        verify(aiAssistantService).setNotesToLlm(true);
+    }
+
+    @Test
+    void aiSettingsUpdateWithMissingOrMalformedValueIsBadRequest() throws Exception {
+        mvc.perform(put("/api/app/ai/settings").with(owner())
+                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code", is("INVALID_AI_SETTINGS")));
+        mvc.perform(put("/api/app/ai/settings").with(owner())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"notesToLlm\":null}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code", is("INVALID_AI_SETTINGS")));
+        mvc.perform(put("/api/app/ai/settings").with(owner())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"notesToLlm\":\"maybe\"}"))
+                .andExpect(status().isBadRequest());
+        mvc.perform(put("/api/app/ai/settings").with(owner())
+                        .contentType(MediaType.APPLICATION_JSON).content(""))
+                .andExpect(status().isBadRequest());
+        verify(aiAssistantService, never()).setNotesToLlm(any(Boolean.class));
+    }
+
+    @Test
+    void exhaustedAiBudgetIsTooManyRequestsWithItsCode() throws Exception {
+        when(aiAssistantService.chat(any(), any(), any()))
+                .thenThrow(new DomainException("AI_BUDGET_EXCEEDED", 429, "Monthly AI token budget used up"));
+
+        mvc.perform(post("/api/app/ai/chat").with(owner())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"message\":\"hi\"}"))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.code", is("AI_BUDGET_EXCEEDED")));
+    }
+
+    private static RequestPostProcessor owner() {
+        return SecurityMockMvcRequestPostProcessors.jwt().jwt(j -> j
+                .claim("tenant_id", DemoIds.LUMEN.toString())
+                .claim("roles", List.of("OWNER")));
     }
 }

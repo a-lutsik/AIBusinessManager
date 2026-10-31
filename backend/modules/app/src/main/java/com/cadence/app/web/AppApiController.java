@@ -1,9 +1,11 @@
 package com.cadence.app.web;
 
 import com.cadence.ai.api.AiAssistantService;
+import com.cadence.ai.api.AiSettingsView;
 import com.cadence.ai.api.ChatResponse;
 import com.cadence.ai.api.ConversationHistoryView;
 import com.cadence.app.usecase.ClientMergeService;
+import com.cadence.app.web.dto.AiSettingsRequest;
 import com.cadence.app.web.dto.AppointmentDetailView;
 import com.cadence.app.web.dto.DashboardView;
 import com.cadence.app.web.dto.MasterTodayView;
@@ -404,15 +406,30 @@ public class AppApiController {
     }
 
     @PostMapping("/ai/drafts/{id}/confirm")
-    public ChatResponse confirm(@PathVariable UUID id) {
+    public ChatResponse.DraftAction confirm(@PathVariable UUID id) {
         assertOwner();
         return aiAssistantService.confirmDraft(id);
     }
 
     @PostMapping("/ai/drafts/{id}/reject")
-    public ChatResponse reject(@PathVariable UUID id) {
+    public ChatResponse.DraftAction reject(@PathVariable UUID id) {
         assertOwner();
         return aiAssistantService.rejectDraft(id);
+    }
+
+    @GetMapping("/ai/settings")
+    public AiSettingsView aiSettings() {
+        assertOwner();
+        return aiAssistantService.getSettings();
+    }
+
+    @PutMapping("/ai/settings")
+    public AiSettingsView updateAiSettings(@RequestBody AiSettingsRequest body) {
+        assertOwner();
+        if (body.notesToLlm() == null) {
+            throw DomainException.badRequest("INVALID_AI_SETTINGS", "notesToLlm is required");
+        }
+        return aiAssistantService.setNotesToLlm(body.notesToLlm());
     }
 
     /** OWNER: any specialist of the tenant; MASTER: only their own specialist record. */

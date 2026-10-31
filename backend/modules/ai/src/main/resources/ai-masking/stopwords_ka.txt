@@ -1,0 +1,57 @@
+# FreeTextMasker stop-words (ADR 0002 §3.2). A clause (split on . ; , and new lines) holding a word that starts
+# with one of these stems is replaced whole by [sensitive]. Matching is case-insensitive on word starts.
+# A line "=word" matches that whole word only (for stems that would hit ordinary words, e.g. "долг" vs "долго").
+# Every list is applied to every text, whatever the tenant locale. Lines starting with # are comments.
+# ჯანმრთელობა
+ალერგ
+ორსულ
+დიაბეტ
+ეპილეფს
+=შიდსი
+=აივ
+ონკოლ
+კიბო
+სიმსივნ
+ქიმიოთერაპ
+წამალ
+მედიკამენტ
+ანტიბიოტ
+ინსულინ
+დიაგნოზ
+ასთმ
+ქირურგ
+ოპერაცი
+ავადმყოფ
+დაავადებ
+დეპრესი
+ფსიქიატრ
+ჰეპატიტ
+ინსულტ
+ინფარქტ
+ვარიკოზ
+ფსორიაზ
+დერმატიტ
+ეგზემ
+ჰერპეს
+ჰიპერტონ
+კარდიოსტიმულატორ
+იზოტრეტინოინ
+პანიკ
+თრომბოზ
+შიზოფრენ
+აბორტ
+ბიპოლარ
+ალკოჰოლ
+ენდომეტრიოზ
+ძუძუთი
+წნევ
+მენსტრუაც
+სკოლიოზ
+ნასამართლ
+გაკოტრ
+# ვალები
+=ვალი
+=ვალს
+=ვალის
+=ვალით
+დავალიან

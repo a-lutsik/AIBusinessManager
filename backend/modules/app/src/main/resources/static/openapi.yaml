@@ -748,7 +748,11 @@ paths:
         "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
   /api/app/ai/chat:
     post:
-      summary: AI chat (owner only)
+      summary: AI chat turn (owner only)
+      description: >
+        One turn of the assistant. The model never changes data: write requests come back as draft cards in `drafts`
+        (status PENDING) that the owner confirms or rejects with /api/app/ai/drafts/{id}/confirm and /reject. Without
+        `conversationId` a new conversation is started.
       requestBody:
         required: true
         content:
@@ -760,9 +764,17 @@ paths:
                 locale: { type: string, description: Defaults to en }
                 message: { type: string, description: Defaults to an empty string }
       responses:
-        "200": { description: Reply + drafts }
+        "200":
+          description: Reply, the drafts created in this turn and the tenant's month usage
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ChatResponse" }
+        "400": { description: "AI_MESSAGE_EMPTY or AI_MESSAGE_TOO_LONG" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
+        "404": { description: "CONVERSATION_NOT_FOUND" }
+        "429": { description: "AI_BUDGET_EXCEEDED - the monthly token budget of the tenant is spent" }
+        "502": { description: "LLM_UNAVAILABLE or LLM_UNAUTHORIZED - the language model provider failed or refused the key" }
   /api/app/ai/conversations/{id}:
     get:
       summary: Conversation history (owner only)
@@ -772,33 +784,55 @@ paths:
           required: true
           schema: { type: string, format: uuid }
       responses:
-        "200": { description: Conversation history }
+        "200":
+          description: Messages in order, each with the drafts created in its turn, and all drafts of the conversation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConversationHistory" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
+        "404": { description: "CONVERSATION_NOT_FOUND" }
   /api/app/ai/drafts:
     get:
-      summary: Drafted actions awaiting confirmation (owner only)
+      summary: Drafted actions of the tenant (owner only)
+      description: Newest first, at most 100. Overdue PENDING drafts become EXPIRED before the list is built.
       parameters:
         - in: query
           name: status
           required: false
-          schema: { type: string }
+          schema: { $ref: "#/components/schemas/DraftStatus" }
       responses:
-        "200": { description: Drafts }
+        "200":
+          description: Drafts
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/DraftAction" }
+        "400": { description: "INVALID_DRAFT_STATUS - unknown status filter" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
   /api/app/ai/drafts/{id}/confirm:
     post:
       summary: Confirm a drafted action (owner only)
+      description: >
+        Applies the draft through the Booking Engine. When the engine refuses (for example SLOT_OCCUPIED) the draft
+        becomes FAILED and the refusal is returned as the error.
       parameters:
         - in: path
           name: id
           required: true
           schema: { type: string, format: uuid }
       responses:
-        "200": { description: Reply after the action ran }
+        "200":
+          description: The draft after the action ran (status CONFIRMED, `appliedEntityId` set)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DraftAction" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
+        "404": { description: "DRAFT_NOT_FOUND" }
+        "409": { description: "DRAFT_NOT_PENDING, DRAFT_EXPIRED, DRAFT_STALE, DRAFT_INVALID, or the engine's own refusal such as SLOT_OCCUPIED" }
   /api/app/ai/drafts/{id}/reject:
     post:
       summary: Reject a drafted action (owner only)
@@ -808,10 +842,131 @@ paths:
           required: true
           schema: { type: string, format: uuid }
       responses:
-        "200": { description: Reply after the rejection }
+        "200":
+          description: The draft after the rejection (status REJECTED)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DraftAction" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
+        "404": { description: "DRAFT_NOT_FOUND" }
+        "409": { description: "DRAFT_NOT_PENDING - the draft was already resolved or expired" }
+  /api/app/ai/settings:
+    get:
+      summary: AI settings and month usage (owner only)
+      responses:
+        "200":
+          description: Settings of the tenant
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AiSettings" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
+    put:
+      summary: Allow or forbid masked client notes and tags in LLM requests (owner only)
+      description: The monthly token budget is set by the operator and cannot be changed here.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [notesToLlm]
+              properties:
+                notesToLlm: { type: boolean }
+      responses:
+        "200":
+          description: Settings after the change
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AiSettings" }
+        "400": { description: "notesToLlm is missing or not a boolean (INVALID_AI_SETTINGS or an unreadable body)" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
 components:
+  schemas:
+    ChatResponse:
+      type: object
+      properties:
+        reply: { type: string }
+        drafts:
+          type: array
+          items: { $ref: "#/components/schemas/DraftAction" }
+        conversationId: { type: string, format: uuid }
+        usage:
+          type: object
+          properties:
+            monthTokensUsed: { type: integer, format: int64 }
+            monthTokenBudget: { type: integer, format: int64 }
+    DraftStatus:
+      type: string
+      enum: [PENDING, CONFIRMED, REJECTED, FAILED, EXPIRED]
+    DraftAction:
+      type: object
+      description: A draft card. `summary` is null only for a stored payload this version cannot read.
+      properties:
+        id: { type: string, format: uuid }
+        type: { type: string, enum: [draft_booking, draft_reschedule, draft_cancel] }
+        status: { $ref: "#/components/schemas/DraftStatus" }
+        createdAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+        resolvedAt: { type: string, format: date-time, nullable: true }
+        appliedEntityId: { type: string, format: uuid, nullable: true }
+        failureCode: { type: string, nullable: true }
+        failureMessage: { type: string, nullable: true }
+        summary:
+          allOf:
+            - $ref: "#/components/schemas/DraftSummary"
+          nullable: true
+    DraftSummary:
+      type: object
+      description: >
+        What the owner confirms, built on the server from entities (only `reason` comes from the model). Times are
+        tenant-local YYYY-MM-DDTHH:MM. draft_booking fills durationMinutes, priceMinor, currencyCode and localStart;
+        draft_reschedule fills localFrom and localTo; draft_cancel fills localStart, initiatedBy and reason. Fields
+        of the other types are null.
+      properties:
+        clientName: { type: string, nullable: true }
+        specialistName: { type: string, nullable: true }
+        serviceName: { type: string, nullable: true }
+        durationMinutes: { type: integer, nullable: true }
+        priceMinor: { type: integer, nullable: true }
+        currencyCode: { type: string, nullable: true }
+        localStart: { type: string, nullable: true, example: "2026-11-05T14:30" }
+        localFrom: { type: string, nullable: true, example: "2026-11-05T14:30" }
+        localTo: { type: string, nullable: true, example: "2026-11-06T10:00" }
+        initiatedBy: { type: string, enum: [business, client], nullable: true }
+        reason: { type: string, nullable: true, description: Plain text }
+    ConversationHistory:
+      type: object
+      properties:
+        conversationId: { type: string, format: uuid }
+        messages:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string, format: uuid }
+              at: { type: string, format: date-time }
+              role: { type: string, enum: [user, assistant] }
+              content: { type: string }
+              provider: { type: string, nullable: true }
+              model: { type: string, nullable: true }
+              drafts:
+                type: array
+                description: Drafts created in the turn of a user message
+                items: { $ref: "#/components/schemas/DraftAction" }
+        drafts:
+          type: array
+          items: { $ref: "#/components/schemas/DraftAction" }
+    AiSettings:
+      type: object
+      properties:
+        notesToLlm: { type: boolean, description: Whether masked client notes and tags may reach the LLM }
+        monthlyTokenBudget: { type: integer, format: int64, description: Effective limit set by the operator }
+        monthTokensUsed: { type: integer, format: int64 }
+        period: { type: string, example: "2026-10", description: Current month YYYY-MM in the tenant zone }
+        periodResetsAt: { type: string, format: date-time, description: Start of the next month }
   responses:
     Unauthorized:
       description: No valid bearer token (problem+json)

@@ -68,7 +68,7 @@ jobs:
           -Porg.gradle.java.installations.paths="$JAVA_HOME_25_X64"
 
       # Second line of defence behind AbstractTimescaleIT: the job fails when any test was skipped, when fewer than
-      # 400 test cases ran (430 at the time of writing; lower the number only when tests were removed on purpose), or
+      # 400 test cases ran (1040 at the time of writing; lower the number only when tests were removed on purpose), or
       # when not a single integration test (class name ending in IT) executed. Gradle alone would stay green.
       - name: Test summary and gate
         if: always()

@@ -2,6 +2,7 @@ package com.cadence.platform.tenant;
 
 import com.cadence.platform.error.DomainException;
 import com.cadence.platform.jooq.tables.records.TenantRecord;
+import com.cadence.platform.tenancy.TenantContext;
 import org.jooq.DSLContext;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
@@ -42,6 +43,18 @@ public class TenantDirectory {
     public TenantRecord requireById(UUID id) {
         return findById(id)
                 .orElseThrow(() -> DomainException.notFound("TENANT_NOT_FOUND", "Tenant not found"));
+    }
+
+    /** 404 {@code TENANT_NOT_FOUND} as {@link #requireById}. */
+    public TenantInfo infoById(UUID id) {
+        TenantRecord r = requireById(id);
+        return new TenantInfo(r.getId(), r.getSlug(), r.getDisplayName(), r.getTimezone(), r.getCurrencyCode(),
+                r.getCountryCode());
+    }
+
+    /** {@link #infoById} of {@link TenantContext#require()}. */
+    public TenantInfo currentInfo() {
+        return infoById(TenantContext.require());
     }
 
     public List<TenantRecord> findAll() {

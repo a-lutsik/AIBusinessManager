@@ -38,6 +38,11 @@ class MoneyFieldClassifierTest {
     private static final Map<String, String> NOT_MONEY = new LinkedHashMap<>();
 
     static {
+        NOT_MONEY.put("AiSettingsView.monthTokensUsed", "AI tokens, not money");
+        NOT_MONEY.put("AiSettingsView.monthlyTokenBudget", "AI tokens, not money");
+        NOT_MONEY.put("ChatResponse.DraftSummary.durationMinutes", "visit duration in minutes");
+        NOT_MONEY.put("ChatResponse.UsageView.monthTokenBudget", "AI tokens, not money");
+        NOT_MONEY.put("ChatResponse.UsageView.monthTokensUsed", "AI tokens, not money");
         NOT_MONEY.put("AppointmentView.bufferAfterSnapshot", "minutes of buffer after the visit");
         NOT_MONEY.put("AppointmentView.bufferBeforeSnapshot", "minutes of buffer before the visit");
         NOT_MONEY.put("AppointmentView.durationSnapshot", "visit duration in minutes");

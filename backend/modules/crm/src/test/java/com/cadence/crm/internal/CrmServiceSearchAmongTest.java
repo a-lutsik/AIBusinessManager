@@ -30,7 +30,7 @@ import static org.mockito.Mockito.when;
 class CrmServiceSearchAmongTest {
 
     private final ClientRepository repository = mock(ClientRepository.class);
-    private final CrmServiceImpl service = new CrmServiceImpl(repository, mock(PlatformTransactionManager.class), mock(com.cadence.platform.audit.AuditLogger.class));
+    private final CrmServiceImpl service = new CrmServiceImpl(repository, mock(PlatformTransactionManager.class), mock(com.cadence.platform.audit.AuditLogger.class), List.of());
 
     private static ClientView client(String phone, String name) {
         return new ClientView(UUID.randomUUID(), phone, name, null, null, null, null, false, null, null, 0, 0, 0, 0);

@@ -1,0 +1,76 @@
+# FreeTextMasker stop-words (ADR 0002 §3.2). A clause (split on . ; , and new lines) holding a word that starts
+# with one of these stems is replaced whole by [sensitive]. Matching is case-insensitive on word starts.
+# A line "=word" matches that whole word only (for stems that would hit ordinary words, e.g. "долг" vs "долго").
+# Every list is applied to every text, whatever the tenant locale. Lines starting with # are comments.
+# zdraví
+alerg
+anafyla
+těhotn
+cukrovk
+diabet
+epilep
+záchvat
+=hiv
+=aids
+onkolog
+rakovin
+nádor
+chemoterap
+=lék
+=léky
+=léků
+=lékem
+medikac
+prášk
+antibiot
+inzulin
+inzulín
+diagnóz
+diagnos
+astm
+chirurg
+operac
+nemoc
+depres
+psychiatr
+psychoterap
+psycholog
+hepatit
+mrtvic
+infarkt
+potrat
+postižen
+kontraindik
+léčb
+léčí
+křečov
+varix
+psoriáz
+lupénk
+dermatit
+ekzém
+=opar
+herpes
+hypertenz
+kardiostimulátor
+roaccutan
+izotretinoin
+panick
+trombóz
+schizofren
+=interrupce
+bipolár
+alkohol
+endometri
+=kojí
+=kojení
+=tlak
+menstru
+skolióz
+trestan
+bankrot
+insolvenc
+# dluhy
+dluh
+dluž
+nedoplat

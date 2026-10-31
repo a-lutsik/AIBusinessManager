@@ -1,5 +1,6 @@
-package com.cadence.ai.internal;
+package com.cadence.ai.internal.llm;
 
+import com.cadence.ai.internal.AiProperties;
 import org.springframework.stereotype.Component;
 
 import java.util.List;

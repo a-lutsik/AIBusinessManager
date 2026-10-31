@@ -1,7 +1,10 @@
 package com.cadence.crm.internal;
 
+import com.cadence.crm.api.ClientName;
+import com.cadence.crm.api.ClientRetirementListener;
 import com.cadence.crm.api.ClientView;
 import com.cadence.crm.api.CrmService;
+import com.cadence.crm.api.NameWords;
 import com.cadence.platform.audit.AuditLogger;
 import com.cadence.platform.error.DomainException;
 import com.cadence.platform.persistence.SqlStates;
@@ -17,9 +20,11 @@ import java.time.Instant;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.text.Normalizer;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -38,10 +43,17 @@ public class CrmServiceImpl implements CrmService {
     private final ClientRepository repository;
     private final TransactionTemplate savepoint;
     private final AuditLogger auditLogger;
+    private final List<ClientRetirementListener> retirementListeners;
 
-    public CrmServiceImpl(ClientRepository repository, PlatformTransactionManager transactionManager, AuditLogger auditLogger) {
+    public CrmServiceImpl(
+            ClientRepository repository,
+            PlatformTransactionManager transactionManager,
+            AuditLogger auditLogger,
+            List<ClientRetirementListener> retirementListeners
+    ) {
         this.repository = repository;
         this.auditLogger = auditLogger;
+        this.retirementListeners = retirementListeners;
         this.savepoint = new TransactionTemplate(transactionManager);
         this.savepoint.setPropagationBehavior(TransactionDefinition.PROPAGATION_NESTED);
     }
@@ -148,6 +160,27 @@ public class CrmServiceImpl implements CrmService {
 
     @Override
     @Transactional(readOnly = true)
+    public Optional<ClientView> findActiveById(UUID clientId) {
+        return repository.findState(clientId)
+                .filter(state -> !state.retired())
+                .map(ClientRepository.ClientState::view);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<ClientName> findByNameWords(Set<String> words) {
+        if (words.isEmpty()) {
+            return List.of();
+        }
+        List<String> normalised = words.stream()
+                .map(NameWords::key)
+                .distinct()
+                .toList();
+        return repository.findByNameWords(normalised);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public List<ClientView> searchAmong(String query, Collection<UUID> clientIds) {
         if (clientIds.isEmpty() || digitCount(query) >= MAX_MASTER_QUERY_DIGITS) {
             return List.of();
@@ -216,6 +249,7 @@ public class CrmServiceImpl implements CrmService {
     @Override
     @Transactional
     public ClientView anonymize(UUID clientId) {
+        retirementListeners.forEach(listener -> listener.clientRetiring(clientId));
         repository.anonymize(clientId);
         return repository.findById(clientId)
                 .orElseThrow(() -> DomainException.notFound("CLIENT_NOT_FOUND", "Client not found"));
@@ -236,6 +270,8 @@ public class CrmServiceImpl implements CrmService {
     @Override
     @Transactional
     public void lockForMerge(UUID survivorId, UUID absorbedId) {
+        // Before the client locks, in the order a draft confirmation takes them (draft row, then client): see DraftApplier.
+        retirementListeners.forEach(listener -> listener.clientRetiring(absorbedId));
         lockAndLoadPair(survivorId, absorbedId);
     }
 

@@ -9,12 +9,15 @@ public record ConversationHistoryView(
         List<MessageView> messages,
         List<ChatResponse.DraftAction> drafts
 ) {
+    /** {@code role} is {@code user} or {@code assistant}; {@code drafts} are those created in the turn of a user message. */
     public record MessageView(
+            UUID id,
             Instant at,
             String role,
             String content,
             String provider,
-            String model
+            String model,
+            List<ChatResponse.DraftAction> drafts
     ) {
     }
 }
