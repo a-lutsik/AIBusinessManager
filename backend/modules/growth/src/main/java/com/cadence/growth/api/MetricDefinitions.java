@@ -60,8 +60,9 @@ public final class MetricDefinitions {
                         "REVENUE_PER_HOUR",
                         "Revenue per hour",
                         "CURRENCY_PER_HOUR",
-                        "Sum(price − discount) of COMPLETED visits in W, in minor units of the tenant currency / their "
-                                + "summed duration in hours. Sample: completed minutes",
+                        "Sum(price − discount) of COMPLETED visits in W / their summed duration in hours. The API value "
+                                + "is in minor units of the tenant currency per hour; the dashboard shows it in the "
+                                + "currency. Sample: completed minutes",
                         1
                 ),
                 new MetricDefinitionView(

@@ -1,6 +1,6 @@
 import { Text, View } from 'react-native';
 import { Button } from '@/components/ui/Button';
-import { useThemeTokens } from '@/src/theme/tokens';
+import { DISPLAY_FONT, useThemeTokens } from '@/src/theme/tokens';
 
 type Props = {
   title: string;
@@ -24,7 +24,7 @@ export function EmptyState({ title, description, actionLabel, onAction }: Props)
         alignItems: 'flex-start',
       }}
     >
-      <Text style={{ fontWeight: '600', color: color.ink, fontFamily: 'Plus Jakarta Sans' }}>{title}</Text>
+      <Text style={{ fontWeight: '600', color: color.ink, fontFamily: DISPLAY_FONT }}>{title}</Text>
       {description ? (
         <Text style={{ marginTop: space.sm, color: color.muted, lineHeight: 20 }}>{description}</Text>
       ) : null}

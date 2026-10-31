@@ -1,25 +1,20 @@
 import { useLocalSearchParams } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import {
   api,
   API_BASE,
+  ApiError,
   LUMEN_SLUG,
   shortRef,
   type PublicVisitView,
 } from '@/src/api/client';
-import { t } from '@/src/i18n';
-import { statusColor, tokens } from '@/src/theme/tokens';
+import { currentLocale, t } from '@/src/i18n';
+import { DISPLAY_FONT, statusColor, tokens } from '@/src/theme/tokens';
+import { formatDateTime, slotWindow } from '@/src/utils/datetime';
 import { formatMoney } from '@/src/utils/money';
-
-function slotWindow() {
-  const now = new Date();
-  const from = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate() + 1));
-  const to = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate() + 14));
-  return { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) };
-}
 
 export default function BookingLinkScreen() {
   const { id, token, slug: slugParam } = useLocalSearchParams<{
@@ -34,6 +29,7 @@ export default function BookingLinkScreen() {
   const [slots, setSlots] = useState<string[]>([]);
   const [slotsError, setSlotsError] = useState<string | null>(null);
   const [rescheduleUnavailable, setRescheduleUnavailable] = useState(false);
+  const [rescheduleDisabled, setRescheduleDisabled] = useState(false);
 
   const slug = (typeof slugParam === 'string' && slugParam) || LUMEN_SLUG;
   const ref = shortRef(typeof id === 'string' ? id : undefined);
@@ -52,24 +48,23 @@ export default function BookingLinkScreen() {
   const headline = pending ? t('book.pending') : cancelled ? t(`status.${visit!.status}`) : t('book.success');
 
   const serviceStart = visit?.serviceStart;
-  const whenLabel = useMemo(() => {
-    if (!serviceStart) return '—';
-    try {
-      return new Date(serviceStart).toLocaleString();
-    } catch {
-      return serviceStart;
-    }
-  }, [serviceStart]);
+  const whenLabel = serviceStart ? formatDateTime(serviceStart, visit?.timezone) : '—';
 
   const openReschedule = async () => {
     setRescheduleOpen(true);
     setSlotsError(null);
     setRescheduleUnavailable(false);
+    setRescheduleDisabled(false);
+    setSlots([]);
+    if (visit?.clientRescheduleAllowed === false) {
+      setRescheduleDisabled(true);
+      return;
+    }
     if (!visit?.serviceId || !visit?.specialistId) {
       setSlotsError(t('visit.rescheduleNoSlots'));
       return;
     }
-    const range = slotWindow();
+    const range = slotWindow(14, visit.timezone);
     try {
       const next = await api.publicSlots(slug, visit.serviceId, visit.specialistId, range.from, range.to);
       setSlots(next);
@@ -95,7 +90,14 @@ export default function BookingLinkScreen() {
       setVisit(next);
       setRescheduleOpen(false);
     } catch (e: unknown) {
-      setError(String((e as Error).message ?? e));
+      // The owner switched the rule off after this page loaded.
+      if (e instanceof ApiError && e.code === 'RESCHEDULE_DISABLED') {
+        setSlots([]);
+        setRescheduleDisabled(true);
+        setVisit((current) => current && { ...current, clientRescheduleAllowed: false });
+      } else {
+        setError(String((e as Error).message ?? e));
+      }
     } finally {
       setBusy(false);
     }
@@ -170,7 +172,7 @@ export default function BookingLinkScreen() {
           <>
             <Text style={styles.rowLabel}>{t('visit.price')}</Text>
             <Text style={styles.rowValue}>
-              {formatMoney(visit.priceSnapshot, visit.currencyCode ?? 'GEL')}
+              {formatMoney(visit.priceSnapshot, visit.currencyCode ?? 'GEL', currentLocale())}
             </Text>
           </>
         ) : null}
@@ -203,7 +205,10 @@ export default function BookingLinkScreen() {
 
       {rescheduleOpen ? (
         <View style={styles.dialog}>
-          <Text style={styles.h2}>{t('visit.pickSlot')}</Text>
+          {rescheduleDisabled ? null : <Text style={styles.h2}>{t('visit.pickSlot')}</Text>}
+          {rescheduleDisabled ? (
+            <EmptyState title={t('visit.rescheduleDisabled')} description={t('visit.rescheduleDisabledHint')} />
+          ) : null}
           {rescheduleUnavailable ? (
             <EmptyState title={t('visit.rescheduleUnavailable')} description={t('visit.rescheduleUnavailableHint')} />
           ) : null}
@@ -212,7 +217,7 @@ export default function BookingLinkScreen() {
             {slots.map((s) => (
               <Button
                 key={s}
-                label={new Date(s).toLocaleString()}
+                label={formatDateTime(s, visit.timezone)}
                 variant="ghost"
                 disabled={busy}
                 onPress={() => doReschedule(s)}
@@ -237,7 +242,7 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   ref: {
-    fontFamily: 'Plus Jakarta Sans',
+    fontFamily: DISPLAY_FONT,
     fontWeight: '600',
     color: tokens.color.muted,
     letterSpacing: 1,
@@ -247,14 +252,14 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: '700',
     color: tokens.color.ink,
-    fontFamily: 'Plus Jakarta Sans',
+    fontFamily: DISPLAY_FONT,
   },
   h2: {
     fontSize: 18,
     fontWeight: '600',
     color: tokens.color.ink,
     marginBottom: tokens.space.md,
-    fontFamily: 'Plus Jakarta Sans',
+    fontFamily: DISPLAY_FONT,
   },
   lead: { color: tokens.color.muted, marginTop: tokens.space.sm, marginBottom: tokens.space.md },
   muted: { color: tokens.color.muted },
@@ -272,7 +277,7 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '700',
     color: tokens.color.ink,
-    fontFamily: 'Plus Jakarta Sans',
+    fontFamily: DISPLAY_FONT,
     marginBottom: tokens.space.md,
   },
   rowLabel: { color: tokens.color.muted, fontSize: 12, marginTop: tokens.space.sm },

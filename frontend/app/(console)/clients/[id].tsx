@@ -5,12 +5,15 @@ import { ScrollView, Text, View } from 'react-native';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { TrustBadge } from '@/components/ui/TrustBadge';
 import { api, LUMEN_TENANT_ID } from '@/src/api/client';
+import { useConsoleSession } from '@/src/auth/ConsoleSession';
 import { t } from '@/src/i18n';
-import { useThemeTokens } from '@/src/theme/tokens';
+import { DISPLAY_FONT, useThemeTokens } from '@/src/theme/tokens';
+import { formatDateTime } from '@/src/utils/datetime';
 
 export default function ClientDetail() {
   const { color, space, radius } = useThemeTokens();
   const { id } = useLocalSearchParams<{ id: string }>();
+  const { me } = useConsoleSession();
   const [data, setData] = useState<any>(null);
   useEffect(() => {
     if (id) {
@@ -24,7 +27,7 @@ export default function ClientDetail() {
 
   return (
     <ScrollView>
-      <Text style={{ fontSize: 28, fontWeight: '700', color: color.ink, fontFamily: 'Plus Jakarta Sans' }}>
+      <Text style={{ fontSize: 28, fontWeight: '700', color: color.ink, fontFamily: DISPLAY_FONT }}>
         {data.client?.displayName ?? '—'}
       </Text>
       {/* Owner only (a master gets marketingConsent null): withdraw consent on the client's request. */}
@@ -71,7 +74,7 @@ export default function ClientDetail() {
           <Text style={{ color: color.ink, fontWeight: '600' }}>
             {v.serviceNameSnapshot} · {t(`status.${v.status}`)}
           </Text>
-          <Text style={{ color: color.muted, marginTop: 4 }}>{v.serviceStart}</Text>
+          <Text style={{ color: color.muted, marginTop: 4 }}>{v.serviceStart ? formatDateTime(v.serviceStart, me?.timezone) : ''}</Text>
         </View>
       ))}
     </ScrollView>

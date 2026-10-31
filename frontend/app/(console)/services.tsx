@@ -3,8 +3,8 @@ import { ScrollView, Text, View } from 'react-native';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Pill } from '@/components/ui/Pill';
 import { api, LUMEN_TENANT_ID, type MeView, type ServiceView } from '@/src/api/client';
-import { t } from '@/src/i18n';
-import { useThemeTokens } from '@/src/theme/tokens';
+import { currentLocale, t } from '@/src/i18n';
+import { DISPLAY_FONT, useThemeTokens } from '@/src/theme/tokens';
 import { formatMoney } from '@/src/utils/money';
 
 export default function ServicesScreen() {
@@ -21,7 +21,7 @@ export default function ServicesScreen() {
 
   return (
     <ScrollView contentContainerStyle={{ paddingBottom: space.xxl }}>
-      <Text style={{ fontSize: 28, fontWeight: '700', marginBottom: space.lg, fontFamily: 'Plus Jakarta Sans', color: color.ink }}>
+      <Text style={{ fontSize: 28, fontWeight: '700', marginBottom: space.lg, fontFamily: DISPLAY_FONT, color: color.ink }}>
         {t('nav.services')}
       </Text>
       {rows.length === 0 ? <EmptyState title={t('empty.services')} /> : null}
@@ -43,7 +43,7 @@ export default function ServicesScreen() {
           >
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm, marginBottom: space.sm }}>
               <View style={{ width: 14, height: 14, borderRadius: radius.pill, backgroundColor: s.color || color.primary }} />
-              <Text style={{ fontWeight: '700', fontSize: 16, color: color.ink, fontFamily: 'Plus Jakarta Sans', flexShrink: 1 }}>
+              <Text style={{ fontWeight: '700', fontSize: 16, color: color.ink, fontFamily: DISPLAY_FONT, flexShrink: 1 }}>
                 {s.name}
               </Text>
             </View>
@@ -51,7 +51,7 @@ export default function ServicesScreen() {
               <Text style={{ color: color.muted, marginBottom: space.sm, fontSize: 13 }}>{s.description}</Text>
             ) : null}
             <Text style={{ fontSize: 18, fontWeight: '700', color: color.primary, marginBottom: 4 }}>
-              {formatMoney(s.priceMinor, currency)}
+              {formatMoney(s.priceMinor, currency, currentLocale())}
             </Text>
             <Text style={{ color: color.muted, fontSize: 13, marginBottom: space.md }}>
               {t('unit.minutes', { count: s.durationMinutes })}

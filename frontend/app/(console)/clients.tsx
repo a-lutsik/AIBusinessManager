@@ -4,7 +4,7 @@ import { Pressable, ScrollView, Text, TextInput } from 'react-native';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { api, LUMEN_TENANT_ID } from '@/src/api/client';
 import { t } from '@/src/i18n';
-import { useThemeTokens } from '@/src/theme/tokens';
+import { DISPLAY_FONT, useThemeTokens } from '@/src/theme/tokens';
 
 export default function ClientsScreen() {
   const { color, space, radius } = useThemeTokens();
@@ -20,7 +20,7 @@ export default function ClientsScreen() {
 
   return (
     <ScrollView>
-      <Text style={{ fontSize: 28, fontWeight: '700', color: color.ink, marginBottom: space.md, fontFamily: 'Plus Jakarta Sans' }}>
+      <Text style={{ fontSize: 28, fontWeight: '700', color: color.ink, marginBottom: space.md, fontFamily: DISPLAY_FONT }}>
         {t('nav.clients')}
       </Text>
       <TextInput

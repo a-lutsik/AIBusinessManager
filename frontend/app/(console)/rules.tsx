@@ -3,9 +3,9 @@ import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Toggle } from '@/components/ui/Toggle';
-import { api, LUMEN_TENANT_ID, type BookingRulesView } from '@/src/api/client';
+import { api, ApiError, LUMEN_TENANT_ID, type BookingRulesView } from '@/src/api/client';
 import { t } from '@/src/i18n';
-import { useThemeTokens } from '@/src/theme/tokens';
+import { DISPLAY_FONT, useThemeTokens } from '@/src/theme/tokens';
 
 const SLOT_STEPS = [15, 30, 60] as const;
 const WEEK_STARTS = [
@@ -96,12 +96,14 @@ export default function RulesScreen() {
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     api
       .rules(LUMEN_TENANT_ID)
       .then((r) => setDraft({ ...DEFAULT_RULES, ...r }))
-      .catch(() => setDraft({ ...DEFAULT_RULES }))
+      // No form on a failed load: its defaults would look like the tenant's rules, and saving them would overwrite those.
+      .catch((e: unknown) => setLoadError(e instanceof ApiError && e.status === 403 ? t('rules.forbidden') : t('rules.loadFailed')))
       .finally(() => setLoading(false));
   }, []);
 
@@ -137,10 +139,10 @@ export default function RulesScreen() {
   if (loading || !draft) {
     return (
       <ScrollView>
-        <Text style={{ fontSize: 28, fontWeight: '700', marginBottom: space.sm, fontFamily: 'Plus Jakarta Sans', color: color.ink }}>
+        <Text style={{ fontSize: 28, fontWeight: '700', marginBottom: space.sm, fontFamily: DISPLAY_FONT, color: color.ink }}>
           {t('nav.rules')}
         </Text>
-        <EmptyState title={t('rules.loading')} />
+        <EmptyState title={loadError ?? t('rules.loading')} />
       </ScrollView>
     );
   }
@@ -157,7 +159,7 @@ export default function RulesScreen() {
 
   return (
     <ScrollView contentContainerStyle={{ paddingBottom: space.xxl }}>
-      <Text style={{ fontSize: 28, fontWeight: '700', marginBottom: space.sm, fontFamily: 'Plus Jakarta Sans', color: color.ink }}>
+      <Text style={{ fontSize: 28, fontWeight: '700', marginBottom: space.sm, fontFamily: DISPLAY_FONT, color: color.ink }}>
         {t('nav.rules')}
       </Text>
       <Text style={{ color: color.muted, marginBottom: space.lg, maxWidth: 520 }}>{t('rules.lead')}</Text>

@@ -1,0 +1,44 @@
+# Isolated environment for the Playwright E2E run (frontend/e2e, `npm run e2e` in frontend/). Never touches the dev stack:
+# own compose project (-p cadence-e2e), own ports, no container_name, no named volumes. Same images as docker-compose.yml.
+#
+#   docker compose -p cadence-e2e -f docker-compose.e2e.yml up -d --wait [--profile oidc]
+#   docker compose -p cadence-e2e -f docker-compose.e2e.yml --profile '*' down -v --remove-orphans
+#
+# The backend runs on the host (./gradlew :modules:app:bootRun), see frontend/scripts/e2e.mjs.
+services:
+  timescaledb:
+    image: timescale/timescaledb:2.30.0-pg16
+    environment:
+      POSTGRES_DB: cadence
+      POSTGRES_USER: cadence
+      POSTGRES_PASSWORD: cadence
+    ports:
+      - "127.0.0.1:15433:5432"
+    # RAM instead of a volume: every run starts on an empty database (DemoDataSeeder fills it) and leaves nothing behind.
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cadence -d cadence"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  # Only for the OIDC run (E8): the issuer has to be http://localhost:18081/realms/cadence, so Keycloak listens on 18081 inside too.
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.2.5
+    profiles: ["oidc"]
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_HTTP_PORT: 18081
+    ports:
+      - "127.0.0.1:18081:18081"
+    volumes:
+      - ./docker/keycloak/realm-cadence.json:/opt/keycloak/data/import/realm-cadence.json:ro
+      - ./docker/keycloak/themes/cadence:/opt/keycloak/themes/cadence:ro
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/18081"]
+      interval: 5s
+      timeout: 5s
+      retries: 36

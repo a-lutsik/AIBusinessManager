@@ -1,6 +1,7 @@
-import { Pressable, Text, type ViewStyle } from 'react-native';
+import { Link, type Href } from 'expo-router';
+import { Pressable, StyleSheet, Text, type ViewStyle } from 'react-native';
 import { useTheme } from '@/src/theme/ThemeContext';
-import { useThemeTokens } from '@/src/theme/tokens';
+import { DISPLAY_FONT, useThemeTokens } from '@/src/theme/tokens';
 
 export type ButtonVariant = 'primary' | 'ai' | 'ghost';
 
@@ -10,9 +11,11 @@ type Props = {
   variant?: ButtonVariant;
   disabled?: boolean;
   style?: ViewStyle;
+  /** Renders a real link (the browser can open or copy it) instead of a button. */
+  href?: Href;
 };
 
-export function Button({ label, onPress, variant = 'primary', disabled, style }: Props) {
+export function Button({ label, onPress, variant = 'primary', disabled, style, href }: Props) {
   const { theme } = useTheme();
   const { color, space, radius } = useThemeTokens();
   const base: ViewStyle = {
@@ -32,16 +35,24 @@ export function Button({ label, onPress, variant = 'primary', disabled, style }:
   const labelTone =
     variant === 'ghost'
       ? { color: color.ink, fontWeight: '600' as const }
-      : { color: solidLabelColor, fontWeight: '600' as const, fontFamily: 'Plus Jakarta Sans' };
+      : { color: solidLabelColor, fontWeight: '600' as const, fontFamily: DISPLAY_FONT };
 
-  return (
+  const button = (
     <Pressable
-      accessibilityRole="button"
+      accessibilityRole={href ? undefined : 'button'}
       disabled={disabled}
       onPress={onPress}
-      style={[base, tone, disabled ? { opacity: 0.5 } : null, style]}
+      // Flat: `Link asChild` hands the style to the anchor as it is, and an array crashes there.
+      style={StyleSheet.flatten([base, tone, disabled ? { opacity: 0.5 } : null, style])}
     >
       <Text style={labelTone}>{label}</Text>
     </Pressable>
+  );
+  return href ? (
+    <Link href={href} asChild>
+      {button}
+    </Link>
+  ) : (
+    button
   );
 }

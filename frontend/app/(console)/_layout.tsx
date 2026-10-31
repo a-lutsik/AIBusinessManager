@@ -1,4 +1,4 @@
-import { Link, Slot, usePathname } from 'expo-router';
+import { Link, Navigator, Slot, usePathname } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, Text, TextInput, View, useWindowDimensions } from 'react-native';
 import { MaterialIcon } from '@/components/ui/MaterialIcon';
@@ -7,7 +7,7 @@ import { useAuth } from '@/src/auth/AuthContext';
 import { ConsoleSessionProvider, useConsoleSession } from '@/src/auth/ConsoleSession';
 import { AuthLoading, SignInScreen } from '@/src/auth/SignInScreen';
 import { setLocale, t, useLocale, type AppLocale } from '@/src/i18n';
-import { useThemeTokens } from '@/src/theme/tokens';
+import { DISPLAY_FONT, useThemeTokens } from '@/src/theme/tokens';
 import { useTheme } from '@/src/theme/ThemeContext';
 
 type NavItem = {
@@ -33,14 +33,20 @@ const RAIL_EXPANDED = 240;
 
 export default function ConsoleLayout() {
   const { mode, status } = useAuth();
-  if (mode === 'oidc') {
-    if (status === 'loading') return <AuthLoading />;
-    if (status === 'unauthenticated') return <SignInScreen />;
-  }
+  // The group's navigator stays mounted behind the sign-in: it owns the requested route. A layout that renders no
+  // navigator loses it, and the router rewrites the URL to the group's first screen (/ai) before anyone signs in.
   return (
-    <ConsoleSessionProvider>
-      <ConsoleShell />
-    </ConsoleSessionProvider>
+    <Navigator>
+      {mode === 'oidc' && status === 'loading' ? (
+        <AuthLoading />
+      ) : mode === 'oidc' && status === 'unauthenticated' ? (
+        <SignInScreen />
+      ) : (
+        <ConsoleSessionProvider>
+          <ConsoleShell />
+        </ConsoleSessionProvider>
+      )}
+    </Navigator>
   );
 }
 
@@ -111,7 +117,7 @@ function ConsoleShell() {
             <MaterialIcon name="monitor_heart" size={18} color="#FFFFFF" filled />
           </View>
           {railExpanded ? (
-            <Text style={{ fontWeight: '700', fontSize: 15, color: color.ink, fontFamily: 'Plus Jakarta Sans' }}>
+            <Text style={{ fontWeight: '700', fontSize: 15, color: color.ink, fontFamily: DISPLAY_FONT }}>
               {t('app.name')}
             </Text>
           ) : null}
@@ -154,28 +160,32 @@ function ConsoleShell() {
             <MaterialIcon name={theme === 'dark' ? 'light_mode' : 'dark_mode'} size={20} color={color.muted} />
             {railExpanded ? <Text style={{ color: color.muted, fontSize: 14, fontWeight: '500' }}>{theme === 'dark' ? t('theme.light') : t('theme.dark')}</Text> : null}
           </Pressable>
-          <Pressable
-            onPress={() => setSettingsOpen((v) => !v)}
-            style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingVertical: space.sm + 2, paddingHorizontal: space.sm, borderRadius: radius.control }}
-          >
-            <MaterialIcon name="settings" size={20} color={color.muted} />
-            {railExpanded ? <Text style={{ color: color.muted, fontSize: 14, fontWeight: '500' }}>{t('shell.debug')}</Text> : null}
-          </Pressable>
-          {settingsOpen && railExpanded ? (
-            <View style={{ paddingHorizontal: space.sm, paddingTop: space.xs, gap: space.sm }}>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>
-                {(['ka', 'uk', 'cs'] as AppLocale[]).map((loc) => (
-                  <Pressable key={loc} onPress={() => switchLocale(loc)}>
-                    <Text style={{ color: color.accent, fontWeight: '600', fontSize: 12 }}>{loc.toUpperCase()}</Text>
-                  </Pressable>
-                ))}
-              </View>
-              {role === 'OWNER' ? (
-                <Pressable onPress={() => api.recalculate(LUMEN_TENANT_ID).catch(() => undefined).then(() => bump((n) => n + 1))}>
-                  <Text style={{ color: color.muted, fontSize: 12 }}>{t('metric.recalculate')}</Text>
-                </Pressable>
+          {mode === 'dev-headers' ? (
+            <>
+              <Pressable
+                onPress={() => setSettingsOpen((v) => !v)}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingVertical: space.sm + 2, paddingHorizontal: space.sm, borderRadius: radius.control }}
+              >
+                <MaterialIcon name="settings" size={20} color={color.muted} />
+                {railExpanded ? <Text style={{ color: color.muted, fontSize: 14, fontWeight: '500' }}>{t('shell.debug')}</Text> : null}
+              </Pressable>
+              {settingsOpen && railExpanded ? (
+                <View style={{ paddingHorizontal: space.sm, paddingTop: space.xs, gap: space.sm }}>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>
+                    {(['ka', 'uk', 'cs'] as AppLocale[]).map((loc) => (
+                      <Pressable key={loc} onPress={() => switchLocale(loc)}>
+                        <Text style={{ color: color.accent, fontWeight: '600', fontSize: 12 }}>{loc.toUpperCase()}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                  {role === 'OWNER' ? (
+                    <Pressable onPress={() => api.recalculate(LUMEN_TENANT_ID).catch(() => undefined).then(() => bump((n) => n + 1))}>
+                      <Text style={{ color: color.muted, fontSize: 12 }}>{t('metric.recalculate')}</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
               ) : null}
-            </View>
+            </>
           ) : null}
         </View>
       </View>
@@ -195,8 +205,8 @@ function ConsoleShell() {
             backgroundColor: color.surface,
           }}
         >
-          <View>
-            <Text style={{ fontSize: 20, fontWeight: '700', color: color.ink, fontFamily: 'Plus Jakarta Sans' }}>
+          <View style={{ maxWidth: '100%' }}>
+            <Text style={{ fontSize: 20, fontWeight: '700', color: color.ink, fontFamily: DISPLAY_FONT }}>
               {t(activeLabelKey)}
             </Text>
             <Text style={{ fontSize: 12, color: color.muted }} numberOfLines={1}>
@@ -204,7 +214,7 @@ function ConsoleShell() {
             </Text>
           </View>
 
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm, flexWrap: 'wrap' }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm, flexWrap: 'wrap', maxWidth: '100%' }}>
             <TextInput
               value={search}
               onChangeText={setSearch}

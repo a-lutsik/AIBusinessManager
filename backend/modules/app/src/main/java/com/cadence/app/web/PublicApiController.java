@@ -4,6 +4,7 @@ import com.cadence.booking.api.AppointmentView;
 import com.cadence.booking.api.BookingService;
 import com.cadence.booking.api.CreateBookingCommand;
 import com.cadence.booking.api.PublicBookingResult;
+import com.cadence.booking.api.PublicVisit;
 import com.cadence.catalog.api.CatalogService;
 import com.cadence.catalog.api.Offering;
 import com.cadence.catalog.api.ServiceView;
@@ -16,6 +17,8 @@ import com.cadence.platform.error.DomainException;
 import com.cadence.platform.tenancy.TenantContext;
 import com.cadence.platform.tenant.TenantDirectory;
 import jakarta.servlet.http.HttpServletRequest;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -37,6 +40,8 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/public")
 public class PublicApiController {
+
+    private static final Logger log = LoggerFactory.getLogger(PublicApiController.class);
 
     private final CatalogService catalogService;
     private final BookingService bookingService;
@@ -155,21 +160,12 @@ public class PublicApiController {
     /** The visit behind a manage link: visit facts and the typed name only (no stored client name, phone or trust). */
     @GetMapping("/bookings/{id}")
     public PublicVisitView booking(@PathVariable UUID id, @RequestParam String token) {
-        AppointmentView view = bookingService.findByAccessToken(token)
-                .orElseThrow(() -> DomainException.notFound("TOKEN_INVALID", "Booking link is invalid"));
-        if (!view.id().equals(id)) {
-            throw DomainException.forbidden("TOKEN_INVALID", "Token does not match this visit");
-        }
-        return PublicVisitView.of(view);
+        return publicView(bookingService.publicVisitByAccessToken(id, token));
     }
 
     @PostMapping("/bookings/{id}/cancel")
     public PublicVisitView cancel(@PathVariable UUID id, @RequestParam String token) {
-        AppointmentView view = bookingService.cancelByAccessToken(token, true);
-        if (!view.id().equals(id)) {
-            throw DomainException.forbidden("TOKEN_INVALID", "Token does not match this visit");
-        }
-        return PublicVisitView.of(view);
+        return publicView(bookingService.cancelByAccessToken(id, token, true));
     }
 
     @PostMapping("/bookings/{id}/reschedule")
@@ -178,11 +174,13 @@ public class PublicApiController {
             @RequestParam String token,
             @RequestParam Instant start
     ) {
-        AppointmentView view = bookingService.rescheduleByAccessToken(token, start);
-        if (!view.id().equals(id)) {
-            throw DomainException.forbidden("TOKEN_INVALID", "Token does not match this visit");
-        }
-        return PublicVisitView.of(view);
+        return publicView(bookingService.rescheduleByAccessToken(id, token, start));
+    }
+
+    private static PublicVisitView publicView(PublicVisit result) {
+        log.debug("Public visit {}: status={}, clientRescheduleAllowed={}",
+                result.visit().id(), result.visit().status(), result.clientRescheduleAllowed());
+        return PublicVisitView.of(result.visit(), result.clientRescheduleAllowed(), result.timezone());
     }
 
     /**

@@ -9,8 +9,8 @@ import {
   type MeView,
   type ServiceView,
 } from '@/src/api/client';
-import { t } from '@/src/i18n';
-import { useThemeTokens } from '@/src/theme/tokens';
+import { currentLocale, t } from '@/src/i18n';
+import { DISPLAY_FONT, useThemeTokens } from '@/src/theme/tokens';
 import { formatMoney } from '@/src/utils/money';
 
 type EnrichedRow = {
@@ -83,16 +83,17 @@ export default function SpecialistMatrix() {
   const colBuf = { flex: 1, minWidth: 80 };
 
   return (
-    <ScrollView horizontal={compact} contentContainerStyle={{ paddingBottom: space.xxl }}>
-      <View style={{ minWidth: compact ? 720 : undefined, width: compact ? undefined : '100%' }}>
-        <Text style={{ fontSize: 28, fontWeight: '700', marginBottom: space.sm, fontFamily: 'Plus Jakarta Sans', color: color.ink }}>
-          {t('matrix.title')}
-        </Text>
-        <Text style={{ color: color.muted, marginBottom: space.lg, maxWidth: 560 }}>{t('matrix.lead')}</Text>
-        {enriched.length === 0 ? <EmptyState title={t('matrix.empty')} /> : null}
+    <ScrollView contentContainerStyle={{ paddingBottom: space.xxl }}>
+      <Text style={{ fontSize: 28, fontWeight: '700', marginBottom: space.sm, fontFamily: DISPLAY_FONT, color: color.ink }}>
+        {t('matrix.title')}
+      </Text>
+      <Text style={{ color: color.muted, marginBottom: space.lg, maxWidth: 560 }}>{t('matrix.lead')}</Text>
+      {enriched.length === 0 ? <EmptyState title={t('matrix.empty')} /> : null}
 
+      {/* Only the table scrolls sideways on a narrow screen: the title and the lead stay readable. */}
+      <ScrollView testID="matrix-scroller" horizontal={compact}>
         {enriched.length > 0 ? (
-          <View style={{ borderWidth: 1, borderColor: color.line, borderRadius: radius.card, overflow: 'hidden', backgroundColor: color.surface }}>
+          <View style={{ minWidth: compact ? 720 : undefined, width: compact ? undefined : '100%', borderWidth: 1, borderColor: color.line, borderRadius: radius.card, overflow: 'hidden', backgroundColor: color.surface }}>
             <View
               style={{
                 flexDirection: 'row',
@@ -115,6 +116,7 @@ export default function SpecialistMatrix() {
             {enriched.map((r) => (
               <View
                 key={r.key}
+                testID={`matrix-row-${r.name}`}
                 style={{
                   flexDirection: 'row',
                   alignItems: 'stretch',
@@ -137,9 +139,9 @@ export default function SpecialistMatrix() {
                 <Text style={[td, colNum, r.durationOverride != null ? { color: color.secondary, fontWeight: '700' } : null]}>
                   {fmtMinutes(r.durationOverride)}
                 </Text>
-                <Text style={[td, colMoney]}>{r.defaultPrice != null ? formatMoney(r.defaultPrice, currency) : '—'}</Text>
+                <Text style={[td, colMoney]}>{r.defaultPrice != null ? formatMoney(r.defaultPrice, currency, currentLocale()) : '—'}</Text>
                 <Text style={[td, colMoney, r.priceOverride != null ? { color: color.secondary, fontWeight: '700' } : null]}>
-                  {r.priceOverride != null ? formatMoney(r.priceOverride, currency) : '—'}
+                  {r.priceOverride != null ? formatMoney(r.priceOverride, currency, currentLocale()) : '—'}
                 </Text>
                 <Text style={[td, colBuf]}>
                   {fmtBuf(r.defaultBefore, r.defaultAfter)}
@@ -151,7 +153,7 @@ export default function SpecialistMatrix() {
             ))}
           </View>
         ) : null}
-      </View>
+      </ScrollView>
     </ScrollView>
   );
 }

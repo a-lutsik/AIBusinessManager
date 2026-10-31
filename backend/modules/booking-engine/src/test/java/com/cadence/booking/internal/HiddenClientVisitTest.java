@@ -442,8 +442,8 @@ class HiddenClientVisitTest {
         AppointmentView booked = stored(EXISTING, AppointmentStatus.CONFIRMED, "Typed Visitor", false);
         tokenFor(booked);
 
-        assertShowsTypedOnly(service.rescheduleByAccessToken("raw", START), "Typed Visitor");
-        assertShowsTypedOnly(service.cancelByAccessToken("raw", true), "Typed Visitor");
+        assertShowsTypedOnly(service.rescheduleByAccessToken(booked.id(), "raw", START).visit(), "Typed Visitor");
+        assertShowsTypedOnly(service.cancelByAccessToken(booked.id(), "raw", true).visit(), "Typed Visitor");
     }
 
     @Test

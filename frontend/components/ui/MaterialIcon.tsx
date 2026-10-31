@@ -12,6 +12,11 @@ type Props = {
 export function MaterialIcon({ name, size = 22, color = tokens.color.ink, filled = false }: Props) {
   if (Platform.OS === 'web') {
     const style: TextStyle = {
+      // A ligature is a whole word until the web font arrives (or never does): the box must not depend on the font.
+      width: size,
+      height: size,
+      lineHeight: size,
+      overflow: 'hidden',
       fontSize: size,
       color,
       fontFamily: 'Material Symbols Outlined',

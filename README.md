@@ -229,12 +229,49 @@ npm run web
 
 i18n catalogs: `frontend/src/i18n/locales/{en,ru,ka,uk,cs}.json` (ru/en complete for UI; ka/uk/cs files exist so adding copy does not require code changes). Dark theme toggle lives in the console sidebar (`data-theme` on web).
 
+## End-to-end tests (Playwright)
+
+```bash
+cd frontend
+npm ci && npx playwright install chromium   # once
+npm run e2e         # dev-headers: console and public booking against the backend with the dev-headers profile
+npm run e2e:oidc    # Keycloak login (authorization code + PKCE) against the realm from docker/keycloak
+npm run e2e -- -g smoke   # extra arguments go to `playwright test`
+```
+
+Each command builds and tears down everything itself (`frontend/scripts/e2e.mjs`, `docker-compose.e2e.yml`): TimescaleDB on a
+tmpfs (and Keycloak for `e2e:oidc`) in the isolated compose project `cadence-e2e`, the backend through `bootRun`, and the web
+bundle exported and served by `scripts/e2e-serve.mjs`. The AI provider is always the stub. Needs Docker and `JAVA_HOME` on a JDK 21
+for Gradle: Gradle 8.14 does not run on JDK 25, also when that is the default of your shell. The runner stops with this message before it
+starts anything. The JDK 25 compile toolchain is resolved by Gradle.
+
+```bash
+export JAVA_HOME="$HOME/Library/Java/JavaVirtualMachines/corretto-21.0.7/Contents/Home"
+```
+
+| Port | What |
+|------|------|
+| 15433 | TimescaleDB |
+| 18080 | backend |
+| 18081 | Keycloak (`e2e:oidc` only) |
+| 19005 | web bundle of `npm run e2e` |
+| 19006 | web bundle of `npm run e2e:oidc` |
+
+- Isolation: the development database, its volumes and the ports of `docker compose up` (5433, 8080, 8081) are not touched. A
+  busy E2E port stops the run with the owner of the port named; nothing foreign is killed. Whatever the run starts is stopped and
+  the compose project is removed with its volumes at the end, also after a failure or Ctrl-C.
+- Results are in `frontend/e2e-results/` (gitignored, cleared at the start of every run): `report/` (HTML report, open
+  `report/index.html`), `screenshots/` (`<name>-1280.png` and `<name>-375.png`), `test-results/` (screenshots and traces of failed
+  tests), `logs/` (backend, bundle export and server logs). `npm run e2e:oidc` starts with an empty directory too, so copy
+  the results of the first run away if you need both.
+
 ## Continuous integration
 
 `.github/workflows/ci.yml` runs on every push and pull request:
 
-- **backend**: Gradle on JDK 21 with the JDK 25 toolchain, `./gradlew build --no-build-cache` (jOOQ codegen, ArchUnit, unit tests and Testcontainers ITs). The build cache is off so cached results never hide a test run. A per-module test summary goes to the job summary; reports are uploaded on failure. Two guards keep a runner without a working Docker daemon from going green with the Testcontainers ITs skipped: with `CI` set (GitHub sets it) `AbstractTimescaleIT` fails instead of skipping when Docker is unreachable (on a developer machine without Docker the ITs are still skipped), and `.github/scripts/junit_summary.py --fail-on-skipped --min-tests 400 --require-class 'IT$'` fails the job when any test case was skipped, fewer than 400 ran (1040 at the time of writing; lower the number only when tests were removed on purpose) or no `*IT` class executed.
-- **frontend**: Node 22, `npm ci`, `npm run typecheck`, `npx expo export --platform web`.
+- **backend**: Gradle on JDK 21 with the JDK 25 toolchain, `./gradlew build --no-build-cache` (jOOQ codegen, ArchUnit, unit tests and Testcontainers ITs). The build cache is off so cached results never hide a test run. A per-module test summary goes to the job summary; reports are uploaded on failure. Two guards keep a runner without a working Docker daemon from going green with the Testcontainers ITs skipped: with `CI` set (GitHub sets it) `AbstractTimescaleIT` fails instead of skipping when Docker is unreachable (on a developer machine without Docker the ITs are still skipped), and `.github/scripts/junit_summary.py --fail-on-skipped --min-tests 400 --require-class 'IT$'` fails the job when any test case was skipped, fewer than 400 ran (1042 at the time of writing; lower the number only when tests were removed on purpose) or no `*IT` class executed.
+- **frontend**: Node 22, `npm ci`, `npm run lint` (zero warnings, includes the ban on hardcoded JSX text) and `npm run lint:selftest`, `npm run i18n:check`, `npm run typecheck`, `npx expo export --platform web`.
+- **e2e**: Playwright on the isolated stack described in [End-to-end tests](#end-to-end-tests-playwright): `npm run e2e`, then `npm run e2e:oidc` (also when the first one failed), Chromium only. The results of each run are uploaded as the artifacts `e2e-results` and `e2e-results-oidc` (reports, screenshots, traces and logs, without the exported bundles; 7 days). It is not a required check: do not add it to branch protection until it has proven stable on the runners.
 - **compose**: the production compose file must reject `.env.prod.example` (empty secrets) and accept a fully generated env file.
 - **docker**: builds `backend/Dockerfile` without pushing.
 
@@ -333,7 +370,8 @@ console, or wipe `keycloak_db_data` on a fresh install).
 
 ### First owner user
 
-The seed is off, so a tenant and its first user are created by hand (no onboarding API yet):
+The seed is off, so a tenant and its first user are created by hand (no onboarding API for them; the catalog goes through the
+owner API, see "Fill the catalog" below):
 
 1. Create the tenant as the schema owner:
 
@@ -353,6 +391,30 @@ The seed is off, so a tenant and its first user are created by hand (no onboardi
 4. Role mapping tab: assign realm role `OWNER` (or `MASTER`).
 5. Replace the bootstrap admin with a named admin and a strong password; remove `KC_BOOTSTRAP_ADMIN_*` from `.env.prod`
    afterwards if you like (it is read only on the first start).
+
+### Fill the catalog (owner API)
+
+The console cannot edit services, masters, the matrix or schedules yet (TD-68); the API can. With the owner's bearer token
+(see the smoke check below for how to get one), `API` is the app origin. `id: null` creates, the response carries the new `id`.
+Order matters: service and master first, then the matrix (needs both ids), then the schedule. Send `color`/`calendarColor`
+always (`#rrggbb`): the database rejects `null`. Money is in minor units (`priceMinor: 8000` is 80.00).
+
+```bash
+H=(-H "Authorization: Bearer $OWNER_TOKEN" -H "Content-Type: application/json")
+curl -sS -X PUT "$API/api/app/services" "${H[@]}" -d '{"id":null,"name":"Haircut","description":null,"durationMinutes":60,"priceMinor":8000,"bufferBeforeMinutes":0,"bufferAfterMinutes":10,"color":"#0f766e","active":true,"publicVisible":true}'
+curl -sS -X PUT "$API/api/app/specialists" "${H[@]}" -d '{"id":null,"displayName":"Nino","keycloakUserId":null,"calendarColor":"#7c3aed","active":true}'
+# $SERVICE_ID and $SPECIALIST_ID are the "id" values from the two responses
+curl -sS -X PUT "$API/api/app/specialists/$SPECIALIST_ID/matrix" "${H[@]}" -d '{"id":null,"serviceId":"'$SERVICE_ID'","offered":true,"durationMinutesOverride":null,"priceMinorOverride":null,"bufferBeforeMinutesOverride":null,"bufferAfterMinutesOverride":null}'
+# the whole weekly schedule is replaced; weekday 1=Mon..7=Sun, minutes from midnight (600 = 10:00, end exclusive)
+curl -sS -X PUT "$API/api/app/specialists/$SPECIALIST_ID/schedule" "${H[@]}" -d '[{"id":null,"weekday":1,"startMinute":600,"endMinute":1140},{"id":null,"weekday":2,"startMinute":600,"endMinute":1140}]'
+# optional: a day off (kind DAY_OFF) or changed hours (kind SHIFT with startMinute/endMinute)
+curl -sS -X PUT "$API/api/app/specialists/$SPECIALIST_ID/exceptions" "${H[@]}" -d '{"id":null,"date":"2026-12-31","kind":"DAY_OFF","startMinute":null,"endMinute":null,"note":"Holiday"}'
+```
+
+`keycloakUserId` of a master is the Keycloak user's id (the JWT `sub`); it links the sign-in to the specialist. Booking rules
+have defaults; change them with `PUT /api/app/rules` (all nine fields, see `openapi.yaml`). Check: `GET $API/api/public/tenants/<slug>`
+answers with the tenant, `GET $API/api/public/tenants/<slug>/services` lists the service, and `<CADENCE_WEB_ORIGIN>/book/<slug>`
+shows it with free slots.
 
 ### Smoke check of a deployment
 
@@ -555,6 +617,6 @@ Open `waitlist/index.html` (or any static file server). Submissions stay in `loc
 - Telegram bot is stubbed (no live Bot API / chat_id deep-link).
 - LLM defaults to the stub. Set `APP_AI_PROVIDER=deepseek` plus `DEEPSEEK_API_KEY` (or gitignored `application-local.yml`) to use DeepSeek. The DeepSeek tool-call format is confirmed only by the operator's live check ([Live check DeepSeek](#live-check-deepseek), TD-41); thinking mode is not supported with the tool loop.
 - AI: name masking is best effort (an unrecognised or misspelled name in an owner message reaches the provider, TD-36; notes are off by default and masked by denylist and regex, TD-37); the monthly token budget is set by the operator in the database, there is no admin surface (TD-42); no right-to-erasure route yet (`crm.anonymize` has no caller). Full list in `docs/tech-debt.md`.
-- Playwright E2E is not in CI; golden path is covered by `BookingCoreIT` (Testcontainers TimescaleDB).
+- Playwright E2E runs in CI as a separate, non-required `e2e` job; the booking core is also covered by `BookingCoreIT` (Testcontainers TimescaleDB).
 - Mobile store builds are not published (in-bounds for MVP).
 - Figma pixel-match was skipped (quota). Calendar is list+panel, not a dense week grid.

@@ -16,10 +16,16 @@ import {
 } from '@/src/api/client';
 import { useConsoleSession } from '@/src/auth/ConsoleSession';
 import { t } from '@/src/i18n';
-import { statusColor, useThemeTokens } from '@/src/theme/tokens';
-import { copyOwnerTaskMessage } from '@/src/utils/ownerTask';
+import { DISPLAY_FONT, statusColor, useThemeTokens } from '@/src/theme/tokens';
+import { formatDateTime } from '@/src/utils/datetime';
+import { copyOwnerTaskMessage, MANAGE_LINK_PLACEHOLDER } from '@/src/utils/ownerTask';
 
 type CopyState = 'busy' | 'copied' | 'error';
+
+const METRIC_TITLES: readonly string[] = ['SLOT_UTILIZATION', 'REPEAT_RATE', 'RETURN_INTERVAL', 'NO_SHOW_RATE', 'REVENUE_PER_HOUR', 'CHURN_RISK'];
+
+/** Task kinds whose title has no server-side values in it, so the owner's language can be applied here. */
+const TASK_TITLES: Record<string, string> = { NEW_BOOKING: 'task.title.NEW_BOOKING', MANUAL_MESSAGE: 'task.title.MANUAL_MESSAGE' };
 
 const SIGNAL_ROUTES: Record<string, string> = {
   OPEN_RULES: '/rules',
@@ -115,7 +121,7 @@ export default function DashboardScreen() {
   const todayColumn = (
     <View style={{ flex: twoCol ? 1 : undefined }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: space.md }}>
-        <Text style={{ fontSize: 18, fontWeight: '600', color: color.ink, fontFamily: 'Plus Jakarta Sans' }}>
+        <Text style={{ fontSize: 18, fontWeight: '600', color: color.ink, fontFamily: DISPLAY_FONT }}>
           {t('dashboard.today')}
         </Text>
         <Button label={`${t('nav.calendar')} →`} variant="ghost" onPress={() => router.push('/calendar')} />
@@ -143,7 +149,7 @@ export default function DashboardScreen() {
           </View>
           <Text style={{ color: color.muted, marginTop: 4 }}>
             {t(`status.${v.status}`)} ·{' '}
-            {v.serviceStart ? new Date(v.serviceStart).toLocaleString() : ''}
+            {v.serviceStart ? formatDateTime(v.serviceStart, me?.timezone) : ''}
           </Text>
         </View>
       ))}
@@ -152,17 +158,21 @@ export default function DashboardScreen() {
 
   const sideColumn = isOwner ? (
     <View style={{ flex: twoCol ? 1 : undefined }}>
-      <Text style={{ fontSize: 18, fontWeight: '600', marginBottom: space.md, color: color.ink, fontFamily: 'Plus Jakarta Sans' }}>
+      <Text style={{ fontSize: 18, fontWeight: '600', marginBottom: space.md, color: color.ink, fontFamily: DISPLAY_FONT }}>
         {t('dashboard.tasks')}
       </Text>
       {tasks.length === 0 ? <EmptyState title={t('empty.tasks')} /> : null}
       {tasks.map((task) => (
         <View
           key={task.id}
+          testID={`owner-task-${task.id}`}
           style={{ backgroundColor: color.surface, padding: space.lg, borderRadius: radius.card, marginBottom: space.sm, borderWidth: 1, borderColor: color.line }}
         >
-          <Text style={{ fontWeight: '700', color: color.ink }}>{task.title}</Text>
-          {task.body ? <Text style={{ marginTop: 4, color: color.ink }}>{task.body}</Text> : null}
+          <Text style={{ fontWeight: '700', color: color.ink }}>{TASK_TITLES[task.kind] ? t(TASK_TITLES[task.kind]) : task.title}</Text>
+          {/* The message goes to the client as written, in the client's language; only the link is filled in on copy. */}
+          {task.body ? (
+            <Text style={{ marginTop: 4, color: color.ink }}>{task.body.split(MANAGE_LINK_PLACEHOLDER).join(t('task.linkOnCopy'))}</Text>
+          ) : null}
           {task.copyText ? (
             <Button
               label={copyLabel(copyState[task.id])}
@@ -185,7 +195,7 @@ export default function DashboardScreen() {
         </View>
       ))}
 
-      <Text style={{ fontSize: 18, fontWeight: '600', marginTop: space.xl, marginBottom: space.md, color: color.ink, fontFamily: 'Plus Jakarta Sans' }}>
+      <Text style={{ fontSize: 18, fontWeight: '600', marginTop: space.xl, marginBottom: space.md, color: color.ink, fontFamily: DISPLAY_FONT }}>
         {t('dashboard.signals')}
       </Text>
       {signals.length === 0 ? <EmptyState title={t('empty.signals')} /> : null}
@@ -220,14 +230,14 @@ export default function DashboardScreen() {
 
   return (
     <ScrollView contentContainerStyle={{ paddingBottom: space.xxl }}>
-      <Text style={{ fontSize: 28, fontWeight: '700', color: color.ink, marginBottom: space.md, fontFamily: 'Plus Jakarta Sans' }}>
+      <Text style={{ fontSize: 28, fontWeight: '700', color: color.ink, marginBottom: space.md, fontFamily: DISPLAY_FONT }}>
         {isOwner ? t('nav.dashboard') : t('nav.today')}
       </Text>
       {error ? <Text style={{ color: color.status.noShow, marginBottom: space.md }}>{error}</Text> : null}
 
       {isOwner ? (
         <>
-          <Text style={{ fontSize: 18, fontWeight: '600', marginBottom: space.md, color: color.ink, fontFamily: 'Plus Jakarta Sans' }}>
+          <Text style={{ fontSize: 18, fontWeight: '600', marginBottom: space.md, color: color.ink, fontFamily: DISPLAY_FONT }}>
             {t('dashboard.growth')}
           </Text>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.md, marginBottom: space.xl }}>
@@ -236,7 +246,7 @@ export default function DashboardScreen() {
               return (
                 <MetricCard
                   key={m.key}
-                  label={def?.title ?? m.key}
+                  label={METRIC_TITLES.includes(m.key) ? t(`metric.title.${m.key}`) : (def?.title ?? m.key)}
                   value={m.value}
                   explanation={m.explanation ?? def?.formula}
                   insufficientData={m.insufficientData}

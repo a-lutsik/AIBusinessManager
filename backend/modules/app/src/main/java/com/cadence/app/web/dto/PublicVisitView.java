@@ -13,7 +13,9 @@ import java.util.UUID;
  * (PENDING vs CONFIRMED, from the client's trust) still tells a returning client from a new one. That is accepted
  * (auto-confirming returning clients is a feature) and bounded by the public booking rate limits; see TD-19.
  * Built as an allow-list: a field added to {@link AppointmentView} later does not reach the public page by itself.
- * {@code specialistId} and {@code serviceId} let the page offer reschedule slots.
+ * {@code specialistId} and {@code serviceId} let the page offer reschedule slots; {@code clientRescheduleAllowed} is
+ * the tenant's rule, so the page does not offer slots the reschedule route would refuse; {@code timezone} is the
+ * tenant's zone, in which the page shows times.
  */
 public record PublicVisitView(
         UUID id,
@@ -25,9 +27,11 @@ public record PublicVisitView(
         String serviceNameSnapshot,
         int priceSnapshot,
         String currencyCode,
-        String enteredName
+        String enteredName,
+        boolean clientRescheduleAllowed,
+        String timezone
 ) {
-    public static PublicVisitView of(AppointmentView visit) {
+    public static PublicVisitView of(AppointmentView visit, boolean clientRescheduleAllowed, String timezone) {
         return new PublicVisitView(
                 visit.id(),
                 visit.specialistId(),
@@ -38,7 +42,9 @@ public record PublicVisitView(
                 visit.serviceNameSnapshot(),
                 visit.priceSnapshot(),
                 visit.currencyCode(),
-                visit.enteredName()
+                visit.enteredName(),
+                clientRescheduleAllowed,
+                timezone
         );
     }
 }

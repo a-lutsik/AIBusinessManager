@@ -177,6 +177,10 @@ export type PublicVisitView = {
   priceSnapshot?: number;
   currencyCode?: string;
   enteredName?: string | null;
+  /** The tenant's rule: when false, the reschedule route answers 403 RESCHEDULE_DISABLED. */
+  clientRescheduleAllowed?: boolean;
+  /** The tenant's IANA zone: times of the visit and its slots are shown in it. */
+  timezone?: string;
 };
 
 /**

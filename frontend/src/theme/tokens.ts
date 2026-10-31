@@ -1,6 +1,16 @@
+import { Platform } from 'react-native';
 import { useTheme } from './ThemeContext';
 
 export type ThemeName = 'light' | 'dark';
+
+/**
+ * Heading font. Plus Jakarta Sans has no Cyrillic or Georgian: a browser without a fallback in the list draws those
+ * with its serif default. Native takes a single family and resolves missing glyphs through the operating system.
+ */
+export const DISPLAY_FONT: string = Platform.select({
+  web: '"Plus Jakarta Sans", Inter, "Noto Sans Georgian", system-ui, sans-serif',
+  default: 'Plus Jakarta Sans',
+});
 
 /** Cadence palette: emerald + indigo + amber on slate. */
 export const tokens = {

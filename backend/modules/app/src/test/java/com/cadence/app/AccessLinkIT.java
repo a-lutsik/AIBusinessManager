@@ -3,6 +3,7 @@ package com.cadence.app;
 import com.cadence.app.seed.DemoIds;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -29,6 +30,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.is;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -238,6 +240,145 @@ class AccessLinkIT extends AbstractTimescaleIT {
                         .with(owner(DemoIds.LUMEN)))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code", is("APPOINTMENT_CANCELLED")));
+    }
+
+    /** The manage link must know the rule before the client picks a slot; the reschedule route still enforces it. */
+    @Test
+    void publicVisitTellsWhetherTheClientMayReschedule() throws Exception {
+        Booking booking = bookPublicly("+995555700020", "Rule Guest");
+        mvc.perform(get("/api/public/bookings/" + booking.id()).param("token", booking.token()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.clientRescheduleAllowed", is(true)))
+                .andExpect(jsonPath("$.timezone", is("Asia/Tbilisi")));
+
+        setClientRescheduleAllowed(false);
+        try {
+            mvc.perform(get("/api/public/bookings/" + booking.id()).param("token", booking.token()))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.clientRescheduleAllowed", is(false)));
+            mvc.perform(post("/api/public/bookings/" + booking.id() + "/reschedule")
+                            .param("token", booking.token())
+                            .param("start", TestSlots.firstFree(mvc, mapper, DemoIds.HAIRCUT, DemoIds.NINO, 3)))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.code", is("RESCHEDULE_DISABLED")));
+            mvc.perform(post("/api/public/bookings/" + booking.id() + "/cancel").param("token", booking.token()))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.clientRescheduleAllowed", is(false)));
+        } finally {
+            setClientRescheduleAllowed(true);
+        }
+    }
+
+    /** A's token on B's address: refused as before, and A is not touched by the refused call. */
+    @Test
+    void tokenOfAnotherVisitChangesNothing() throws Exception {
+        Booking a = bookPublicly("+995555700021", "Token Owner");
+        Booking b = bookPublicly("+995555700022", "Other Visit");
+        String statusBefore = visitStatus(a.id());
+        String startBefore = visitStart(a.id());
+        long eventsBefore = journalEvents(a.id());
+        String newStart = TestSlots.firstFree(mvc, mapper, DemoIds.HAIRCUT, DemoIds.NINO, 4);
+
+        mvc.perform(post("/api/public/bookings/" + b.id() + "/cancel").param("token", a.token()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is("TOKEN_INVALID")));
+        mvc.perform(post("/api/public/bookings/" + b.id() + "/reschedule").param("token", a.token()).param("start", newStart))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is("TOKEN_INVALID")));
+
+        assertThat(visitStatus(a.id())).isEqualTo(statusBefore);
+        assertThat(visitStart(a.id())).isEqualTo(startBefore);
+        assertThat(journalEvents(a.id())).isEqualTo(eventsBefore);
+    }
+
+    /** A's token on any other address answers the same: a caller learns nothing about which visit ids exist. */
+    @Test
+    void foreignTokenAndUnknownIdAnswerAlikeAndAuditNothing() throws Exception {
+        Booking a = bookPublicly("+995555700023", "Oracle Owner");
+        Booking b = bookPublicly("+995555700024", "Oracle Other");
+        long auditBefore = auditRows();
+
+        JsonNode foreign = refused("/api/public/bookings/" + b.id(), a.token());
+        JsonNode unknown = refused("/api/public/bookings/" + UUID.randomUUID(), a.token());
+        assertThat(foreign.get("code").asText()).isEqualTo("TOKEN_INVALID");
+        assertThat(unknown.get("code").asText()).isEqualTo(foreign.get("code").asText());
+        assertThat(unknown.get("detail").asText()).isEqualTo(foreign.get("detail").asText());
+
+        String unknownVisit = UUID.randomUUID().toString();
+        for (String action : new String[] {"/cancel", "/reschedule"}) {
+            mvc.perform(post("/api/public/bookings/" + unknownVisit + action)
+                            .param("token", a.token())
+                            .param("start", "2099-01-01T10:00:00Z"))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.code", is("TOKEN_INVALID")));
+        }
+        assertThat(auditRows()).isEqualTo(auditBefore);
+
+        // A token that resolves to nothing stays a different answer: it is not about the visit id.
+        mvc.perform(get("/api/public/bookings/" + b.id()).param("token", "no-such-token"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code", is("TOKEN_INVALID")));
+    }
+
+    private JsonNode refused(String path, String token) throws Exception {
+        MvcResult result = mvc.perform(get(path).param("token", token))
+                .andExpect(status().isForbidden())
+                .andReturn();
+        return mapper.readTree(result.getResponse().getContentAsByteArray());
+    }
+
+    private long auditRows() throws SQLException {
+        try (Connection c = ownerConnection();
+             PreparedStatement st = c.prepareStatement("select count(*) from audit_log where tenant_id = ?")) {
+            st.setObject(1, DemoIds.LUMEN);
+            try (ResultSet rs = st.executeQuery()) {
+                rs.next();
+                return rs.getLong(1);
+            }
+        }
+    }
+
+    private String visitStatus(String id) throws SQLException {
+        return appointmentColumn(id, "status");
+    }
+
+    private String visitStart(String id) throws SQLException {
+        return appointmentColumn(id, "service_start");
+    }
+
+    private String appointmentColumn(String id, String column) throws SQLException {
+        try (Connection c = ownerConnection();
+             PreparedStatement st = c.prepareStatement("select " + column + " from appointment where id = ?")) {
+            st.setObject(1, UUID.fromString(id));
+            try (ResultSet rs = st.executeQuery()) {
+                assertThat(rs.next()).isTrue();
+                return rs.getString(1);
+            }
+        }
+    }
+
+    private long journalEvents(String id) throws SQLException {
+        try (Connection c = ownerConnection();
+             PreparedStatement st = c.prepareStatement("select count(*) from appointment_event where appointment_id = ?")) {
+            st.setObject(1, UUID.fromString(id));
+            try (ResultSet rs = st.executeQuery()) {
+                rs.next();
+                return rs.getLong(1);
+            }
+        }
+    }
+
+    private void setClientRescheduleAllowed(boolean allowed) throws Exception {
+        MvcResult current = mvc.perform(get("/api/app/rules").with(owner(DemoIds.LUMEN)))
+                .andExpect(status().isOk())
+                .andReturn();
+        ObjectNode rules = (ObjectNode) mapper.readTree(current.getResponse().getContentAsByteArray());
+        rules.put("clientRescheduleAllowed", allowed);
+        mvc.perform(put("/api/app/rules")
+                        .with(owner(DemoIds.LUMEN))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(mapper.writeValueAsBytes(rules)))
+                .andExpect(status().isOk());
     }
 
     @Test

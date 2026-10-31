@@ -1,11 +1,14 @@
-import { useLocalSearchParams } from 'expo-router';
+import * as Clipboard from 'expo-clipboard';
+import { useLocalSearchParams, type Href } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { Button } from '@/components/ui/Button';
 import { MaterialIcon } from '@/components/ui/MaterialIcon';
-import { api, API_BASE } from '@/src/api/client';
+import { api, API_BASE, ApiError } from '@/src/api/client';
 import { currentLocale, setLocale, t, useLocale, type AppLocale } from '@/src/i18n';
-import { useThemeTokens } from '@/src/theme/tokens';
+import { DISPLAY_FONT, useThemeTokens } from '@/src/theme/tokens';
+import { dayKey, formatDateTime, formatDay, formatTime, slotWindow } from '@/src/utils/datetime';
+import { toAbsoluteManageUrl } from '@/src/utils/ownerTask';
 
 const COUNTRIES = [
   { code: 'GE', dial: '+995' },
@@ -30,7 +33,13 @@ export default function PublicBookScreen() {
   const [consent, setConsent] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
+  const [chosenDay, setChosenDay] = useState<string | null>(null);
+  const [slotsLoading, setSlotsLoading] = useState(false);
+  const [slotsRequest, setSlotsRequest] = useState(0);
+  const [slotTaken, setSlotTaken] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
   const activeLocale = useLocale();
+  const timeZone: string | undefined = tenant?.timezone;
 
   useEffect(() => {
     if (!slug) return;
@@ -53,20 +62,47 @@ export default function PublicBookScreen() {
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [slug, serviceId]);
 
-  const windowRange = useMemo(() => {
-    const now = new Date();
-    const from = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate() + 1));
-    const to = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate() + 7));
-    return { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) };
-  }, []);
+  // Tomorrow..+7 days as the tenant counts them, so the request waits for the tenant.
+  const windowRange = useMemo(() => (tenant ? slotWindow(7, tenant.timezone) : null), [tenant]);
 
   useEffect(() => {
-    if (!slug || !serviceId || !specialistId) return;
-    api.publicSlots(slug, serviceId, specialistId, windowRange.from, windowRange.to).then(setSlots).catch(() => setSlots([]));
-  }, [slug, serviceId, specialistId, windowRange.from, windowRange.to]);
+    if (!slug || !serviceId || !specialistId || !windowRange) return;
+    let current = true;
+    /* eslint-disable react-hooks/set-state-in-effect */
+    setSlots([]);
+    setSlotsLoading(true);
+    /* eslint-enable react-hooks/set-state-in-effect */
+    api
+      .publicSlots(slug, serviceId, specialistId, windowRange.from, windowRange.to)
+      .then((next) => {
+        if (!current) return;
+        setSlots(next);
+        setSlot((chosen) => (chosen && next.includes(chosen) ? chosen : null));
+      })
+      .catch(() => {
+        if (current) setSlots([]);
+      })
+      .finally(() => {
+        if (current) setSlotsLoading(false);
+      });
+    return () => {
+      current = false;
+    };
+  }, [slug, serviceId, specialistId, windowRange, slotsRequest]);
+
+  const slotDays = useMemo(() => {
+    const byDay = new Map<string, string[]>();
+    for (const s of slots) {
+      const key = dayKey(s, timeZone);
+      byDay.set(key, [...(byDay.get(key) ?? []), s]);
+    }
+    return [...byDay.entries()].map(([key, daySlots]) => ({ key, slots: daySlots }));
+  }, [slots, timeZone]);
+  const activeDay = slotDays.find((d) => d.key === chosenDay) ?? slotDays[0];
 
   const submit = async () => {
     if (!slug || !serviceId || !specialistId || !slot) return;
+    setError(null);
     try {
       const dial = COUNTRIES.find((c) => c.code === country)?.dial ?? '';
       const normalized = phone.trim().startsWith('+') ? phone.trim() : `${dial}${phone.trim()}`;
@@ -82,7 +118,14 @@ export default function PublicBookScreen() {
       });
       setResult(booked);
     } catch (e: any) {
-      setError(String(e.message ?? e));
+      if (e instanceof ApiError && e.status === 409) {
+        // Taken while the client was typing: what was typed stays, the slot goes, the list is fresh again.
+        setSlot(null);
+        setSlotTaken(true);
+        setSlotsRequest((n) => n + 1);
+      } else {
+        setError(String(e.message ?? e));
+      }
     }
   };
 
@@ -111,26 +154,43 @@ export default function PublicBookScreen() {
 
   if (result) {
     const pending = result.status === 'PENDING';
+    const manageUrl = toAbsoluteManageUrl(result.managePath);
     return (
       <ScrollView style={{ flex: 1, backgroundColor: color.canvas, padding: space.xl }}>
-        <Text style={{ fontSize: 28, fontWeight: '700', color: color.ink, fontFamily: 'Plus Jakarta Sans' }}>
+        <Text style={{ fontSize: 28, fontWeight: '700', color: color.ink, fontFamily: DISPLAY_FONT }}>
           {pending ? t('book.pending') : t('book.success')}
         </Text>
         <Text style={{ color: color.ink, marginTop: space.sm }}>
-          {result.serviceName} · {result.serviceStart}
+          {result.serviceName} · {formatDateTime(result.serviceStart, timeZone)}
         </Text>
         <Text style={{ color: color.muted, marginVertical: space.md }}>
-          {t('book.saveLink')}: {result.managePath}
+          {t('book.saveLink')}: {manageUrl}
         </Text>
-        <Button
-          label={t('book.addToCalendar')}
-          onPress={() => {
-            const url = `${API_BASE}/api/public/bookings/${result.id}/calendar.ics?token=${encodeURIComponent(result.accessToken)}`;
-            if (typeof window !== 'undefined') {
-              window.open(url, '_blank');
-            }
-          }}
-        />
+        {error ? <Text style={{ color: color.status.noShow, marginBottom: space.sm }}>{error}</Text> : null}
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>
+          <Button label={t('book.openLink')} href={manageUrl as Href} />
+          {Platform.OS === 'web' ? (
+            <Button
+              label={linkCopied ? t('book.linkCopied') : t('book.copyLink')}
+              variant="ghost"
+              onPress={() =>
+                Clipboard.setStringAsync(manageUrl)
+                  .then(() => setLinkCopied(true))
+                  .catch(() => setError(t('task.copyFailed')))
+              }
+            />
+          ) : null}
+          <Button
+            label={t('book.addToCalendar')}
+            variant="ghost"
+            onPress={() => {
+              const url = `${API_BASE}/api/public/bookings/${result.id}/calendar.ics?token=${encodeURIComponent(result.accessToken)}`;
+              if (typeof window !== 'undefined') {
+                window.open(url, '_blank');
+              }
+            }}
+          />
+        </View>
       </ScrollView>
     );
   }
@@ -138,7 +198,7 @@ export default function PublicBookScreen() {
   return (
     <ScrollView style={{ flex: 1, backgroundColor: color.canvas, padding: space.xl }}>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, alignItems: 'center', justifyContent: 'space-between' }}>
-        <Text style={{ fontSize: 28, fontWeight: '700', color: color.ink, fontFamily: 'Plus Jakarta Sans' }}>
+        <Text style={{ fontSize: 28, fontWeight: '700', color: color.ink, fontFamily: DISPLAY_FONT }}>
           {tenant?.displayName ?? slug}
         </Text>
         <View style={{ flexDirection: 'row', gap: space.sm }}>
@@ -151,7 +211,7 @@ export default function PublicBookScreen() {
       </View>
       {error ? <Text style={{ color: color.status.noShow, marginTop: space.sm }}>{error}</Text> : null}
 
-      <Text style={{ fontSize: 18, fontWeight: '600', marginTop: space.lg, marginBottom: space.sm, color: color.ink, fontFamily: 'Plus Jakarta Sans' }}>
+      <Text style={{ fontSize: 18, fontWeight: '600', marginTop: space.lg, marginBottom: space.sm, color: color.ink, fontFamily: DISPLAY_FONT }}>
         {t('book.service')}
       </Text>
       {services.map((s) => (
@@ -162,12 +222,20 @@ export default function PublicBookScreen() {
 
       {serviceId ? (
         <>
-          <Text style={{ fontSize: 18, fontWeight: '600', marginTop: space.lg, marginBottom: space.sm, color: color.ink, fontFamily: 'Plus Jakarta Sans' }}>
+          <Text style={{ fontSize: 18, fontWeight: '600', marginTop: space.lg, marginBottom: space.sm, color: color.ink, fontFamily: DISPLAY_FONT }}>
             {t('book.specialist')}
           </Text>
           {specialists.length === 0 ? <Text style={{ color: color.muted, marginVertical: space.md }}>{t('empty.specialistsForService')}</Text> : null}
           {specialists.map((s) => (
-            <Pressable key={s.id} onPress={() => setSpecialistId(s.id)} style={card(specialistId === s.id)}>
+            <Pressable
+              key={s.id}
+              onPress={() => {
+                setSpecialistId(s.id);
+                setChosenDay(null);
+                setSlot(null);
+              }}
+              style={card(specialistId === s.id)}
+            >
               <Text style={{ color: color.ink }}>{s.displayName}</Text>
             </Pressable>
           ))}
@@ -176,21 +244,49 @@ export default function PublicBookScreen() {
 
       {specialistId ? (
         <>
-          <Text style={{ fontSize: 18, fontWeight: '600', marginTop: space.lg, marginBottom: space.sm, color: color.ink, fontFamily: 'Plus Jakarta Sans' }}>
+          <Text style={{ fontSize: 18, fontWeight: '600', marginTop: space.lg, marginBottom: space.sm, color: color.ink, fontFamily: DISPLAY_FONT }}>
             {t('book.slot')}
           </Text>
-          {slots.length === 0 ? <Text style={{ color: color.muted, marginVertical: space.md }}>{t('empty.slots')}</Text> : null}
-          {slots.map((s) => (
-            <Pressable key={s} onPress={() => setSlot(s)} style={card(slot === s)}>
-              <Text style={{ color: color.ink }}>{new Date(s).toLocaleString()}</Text>
-            </Pressable>
-          ))}
+          {slotTaken ? <Text accessibilityRole="alert" style={{ color: color.status.noShow, marginBottom: space.sm }}>{t('book.slotTaken')}</Text> : null}
+          {slots.length === 0 && !slotsLoading ? <Text style={{ color: color.muted, marginVertical: space.md }}>{t('empty.slots')}</Text> : null}
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginBottom: space.md }}>
+            {slotDays.map((d) => (
+              <Pressable
+                key={d.key}
+                accessibilityRole="button"
+                onPress={() => {
+                  setChosenDay(d.key);
+                  setSlot(null);
+                }}
+                style={{
+                  paddingVertical: space.sm,
+                  paddingHorizontal: space.md,
+                  borderRadius: radius.pill,
+                  borderWidth: 1,
+                  borderColor: d.key === activeDay?.key ? color.primary : color.line,
+                  backgroundColor: d.key === activeDay?.key ? color.primary : color.surface,
+                }}
+              >
+                <Text style={{ fontWeight: '600', color: d.key === activeDay?.key ? '#FFFFFF' : color.ink }}>{formatDay(d.slots[0], timeZone)}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>
+            {activeDay?.slots.map((s) => (
+              <Pressable key={s} accessibilityRole="button" onPress={() => {
+                  setSlot(s);
+                  setSlotTaken(false);
+                }} style={[card(slot === s), { marginBottom: 0 }]}>
+                <Text style={{ color: color.ink, fontVariant: ['tabular-nums'] }}>{formatTime(s, timeZone)}</Text>
+              </Pressable>
+            ))}
+          </View>
         </>
       ) : null}
 
       {slot ? (
         <>
-          <Text style={{ fontSize: 18, fontWeight: '600', marginTop: space.lg, marginBottom: space.sm, color: color.ink, fontFamily: 'Plus Jakarta Sans' }}>
+          <Text style={{ fontSize: 18, fontWeight: '600', marginTop: space.lg, marginBottom: space.sm, color: color.ink, fontFamily: DISPLAY_FONT }}>
             {t('book.contact')}
           </Text>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginBottom: space.sm }}>

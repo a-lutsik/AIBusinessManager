@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Modal, Pressable, ScrollView, Text, View } from 'react-native';
+import { Modal, Pressable, ScrollView, Text, View, useWindowDimensions } from 'react-native';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { TrustBadge } from '@/components/ui/TrustBadge';
@@ -12,26 +12,8 @@ import {
 } from '@/src/api/client';
 import { useConsoleSession } from '@/src/auth/ConsoleSession';
 import { t } from '@/src/i18n';
-import { statusColor, useThemeTokens } from '@/src/theme/tokens';
-
-function startOfLocalDay(d: Date) {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  return x;
-}
-
-function addDays(d: Date, n: number) {
-  const x = new Date(d);
-  x.setDate(x.getDate() + n);
-  return x;
-}
-
-function dayKey(d: Date) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
+import { DISPLAY_FONT, statusColor, useThemeTokens } from '@/src/theme/tokens';
+import { dayKey, formatDateTime, formatLongDay, formatTime, slotWindow, startOfZoneDay, zoneDate } from '@/src/utils/datetime';
 
 function unwrapAppointment(raw: unknown): AppointmentView {
   if (raw && typeof raw === 'object' && 'appointment' in (raw as object)) {
@@ -50,7 +32,10 @@ function trustFromDetail(raw: unknown, fallback?: string | null): string | null 
 
 export default function CalendarScreen() {
   const { color, space, radius } = useThemeTokens();
-  const { role } = useConsoleSession();
+  const { role, me, profileLoaded } = useConsoleSession();
+  const timeZone = me?.timezone;
+  // On a narrow screen the visit panel covers the feed instead of squeezing it next to a 320 px column.
+  const narrow = useWindowDimensions().width < 768;
   const [mode, setMode] = useState<'day' | 'week'>('week');
   const [visits, setVisits] = useState<AppointmentView[]>([]);
   const [specialists, setSpecialists] = useState<SpecialistView[]>([]);
@@ -61,22 +46,18 @@ export default function CalendarScreen() {
   const [slotOpen, setSlotOpen] = useState(false);
   const [slots, setSlots] = useState<string[]>([]);
   const [slotsBusy, setSlotsBusy] = useState(false);
-  const [tenantSlug, setTenantSlug] = useState(LUMEN_SLUG);
 
-  const anchor = useMemo(() => startOfLocalDay(new Date()), []);
-
-  const days = useMemo(() => {
-    const count = mode === 'week' ? 7 : 1;
-    return Array.from({ length: count }, (_, i) => addDays(anchor, i));
-  }, [mode, anchor]);
-
+  // Days as the tenant counts them: the range waits for the tenant's zone (the feed groups by it as well).
   const range = useMemo(() => {
-    const from = days[0];
-    const to = addDays(days[days.length - 1], 1);
-    return { from: from.toISOString(), to: to.toISOString() };
-  }, [days]);
+    if (!profileLoaded) return null;
+    return {
+      from: startOfZoneDay(zoneDate(timeZone), timeZone),
+      to: startOfZoneDay(zoneDate(timeZone, mode === 'week' ? 7 : 1), timeZone),
+    };
+  }, [profileLoaded, timeZone, mode]);
 
   const load = () => {
+    if (!range) return;
     api
       .calendar(LUMEN_TENANT_ID, range.from, range.to, filter ?? undefined)
       .then(setVisits)
@@ -85,20 +66,15 @@ export default function CalendarScreen() {
 
   useEffect(() => {
     api.specialists(LUMEN_TENANT_ID).then(setSpecialists).catch(() => setSpecialists([]));
-    api
-      .me(LUMEN_TENANT_ID)
-      .then((m) => {
-        if (m.slug) setTenantSlug(m.slug);
-      })
-      .catch(() => undefined);
   }, []);
 
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [range.from, range.to, filter]);
+  }, [range?.from, range?.to, filter]);
 
   const openVisit = async (summary: AppointmentView) => {
+    setError(null);
     setSelected(summary);
     setSelectedTrust(summary.trustLevel);
     try {
@@ -134,16 +110,8 @@ export default function CalendarScreen() {
     setSlotsBusy(true);
     setSlots([]);
     try {
-      const now = new Date();
-      const from = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate() + 1));
-      const to = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate() + 14));
-      const next = await api.publicSlots(
-        tenantSlug,
-        selected.serviceId,
-        selected.specialistId,
-        from.toISOString().slice(0, 10),
-        to.toISOString().slice(0, 10)
-      );
+      const window = slotWindow(14, timeZone);
+      const next = await api.publicSlots(me?.slug ?? LUMEN_SLUG, selected.serviceId, selected.specialistId, window.from, window.to);
       setSlots(next);
     } catch (e: unknown) {
       setError(String((e as Error).message ?? e));
@@ -168,17 +136,21 @@ export default function CalendarScreen() {
     }
   };
 
+  // Days as the tenant counts them; the feed lists only days that have visits.
   const feedDays = useMemo(() => {
-    return days
-      .map((day) => {
-        const key = dayKey(day);
-        const dayVisits = visits
-          .filter((v) => v.serviceStart && dayKey(new Date(v.serviceStart)) === key)
-          .sort((a, b) => new Date(a.serviceStart!).getTime() - new Date(b.serviceStart!).getTime());
-        return { day, key, visits: dayVisits };
-      })
-      .filter((d) => d.visits.length > 0);
-  }, [days, visits]);
+    const byDay = new Map<string, AppointmentView[]>();
+    for (const v of visits) {
+      if (!v.serviceStart) continue;
+      const key = dayKey(v.serviceStart, timeZone);
+      byDay.set(key, [...(byDay.get(key) ?? []), v]);
+    }
+    return [...byDay.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, dayVisits]) => ({
+        key,
+        visits: dayVisits.sort((a, b) => new Date(a.serviceStart!).getTime() - new Date(b.serviceStart!).getTime()),
+      }));
+  }, [visits, timeZone]);
 
   const pill = (active: boolean) => ({
     paddingVertical: 6,
@@ -193,7 +165,7 @@ export default function CalendarScreen() {
   return (
     <View style={{ flex: 1, flexDirection: 'row', gap: space.lg }}>
       <View style={{ flex: 1 }}>
-        <Text style={{ fontSize: 28, fontWeight: '700', color: color.ink, fontFamily: 'Plus Jakarta Sans' }}>
+        <Text style={{ fontSize: 28, fontWeight: '700', color: color.ink, fontFamily: DISPLAY_FONT }}>
           {t('nav.calendar')}
         </Text>
         <View style={{ flexDirection: 'row', gap: space.sm, marginVertical: space.md, flexWrap: 'wrap' }}>
@@ -216,14 +188,15 @@ export default function CalendarScreen() {
 
         <ScrollView contentContainerStyle={{ paddingBottom: space.xxl }}>
           {feedDays.length === 0 ? <EmptyState title={t('empty.calendar')} /> : null}
-          {feedDays.map(({ day, key, visits: dayVisits }) => (
+          {feedDays.map(({ key, visits: dayVisits }) => (
             <View key={key} style={{ marginBottom: space.lg }}>
-              <Text style={{ fontSize: 13, fontWeight: '700', color: color.muted, textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: space.sm }}>
-                {day.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}
+              <Text testID="calendar-day" style={{ fontSize: 13, fontWeight: '700', color: color.muted, textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: space.sm }}>
+                {formatLongDay(dayVisits[0].serviceStart!, timeZone)}
               </Text>
               {dayVisits.map((v) => (
                 <Pressable
                   key={v.id}
+                  testID={`visit-row-${v.id}`}
                   onPress={() => openVisit(v)}
                   style={{
                     flexDirection: 'row',
@@ -240,7 +213,7 @@ export default function CalendarScreen() {
                   }}
                 >
                   <Text style={{ width: 56, fontWeight: '700', color: color.ink, fontVariant: ['tabular-nums'] }}>
-                    {v.serviceStart ? new Date(v.serviceStart).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : ''}
+                    {v.serviceStart ? formatTime(v.serviceStart, timeZone) : ''}
                   </Text>
                   <View style={{ flex: 1 }}>
                     <Text style={{ fontWeight: '700', color: color.ink }} numberOfLines={1}>
@@ -258,60 +231,66 @@ export default function CalendarScreen() {
 
       {selected ? (
         <View
+          testID="visit-panel"
           style={{
-            width: 320,
+            ...(narrow ? { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 } : { width: 320, alignSelf: 'flex-start', maxHeight: '100%' }),
             backgroundColor: color.surface,
-            padding: space.lg,
             borderRadius: radius.card,
             borderWidth: 1,
             borderColor: color.line,
-            gap: space.xs,
-            alignSelf: 'flex-start',
           }}
         >
-          <Text style={{ fontSize: 20, fontWeight: '600', color: color.ink, fontFamily: 'Plus Jakarta Sans', marginBottom: space.sm }}>
-            {selected.serviceNameSnapshot}
-          </Text>
-          <Text style={{ color: color.ink }}>{selected.clientDisplayName ?? '—'}</Text>
-          <TrustBadge level={selectedTrust ?? selected.trustLevel} />
-          <Text style={{ color: color.muted, marginTop: 4 }}>{t(`status.${selected.status}`)}</Text>
-          <Text style={{ color: color.muted, marginTop: 4 }}>
-            {selected.serviceStart ? new Date(selected.serviceStart).toLocaleString() : ''}
-          </Text>
-          {selected.clientPhone ? <Text style={{ color: color.muted, marginTop: 4 }}>{selected.clientPhone}</Text> : null}
-          {selected.note ? <Text style={{ color: color.ink, marginTop: 4 }}>{selected.note}</Text> : null}
-          <View style={{ marginTop: space.md, gap: space.sm }}>
-            {selected.clientHiddenFromMaster && role === 'MASTER' ? (
-              <Text style={{ color: color.muted }}>{t('calendar.awaitingOwnerConfirmation')}</Text>
+          <ScrollView contentContainerStyle={{ padding: space.lg, gap: space.xs }}>
+            <Text style={{ fontSize: 20, fontWeight: '600', color: color.ink, fontFamily: DISPLAY_FONT, marginBottom: space.sm }}>
+              {selected.serviceNameSnapshot}
+            </Text>
+            {/* The panel covers the feed and its error line on a narrow screen. */}
+            {narrow && error ? (
+              <Text accessibilityRole="alert" style={{ color: color.status.noShow, marginBottom: space.sm }}>
+                {error}
+              </Text>
             ) : null}
-            {actionsFor(selected.status, selected.serviceStart, selected.clientHiddenFromMaster).map((st) => (
-              <Button
-                key={st}
-                label={t(`status.${st}`)}
-                onPress={() =>
-                  api
-                    .transition(LUMEN_TENANT_ID, selected.id, st)
-                    .then((next) => {
-                      setSelected(next);
-                      setSelectedTrust(next.trustLevel);
-                      load();
-                    })
-                    .catch((e: unknown) => setError(String((e as Error).message ?? e)))
-                }
-              />
-            ))}
-            {!String(selected.status).startsWith('CANCELLED') ? (
-              <Button label={t('visit.reschedule')} variant="ghost" onPress={openRescheduleDialog} />
-            ) : null}
-            <Button label={t('calendar.closePanel')} variant="ghost" onPress={() => setSelected(null)} />
-          </View>
+            <Text style={{ color: color.ink }}>{selected.clientDisplayName ?? '—'}</Text>
+            <TrustBadge level={selectedTrust ?? selected.trustLevel} />
+            <Text style={{ color: color.muted, marginTop: 4 }}>{t(`status.${selected.status}`)}</Text>
+            <Text style={{ color: color.muted, marginTop: 4 }}>
+              {selected.serviceStart ? formatDateTime(selected.serviceStart, timeZone) : ''}
+            </Text>
+            {selected.clientPhone ? <Text style={{ color: color.muted, marginTop: 4 }}>{selected.clientPhone}</Text> : null}
+            {selected.note ? <Text style={{ color: color.ink, marginTop: 4 }}>{selected.note}</Text> : null}
+            <View style={{ marginTop: space.md, gap: space.sm }}>
+              {selected.clientHiddenFromMaster && role === 'MASTER' ? (
+                <Text style={{ color: color.muted }}>{t('calendar.awaitingOwnerConfirmation')}</Text>
+              ) : null}
+              {actionsFor(selected.status, selected.serviceStart, selected.clientHiddenFromMaster).map((st) => (
+                <Button
+                  key={st}
+                  label={t(`visit.action.${st}`)}
+                  onPress={() =>
+                    api
+                      .transition(LUMEN_TENANT_ID, selected.id, st)
+                      .then((next) => {
+                        setSelected(next);
+                        setSelectedTrust(next.trustLevel);
+                        load();
+                      })
+                      .catch((e: unknown) => setError(String((e as Error).message ?? e)))
+                  }
+                />
+              ))}
+              {!String(selected.status).startsWith('CANCELLED') ? (
+                <Button label={t('visit.reschedule')} variant="ghost" onPress={openRescheduleDialog} />
+              ) : null}
+              <Button label={t('calendar.closePanel')} variant="ghost" onPress={() => setSelected(null)} />
+            </View>
+          </ScrollView>
         </View>
       ) : null}
 
       <Modal visible={slotOpen} transparent animationType="fade" onRequestClose={() => setSlotOpen(false)}>
         <View style={{ flex: 1, backgroundColor: 'rgba(15,23,42,0.4)', justifyContent: 'center', alignItems: 'center', padding: space.xl }}>
           <View style={{ width: '100%', maxWidth: 420, backgroundColor: color.surface, borderRadius: radius.card, padding: space.xl, gap: space.sm }}>
-            <Text style={{ fontSize: 20, fontWeight: '600', color: color.ink, fontFamily: 'Plus Jakarta Sans', marginBottom: space.sm }}>
+            <Text style={{ fontSize: 20, fontWeight: '600', color: color.ink, fontFamily: DISPLAY_FONT, marginBottom: space.sm }}>
               {t('visit.pickSlot')}
             </Text>
             {slotsBusy && slots.length === 0 ? <Text style={{ color: color.muted }}>…</Text> : null}
@@ -320,7 +299,7 @@ export default function CalendarScreen() {
               {slots.map((s) => (
                 <Button
                   key={s}
-                  label={new Date(s).toLocaleString()}
+                  label={formatDateTime(s, timeZone)}
                   variant="ghost"
                   disabled={slotsBusy}
                   onPress={() => applyReschedule(s)}

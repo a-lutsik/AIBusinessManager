@@ -11,10 +11,13 @@ import com.cadence.growth.api.MetricView;
 import com.cadence.platform.audit.AuditLogger;
 import com.cadence.platform.tenancy.ActorContext;
 import com.cadence.platform.tenant.TenantDirectory;
+import com.cadence.platform.tenant.TenantInfo;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Isolation;
@@ -57,6 +60,7 @@ class MetricsRecalculation {
     static final String JOURNAL_MISMATCH = "growth.journal_mismatch";
     private static final int MAX_DEFECTS_AUDITED = 20;
     private static final int MAX_DETAIL = 200;
+    private static final Logger log = LoggerFactory.getLogger(MetricsRecalculation.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     /** Everything the read step computed; the write step only stores it. */
@@ -120,7 +124,12 @@ class MetricsRecalculation {
 
     private Computation compute(UUID tenantId, Duration lag) {
         // The first statement fixes the snapshot; now and T are taken after it.
-        ZoneId zone = ZoneId.of(tenants.requireById(tenantId).getTimezone());
+        TenantInfo tenant = tenants.infoById(tenantId);
+        ZoneId zone = tenant.zone();
+        String currency = tenant.currencyCode();
+        if (!MetricsCalculator.hasKnownMinorUnits(currency)) {
+            log.warn("Metric explanations without amounts: tenant {} has currency {} with no known minor units", tenantId, currency);
+        }
         Instant now = clock.instant();
         Instant asOf = now.minus(lag).truncatedTo(ChronoUnit.MICROS);
         LocalDate today = LocalDate.ofInstant(asOf, zone);
@@ -135,9 +144,11 @@ class MetricsRecalculation {
         MetricsCalculator.Schedule schedule = schedule(active, previousMonth.atDay(1), today);
 
         List<Window> windows = new ArrayList<>();
-        windows.add(window(fold, schedule, zone, previousMonth.atDay(1), previousMonth.atEndOfMonth(), asOf, active));
-        windows.add(window(fold, schedule, zone, currentStart, today, asOf, active));
-        MetricsCalculator.Result currentTenant = MetricsCalculator.compute(fold.facts(), schedule, zone, currentStart, today, asOf, null);
+        windows.add(window(fold, schedule, zone, currency, previousMonth.atDay(1), previousMonth.atEndOfMonth(), asOf, active));
+        windows.add(window(fold, schedule, zone, currency, currentStart, today, asOf, active));
+        MetricsCalculator.Result currentTenant = MetricsCalculator.compute(fold.facts(), schedule, zone, currency, currentStart, today, asOf, null);
+        log.debug("Metrics computed: tenant={}, asOf={}, zone={}, currency={}, windows={}, defects={}",
+                tenantId, asOf, zone, currency, windows.size(), defects.size());
         return new Computation(tenantId, asOf, YearMonth.from(currentStart), windows, defects, currentTenant);
     }
 
@@ -162,12 +173,12 @@ class MetricsRecalculation {
         signals.resolveAllBut(c.period().toString(), firing, c.asOf());
     }
 
-    private static Window window(JournalFold fold, MetricsCalculator.Schedule schedule, ZoneId zone, LocalDate ws,
-                                 LocalDate we, Instant asOf, List<SpecialistView> active) {
+    private static Window window(JournalFold fold, MetricsCalculator.Schedule schedule, ZoneId zone, String currency,
+                                 LocalDate ws, LocalDate we, Instant asOf, List<SpecialistView> active) {
         List<MetricView> rows = new ArrayList<>(
-                MetricsCalculator.compute(fold.facts(), schedule, zone, ws, we, asOf, null).metrics());
+                MetricsCalculator.compute(fold.facts(), schedule, zone, currency, ws, we, asOf, null).metrics());
         for (SpecialistView specialist : active) {
-            rows.addAll(MetricsCalculator.compute(fold.facts(), schedule, zone, ws, we, asOf, specialist.id()).metrics());
+            rows.addAll(MetricsCalculator.compute(fold.facts(), schedule, zone, currency, ws, we, asOf, specialist.id()).metrics());
         }
         return new Window(ws, we, rows.stream().map(m -> m.withWindow(ws, we)).toList());
     }

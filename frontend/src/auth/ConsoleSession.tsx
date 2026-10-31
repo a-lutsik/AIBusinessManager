@@ -10,6 +10,8 @@ type ConsoleSessionValue = {
   role: ConsoleRole | null;
   /** True once the role is known and screens may load data. */
   ready: boolean;
+  /** True once `api.me()` has answered, also with an error: `me` (the tenant's zone in it) is as known as it will be. */
+  profileLoaded: boolean;
   /** dev-headers only: the role switcher. No-op in oidc mode. */
   switchRole: (next: ConsoleRole) => void;
 };
@@ -94,8 +96,8 @@ export function ConsoleSessionProvider({ children }: { children: ReactNode }) {
   const ready = role !== null && (mode === 'dev-headers' || meLoaded);
 
   const value = useMemo<ConsoleSessionValue>(
-    () => ({ me, role, ready, switchRole }),
-    [me, role, ready, switchRole]
+    () => ({ me, role, ready, profileLoaded: meLoaded, switchRole }),
+    [me, role, ready, meLoaded, switchRole]
   );
   return <ConsoleSessionContext.Provider value={value}>{children}</ConsoleSessionContext.Provider>;
 }

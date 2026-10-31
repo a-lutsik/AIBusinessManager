@@ -102,7 +102,7 @@ const restrictedSyntax = [
 ];
 
 module.exports = defineConfig([
-  globalIgnores(['dist/**', '.expo/**', 'node_modules/**', 'web-build/**', 'expo-env.d.ts', 'nativewind-env.d.ts']),
+  globalIgnores(['dist/**', 'e2e-results/**', '.expo/**', 'node_modules/**', 'web-build/**', 'expo-env.d.ts', 'nativewind-env.d.ts']),
   expoConfig,
   {
     files: ['**/*.{js,jsx,ts,tsx}'],

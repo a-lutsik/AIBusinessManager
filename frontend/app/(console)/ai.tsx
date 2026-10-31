@@ -15,7 +15,7 @@ import {
 } from '@/src/api/client';
 import { useConsoleSession } from '@/src/auth/ConsoleSession';
 import { currentLocale, t, useLocale } from '@/src/i18n';
-import { useThemeTokens } from '@/src/theme/tokens';
+import { DISPLAY_FONT, useThemeTokens } from '@/src/theme/tokens';
 
 const CONVERSATION_KEY = 'cadence.aiConversationId';
 
@@ -230,7 +230,7 @@ function AiScreen() {
   return (
     <View style={{ flex: 1 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: space.md, flexWrap: 'wrap', marginBottom: space.md }}>
-        <Text style={{ fontSize: 28, fontWeight: '700', color: color.ink, fontFamily: 'Plus Jakarta Sans' }}>
+        <Text style={{ fontSize: 28, fontWeight: '700', color: color.ink, fontFamily: DISPLAY_FONT }}>
           {t('nav.ai')}
         </Text>
         <Button
@@ -249,7 +249,7 @@ function AiScreen() {
       <ScrollView style={{ flex: 1 }}>
         {openOutsideChat.length > 0 ? (
           <View style={{ marginBottom: space.md }}>
-            <Text style={{ fontSize: 16, fontWeight: '600', color: color.ink, fontFamily: 'Plus Jakarta Sans' }}>
+            <Text style={{ fontSize: 16, fontWeight: '600', color: color.ink, fontFamily: DISPLAY_FONT }}>
               {t('ai.openDrafts')}
             </Text>
             {renderDrafts(openOutsideChat)}

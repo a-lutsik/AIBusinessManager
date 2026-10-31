@@ -9,6 +9,7 @@ import com.cadence.app.web.dto.MasterTodayView;
 import com.cadence.booking.api.AppointmentStatus;
 import com.cadence.booking.api.AppointmentView;
 import com.cadence.booking.api.BookingService;
+import com.cadence.booking.api.PublicVisit;
 import com.cadence.catalog.api.CatalogService;
 import com.cadence.crm.api.CrmService;
 import com.cadence.growth.api.GrowthService;
@@ -209,15 +210,17 @@ class HiddenClientResponsesTest {
     @Test
     void publicVisitRoutesAnswerWithVisitFactsAndTheTypedNameOnly() {
         AppointmentView view = visit(SHARED_CLIENT, false);
-        when(booking.findByAccessToken("t")).thenReturn(Optional.of(view));
-        when(booking.cancelByAccessToken("t", true)).thenReturn(view);
-        when(booking.rescheduleByAccessToken(eq("t"), any())).thenReturn(view);
+        PublicVisit visit = new PublicVisit(view, true, "Asia/Tbilisi");
+        when(booking.publicVisitByAccessToken(view.id(), "t")).thenReturn(visit);
+        when(booking.cancelByAccessToken(view.id(), "t", true)).thenReturn(visit);
+        when(booking.rescheduleByAccessToken(eq(view.id()), eq("t"), any())).thenReturn(visit);
 
         for (Object body : List.of(publicApi.booking(view.id(), "t"), publicApi.cancel(view.id(), "t"),
                 publicApi.reschedule(view.id(), "t", view.serviceStart()))) {
             JsonNode json = mapper.valueToTree(body);
             assertThat(keys(json)).containsExactlyInAnyOrder("id", "specialistId", "serviceId", "status",
-                    "serviceStart", "serviceEnd", "serviceNameSnapshot", "priceSnapshot", "currencyCode", "enteredName");
+                    "serviceStart", "serviceEnd", "serviceNameSnapshot", "priceSnapshot", "currencyCode", "enteredName",
+                    "clientRescheduleAllowed", "timezone");
             assertThat(json.get("enteredName").asString()).isEqualTo("Typed");
             assertThat(json.toString()).doesNotContain("Stored Name").doesNotContain("995555000001").doesNotContain("LOW");
         }

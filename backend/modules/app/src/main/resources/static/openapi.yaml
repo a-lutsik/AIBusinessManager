@@ -167,13 +167,16 @@ paths:
           schema: { type: string }
       description: >
         Answers with the visit facts (id, specialistId, serviceId, status, serviceStart, serviceEnd,
-        serviceNameSnapshot, priceSnapshot, currencyCode) and enteredName, the name typed at booking (for rows from
-        before stage 03 that held "typed / stored", everything from the first " / " is dropped). Never the stored
-        client name, phone or trust. The status still differs for a returning client when new clients need
-        confirmation (accepted, rate-limited). The cancel and reschedule routes answer the same way.
+        serviceNameSnapshot, priceSnapshot, currencyCode), enteredName, the name typed at booking (for rows from
+        before stage 03 that held "typed / stored", everything from the first " / " is dropped), and
+        clientRescheduleAllowed, the tenant's rule (when false, the reschedule route answers 403 RESCHEDULE_DISABLED),
+        and timezone, the tenant's IANA zone.
+        Never the stored client name, phone or trust. The status still differs for a returning client when new clients
+        need confirmation (accepted, rate-limited). The cancel and reschedule routes answer the same way.
       responses:
         "200": { description: "Visit facts and the typed name only" }
-        "404": { description: Invalid token }
+        "403": { description: "TOKEN_INVALID - the token belongs to another visit (also for a visit id that does not exist); nothing is written" }
+        "404": { description: "TOKEN_INVALID - unknown, revoked or expired token" }
   /api/public/bookings/{id}/cancel:
     post:
       summary: Cancel by opaque token
@@ -188,6 +191,8 @@ paths:
           schema: { type: string }
       responses:
         "200": { description: "Cancelled visit: visit facts and the typed name only, as GET /api/public/bookings/{id}" }
+        "403": { description: "TOKEN_INVALID - the token belongs to another visit (also for a visit id that does not exist); nothing is written" }
+        "404": { description: "TOKEN_INVALID - unknown, revoked or expired token" }
   /api/public/bookings/{id}/reschedule:
     post:
       summary: Move the visit to another start by opaque token
@@ -206,7 +211,7 @@ paths:
           schema: { type: string, format: date-time }
       responses:
         "200": { description: "Moved visit: visit facts and the typed name only, as GET /api/public/bookings/{id}" }
-        "403": { description: "TOKEN_INVALID - the token belongs to another visit" }
+        "403": { description: "TOKEN_INVALID - the token belongs to another visit (also for a visit id that does not exist), or RESCHEDULE_DISABLED - the tenant's rule forbids it; nothing is written" }
         "404": { description: "TOKEN_INVALID - unknown, revoked or expired token" }
         "409": { description: "Slot occupied or rule violation (problem+json with a machine code)" }
   /api/public/bookings/{id}/consent/withdraw:
@@ -716,6 +721,9 @@ paths:
   /api/app/metrics/definitions:
     get:
       summary: Definitions of the six metrics (owner only)
+      description: >
+        Each definition has key, title, unit, formula and minSampleSize. The unit tells how to read a metric's value:
+        RATIO is a fraction, DAYS a number of days, CURRENCY_PER_HOUR minor units of the tenant currency per hour.
       responses:
         "200": { description: Metric definitions }
         "401": { $ref: "#/components/responses/Unauthorized" }

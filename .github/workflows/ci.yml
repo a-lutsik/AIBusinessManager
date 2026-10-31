@@ -1,5 +1,5 @@
-# Cadence CI: backend (compile, ArchUnit, unit and Testcontainers ITs), frontend (typecheck, web export), production
-# compose validation, and a no-push build of the backend Docker image.
+# Cadence CI: backend (compile, ArchUnit, unit and Testcontainers ITs), frontend (lint, i18n, typecheck, web export),
+# Playwright E2E on an isolated stack, production compose validation, and a no-push build of the backend Docker image.
 #
 # Actions are pinned to the major tag of the official/first-party release (checkout, setup-java, setup-node,
 # upload-artifact @v4; gradle/actions/setup-gradle @v4; docker/setup-buildx-action @v3; docker/build-push-action @v6).
@@ -68,7 +68,7 @@ jobs:
           -Porg.gradle.java.installations.paths="$JAVA_HOME_25_X64"
 
       # Second line of defence behind AbstractTimescaleIT: the job fails when any test was skipped, when fewer than
-      # 400 test cases ran (1040 at the time of writing; lower the number only when tests were removed on purpose), or
+      # 400 test cases ran (1048 at the time of writing; lower the number only when tests were removed on purpose), or
       # when not a single integration test (class name ending in IT) executed. Gradle alone would stay green.
       - name: Test summary and gate
         if: always()
@@ -121,6 +121,93 @@ jobs:
         env:
           CI: "1"
           EXPO_NO_TELEMETRY: "1"
+
+  # Playwright against the real stack, brought up and torn down by frontend/scripts/e2e.mjs: TimescaleDB (and Keycloak
+  # for the OIDC run) in the compose project cadence-e2e, the backend through bootRun, the exported web bundle. Not a
+  # required check: it is not listed in branch protection, so a red run is visible but does not block a merge.
+  e2e:
+    name: E2E (Playwright, dev-headers and Keycloak)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      # Same JDK arrangement as the backend job: Gradle runs on 21 (JAVA_HOME), the Java 25 toolchain is announced to
+      # Gradle through the user-level gradle.properties, because e2e.mjs starts ./gradlew itself and passes no -P option.
+      - name: Set up JDK 21 (runs Gradle) and JDK 25 (toolchain)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: |
+            25
+            21
+
+      - name: Set up Gradle (wrapper distribution, dependency and build cache)
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Point Gradle at the JDK 25 toolchain
+        working-directory: ${{ github.workspace }}
+        run: |
+          test -x "$JAVA_HOME_25_X64/bin/java"
+          mkdir -p "$HOME/.gradle"
+          echo "org.gradle.java.installations.paths=$JAVA_HOME_25_X64" >> "$HOME/.gradle/gradle.properties"
+          echo "JAVA_HOME=$JAVA_HOME"
+          java -version
+          command -v docker lsof
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+
+      # Chromium only; the system libraries come with --with-deps (the runner allows sudo).
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      # e2e.mjs deletes frontend/e2e-results/ when a run starts, so each run's results are uploaded before the next one.
+      # The exported web bundles (bundle-*) are build output, not evidence, and are left out of the artifacts.
+      - name: E2E (dev-headers)
+        run: npm run e2e
+        env:
+          CI: "1"
+          EXPO_NO_TELEMETRY: "1"
+
+      - name: Upload E2E results (dev-headers)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-results
+          path: |
+            frontend/e2e-results/
+            !frontend/e2e-results/bundle-*
+          if-no-files-found: ignore
+          retention-days: 7
+
+      # Runs even when the first run failed, so one red run does not hide the result of the other.
+      - name: E2E (Keycloak login)
+        if: ${{ !cancelled() }}
+        run: npm run e2e:oidc
+        env:
+          CI: "1"
+          EXPO_NO_TELEMETRY: "1"
+
+      - name: Upload E2E results (Keycloak login)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-results-oidc
+          path: |
+            frontend/e2e-results/
+            !frontend/e2e-results/bundle-*
+          if-no-files-found: ignore
+          retention-days: 7
 
   compose:
     name: Production compose validation

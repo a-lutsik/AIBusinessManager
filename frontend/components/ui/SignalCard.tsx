@@ -1,7 +1,7 @@
 import { Text, View } from 'react-native';
 import { Button } from '@/components/ui/Button';
 import { t } from '@/src/i18n';
-import { useThemeTokens } from '@/src/theme/tokens';
+import { DISPLAY_FONT, useThemeTokens } from '@/src/theme/tokens';
 
 type Props = {
   title: string;
@@ -40,7 +40,7 @@ export function SignalCard({
     >
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
         <View style={{ width: 8, height: 8, borderRadius: radius.pill, backgroundColor: accent }} />
-        <Text style={{ fontWeight: '700', color: color.ink, fontFamily: 'Plus Jakarta Sans', flexShrink: 1 }}>
+        <Text style={{ fontWeight: '700', color: color.ink, fontFamily: DISPLAY_FONT, flexShrink: 1 }}>
           {title}
         </Text>
       </View>

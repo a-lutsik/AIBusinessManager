@@ -1,7 +1,7 @@
 import { Text, View } from 'react-native';
 import { currentLocale, formatPercent, t } from '@/src/i18n';
 import { formatMoney } from '@/src/utils/money';
-import { useThemeTokens } from '@/src/theme/tokens';
+import { DISPLAY_FONT, useThemeTokens } from '@/src/theme/tokens';
 
 type Props = {
   label: string;
@@ -27,6 +27,7 @@ export function MetricCard({ label, value, explanation, insufficientData, deltaM
 
   return (
     <View
+      testID="metric-card"
       style={{
         backgroundColor: color.surface,
         paddingVertical: space.lg,
@@ -56,7 +57,7 @@ export function MetricCard({ label, value, explanation, insufficientData, deltaM
           fontSize: 24,
           fontWeight: '700',
           color: insufficientData ? color.muted : color.ink,
-          fontFamily: 'Plus Jakarta Sans',
+          fontFamily: DISPLAY_FONT,
         }}
       >
         {display}

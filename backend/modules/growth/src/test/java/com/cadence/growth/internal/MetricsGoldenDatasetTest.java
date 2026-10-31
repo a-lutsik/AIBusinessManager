@@ -163,11 +163,11 @@ class MetricsGoldenDatasetTest {
     }
 
     private static MetricsCalculator.Result tenant() {
-        return MetricsCalculator.compute(facts(), schedule(), ZONE, WS, WE, T, null);
+        return MetricsCalculator.compute(facts(), schedule(), ZONE, "GEL", WS, WE, T, null);
     }
 
     private static MetricsCalculator.Result master1() {
-        return MetricsCalculator.compute(facts(), schedule(), ZONE, WS, WE, T, M1);
+        return MetricsCalculator.compute(facts(), schedule(), ZONE, "GEL", WS, WE, T, M1);
     }
 
     private static void assertValue(double expected, int sample, MetricView m) {
@@ -338,7 +338,7 @@ class MetricsGoldenDatasetTest {
     }
 
     private static MetricsCalculator.Result tenantWithSameDayVisits() {
-        return MetricsCalculator.compute(factsWithSameDayVisits(), schedule(), ZONE, WS, WE, T, null);
+        return MetricsCalculator.compute(factsWithSameDayVisits(), schedule(), ZONE, "GEL", WS, WE, T, null);
     }
 
     /**

@@ -8,6 +8,7 @@ import com.cadence.catalog.api.WorkingHours;
 import com.cadence.growth.api.MetricDefinitions;
 import com.cadence.growth.api.MetricView;
 
+import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -15,8 +16,10 @@ import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.Currency;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -72,8 +75,8 @@ final class MetricsCalculator {
     private MetricsCalculator() {
     }
 
-    static Result compute(List<VisitFact> allFacts, Schedule schedule, ZoneId zone, LocalDate ws, LocalDate we,
-                          Instant asOf, UUID specialistId) {
+    static Result compute(List<VisitFact> allFacts, Schedule schedule, ZoneId zone, String currencyCode, LocalDate ws,
+                          LocalDate we, Instant asOf, UUID specialistId) {
         List<VisitFact> facts = specialistId == null
                 ? allFacts
                 : allFacts.stream().filter(f -> specialistId.equals(f.specialistId())).toList();
@@ -174,8 +177,9 @@ final class MetricsCalculator {
         } else {
             double hours = minutes / 60.0;
             metrics.add(MetricView.basic(REVENUE_PER_HOUR, valueMinor / hours, (int) minutes, false,
-                    "Completed value " + valueMinor + " minor units over " + hours + " worked hours ("
-                            + completedInW.size() + " visits)", specialistId));
+                    "Completed value " + money(valueMinor, currencyCode) + "over "
+                            + String.format(Locale.ROOT, "%.1f", hours) + " worked hours (" + completedInW.size() + " visits)",
+                    specialistId));
         }
 
         // 6. CHURN_RISK
@@ -227,6 +231,25 @@ final class MetricsCalculator {
         }
 
         return new Result(metrics, churn, booked, available, noShows, due.size(), serviceHours(completedInW));
+    }
+
+    /** False for an unknown code and for a pseudo-currency (XXX, XAU): -1 fraction digits would scale an amount. */
+    static boolean hasKnownMinorUnits(String currencyCode) {
+        return fractionDigits(currencyCode) >= 0;
+    }
+
+    private static int fractionDigits(String currencyCode) {
+        try {
+            return Currency.getInstance(currencyCode).getDefaultFractionDigits();
+        } catch (IllegalArgumentException e) {
+            return -1;
+        }
+    }
+
+    /** The amount with a trailing space, or nothing for a code without known minor units: a text must not stop a recalculation. */
+    private static String money(long minor, String currencyCode) {
+        int digits = fractionDigits(currencyCode);
+        return digits < 0 ? "" : BigDecimal.valueOf(minor, digits).toPlainString() + " " + currencyCode + " ";
     }
 
     private static MetricView insufficient(String key, int sample, String explanation, UUID specialistId) {

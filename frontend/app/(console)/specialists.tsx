@@ -5,7 +5,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { Pill } from '@/components/ui/Pill';
 import { api, LUMEN_TENANT_ID, type SpecialistView } from '@/src/api/client';
 import { t } from '@/src/i18n';
-import { useThemeTokens } from '@/src/theme/tokens';
+import { DISPLAY_FONT, useThemeTokens } from '@/src/theme/tokens';
 
 export default function SpecialistsScreen() {
   const { color, space, radius } = useThemeTokens();
@@ -16,7 +16,7 @@ export default function SpecialistsScreen() {
 
   return (
     <ScrollView contentContainerStyle={{ paddingBottom: space.xxl }}>
-      <Text style={{ fontSize: 28, fontWeight: '700', marginBottom: space.lg, fontFamily: 'Plus Jakarta Sans', color: color.ink }}>
+      <Text style={{ fontSize: 28, fontWeight: '700', marginBottom: space.lg, fontFamily: DISPLAY_FONT, color: color.ink }}>
         {t('nav.specialists')}
       </Text>
       {rows.length === 0 ? <EmptyState title={t('empty.specialists')} /> : null}
@@ -38,7 +38,7 @@ export default function SpecialistsScreen() {
             >
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm, marginBottom: space.md }}>
                 <View style={{ width: 14, height: 14, borderRadius: radius.pill, backgroundColor: s.calendarColor || color.secondary }} />
-                <Text style={{ fontWeight: '700', fontSize: 16, color: color.ink, fontFamily: 'Plus Jakarta Sans', flexShrink: 1 }}>
+                <Text style={{ fontWeight: '700', fontSize: 16, color: color.ink, fontFamily: DISPLAY_FONT, flexShrink: 1 }}>
                   {s.displayName}
                 </Text>
               </View>

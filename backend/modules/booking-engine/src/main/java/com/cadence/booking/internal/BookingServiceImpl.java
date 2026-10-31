@@ -7,6 +7,7 @@ import com.cadence.booking.api.AppointmentView;
 import com.cadence.booking.api.BookingService;
 import com.cadence.booking.api.CreateBookingCommand;
 import com.cadence.booking.api.PublicBookingResult;
+import com.cadence.booking.api.PublicVisit;
 import com.cadence.catalog.api.BookingRulesView;
 import com.cadence.catalog.api.CatalogService;
 import com.cadence.catalog.api.Offering;
@@ -26,6 +27,8 @@ import com.cadence.platform.tenancy.TenantContext;
 import com.cadence.platform.tenant.TenantDirectory;
 import com.cadence.retention.api.RetentionService;
 import com.cadence.platform.jooq.tables.records.TenantRecord;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -41,6 +44,7 @@ import java.util.UUID;
 @Service
 public class BookingServiceImpl implements BookingService {
 
+    private static final Logger log = LoggerFactory.getLogger(BookingServiceImpl.class);
     private static final Duration ACCESS_TOKEN_TTL = Duration.ofDays(365);
 
     private final CatalogService catalogService;
@@ -499,36 +503,44 @@ public class BookingServiceImpl implements BookingService {
     }
 
     @Override
-    @Transactional
-    public AppointmentView cancelByAccessToken(String rawToken, boolean byClient) {
-        AppointmentRepository.TokenTarget target = requireToken(rawToken);
-        try (var ignored = TenantContext.open(target.tenantId())) {
+    @Transactional(readOnly = true)
+    public PublicVisit publicVisitByAccessToken(UUID appointmentId, String rawToken) {
+        AppointmentRepository.TokenTarget target = requireToken(appointmentId, rawToken);
+        try (TenantContext.Scope ignored = TenantContext.open(target.tenantId())) {
             AppointmentView view = appointments.find(target.appointmentId()).orElseThrow(BookingServiceImpl::tokenInvalid);
-            AppointmentStatus status = byClient ? AppointmentStatus.CANCELLED_BY_CLIENT : AppointmentStatus.CANCELLED_BY_BUSINESS;
-            return publicView(applyTransition(view.id(), status, view.note()));
+            return publicVisit(view, catalogService.rules().clientRescheduleAllowed());
         }
     }
 
     @Override
     @Transactional
-    public AppointmentView rescheduleByAccessToken(String rawToken, Instant newStart) {
-        AppointmentRepository.TokenTarget target = requireToken(rawToken);
-        try (var ignored = TenantContext.open(target.tenantId())) {
+    public PublicVisit cancelByAccessToken(UUID appointmentId, String rawToken, boolean byClient) {
+        AppointmentRepository.TokenTarget target = requireToken(appointmentId, rawToken);
+        try (TenantContext.Scope ignored = TenantContext.open(target.tenantId())) {
+            AppointmentView view = appointments.find(target.appointmentId()).orElseThrow(BookingServiceImpl::tokenInvalid);
+            AppointmentStatus status = byClient ? AppointmentStatus.CANCELLED_BY_CLIENT : AppointmentStatus.CANCELLED_BY_BUSINESS;
+            return publicVisit(applyTransition(view.id(), status, view.note()), catalogService.rules().clientRescheduleAllowed());
+        }
+    }
+
+    @Override
+    @Transactional
+    public PublicVisit rescheduleByAccessToken(UUID appointmentId, String rawToken, Instant newStart) {
+        AppointmentRepository.TokenTarget target = requireToken(appointmentId, rawToken);
+        try (TenantContext.Scope ignored = TenantContext.open(target.tenantId())) {
             BookingRulesView rules = catalogService.rules();
             if (!rules.clientRescheduleAllowed()) {
+                log.info("Client reschedule refused by the tenant rule: appointment={}", appointmentId);
                 throw DomainException.forbidden("RESCHEDULE_DISABLED", "Client reschedule is disabled for this business");
             }
-            return publicView(applyReschedule(target.appointmentId(), newStart));
+            return publicVisit(applyReschedule(target.appointmentId(), newStart), true);
         }
     }
 
     @Override
     @Transactional
     public AppointmentView withdrawConsentByAccessToken(UUID appointmentId, String rawToken) {
-        AppointmentRepository.TokenTarget target = requireToken(rawToken);
-        if (!target.appointmentId().equals(appointmentId)) {
-            throw DomainException.forbidden("TOKEN_INVALID", "Token does not match this visit");
-        }
+        AppointmentRepository.TokenTarget target = requireToken(appointmentId, rawToken);
         try (var ignored = TenantContext.open(target.tenantId())) {
             AppointmentView view = appointments.find(target.appointmentId()).orElseThrow(BookingServiceImpl::tokenInvalid);
             crmService.withdrawMarketingConsent(view.clientId(), "public-link");
@@ -560,6 +572,20 @@ public class BookingServiceImpl implements BookingService {
     /** Resolves a live token across tenants; the caller opens the returned tenant scope before tenant reads. */
     private AppointmentRepository.TokenTarget requireToken(String rawToken) {
         return appointments.resolveToken(BookingTokens.hash(rawToken)).orElseThrow(BookingServiceImpl::tokenInvalid);
+    }
+
+    private PublicVisit publicVisit(AppointmentView row, boolean rescheduleAllowed) {
+        return new PublicVisit(publicView(row), rescheduleAllowed, tenants.requireById(TenantContext.require()).getTimezone());
+    }
+
+    /** As {@link #requireToken(String)}, and the token must belong to this visit: checked before anything is written. */
+    private AppointmentRepository.TokenTarget requireToken(UUID appointmentId, String rawToken) {
+        AppointmentRepository.TokenTarget target = requireToken(rawToken);
+        if (!target.appointmentId().equals(appointmentId)) {
+            log.warn("Manage link refused: token of visit {} used for visit {}", target.appointmentId(), appointmentId);
+            throw DomainException.forbidden("TOKEN_INVALID", "Token does not match this visit");
+        }
+        return target;
     }
 
     private static DomainException tokenInvalid() {

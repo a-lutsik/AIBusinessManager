@@ -11,7 +11,7 @@ export const georgianFontSource: number = require('../../assets/fonts/NotoSansGe
 /** Georgian, Georgian Extended (Mtavruli), Georgian Supplement. */
 const GEORGIAN_UNICODE_RANGE = 'U+10A0-10FF, U+1C90-1CBF, U+2D00-2D2F';
 
-/** The families the interface sets by name; screens write `fontFamily: 'Plus Jakarta Sans'` without a fallback list. */
+/** The families the interface sets by name (`DISPLAY_FONT` in src/theme/tokens.ts for headings). */
 const FAMILIES_WITHOUT_GEORGIAN = ['Inter', 'Plus Jakarta Sans'];
 
 let installed = false;

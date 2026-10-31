@@ -2,7 +2,7 @@ import { Text, View } from 'react-native';
 import { Toggle } from '@/components/ui/Toggle';
 import type { AiSettingsView } from '@/src/api/client';
 import { currentLocale, t } from '@/src/i18n';
-import { useThemeTokens } from '@/src/theme/tokens';
+import { DISPLAY_FONT, useThemeTokens } from '@/src/theme/tokens';
 
 /** Start of the next budget period as a calendar date in the tenant's zone. */
 function resetDate(settings: AiSettingsView, timeZone: string | undefined): string {
@@ -35,7 +35,7 @@ export function AiSettingsPanel({ settings, saving, timeZone, onNotesChange }: P
         backgroundColor: color.surface,
       }}
     >
-      <Text style={{ fontWeight: '600', color: color.ink, marginBottom: space.sm, fontFamily: 'Plus Jakarta Sans' }}>
+      <Text style={{ fontWeight: '600', color: color.ink, marginBottom: space.sm, fontFamily: DISPLAY_FONT }}>
         {t('ai.settings.title')}
       </Text>
       <Text style={{ color: color.muted, fontSize: 13, marginBottom: space.md }}>

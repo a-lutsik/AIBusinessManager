@@ -65,9 +65,17 @@ public interface BookingService {
      */
     Optional<AppointmentView> findByAccessToken(String rawToken);
 
-    AppointmentView cancelByAccessToken(String rawToken, boolean byClient);
+    /**
+     * The manage page: the visit as {@link #findByAccessToken} shows it and the tenant's reschedule rule, for the page
+     * to know before the client picks a slot. Like every token method with an {@code appointmentId}: an unknown or
+     * expired token is 404, a token of another visit is {@code TOKEN_INVALID}, 403, and nothing is written.
+     */
+    PublicVisit publicVisitByAccessToken(UUID appointmentId, String rawToken);
 
-    AppointmentView rescheduleByAccessToken(String rawToken, Instant newStart);
+    PublicVisit cancelByAccessToken(UUID appointmentId, String rawToken, boolean byClient);
+
+    /** {@code RESCHEDULE_DISABLED}, 403, when the tenant's rule forbids it. */
+    PublicVisit rescheduleByAccessToken(UUID appointmentId, String rawToken, Instant newStart);
 
     /**
      * Withdraws the marketing consent of the client behind a manage link (PRODUCT_PLAN §10), audited with source

@@ -343,10 +343,10 @@ class MetricsJournalReplayIT extends AbstractTimescaleIT {
         String token = pub[0].accessToken();
         assertThat(events(publicVisit)).isEqualTo(1);
         Instant publicMove = freeSlot(m1, cut, 2, 6);
-        expectEvents(1, () -> booking.rescheduleByAccessToken(token, publicMove), publicVisit);
+        expectEvents(1, () -> booking.rescheduleByAccessToken(publicVisit, token, publicMove), publicVisit);
         expectEvents(0, () -> booking.withdrawConsentByAccessToken(publicVisit, token), publicVisit);
         expectEvents(0, () -> asOwner(() -> booking.issueAccessLink(o.id())), o.id());
-        expectEvents(1, () -> booking.cancelByAccessToken(token, true), publicVisit);
+        expectEvents(1, () -> booking.cancelByAccessToken(publicVisit, token, true), publicVisit);
         visits.add(publicVisit);
 
         // Merge K into A: one CLIENT_CHANGED per moved visit.
@@ -474,7 +474,8 @@ class MetricsJournalReplayIT extends AbstractTimescaleIT {
         Set<String> mutating = Set.of("create", "createPublic", "transition", "reschedule", "cancelByAccessToken",
                 "rescheduleByAccessToken", "reassignClient");
         Set<String> noFactChange = Set.of("moduleName", "freeSlots", "calendar", "find", "clientIdsOf", "clientHistory",
-                "findByAccessToken", "withdrawConsentByAccessToken", "ics", "icsByAccessToken", "issueAccessLink");
+                "findByAccessToken", "publicVisitByAccessToken", "withdrawConsentByAccessToken", "ics",
+                "icsByAccessToken", "issueAccessLink");
         Set<String> declared = new TreeSet<>();
         Arrays.stream(BookingService.class.getMethods()).map(Method::getName).forEach(declared::add);
         Set<String> classified = new TreeSet<>(mutating);

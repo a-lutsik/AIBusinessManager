@@ -2,7 +2,8 @@ import { Text, View } from 'react-native';
 import { Button } from '@/components/ui/Button';
 import type { DraftAction, DraftStatus, DraftType } from '@/src/api/client';
 import { currentLocale, t } from '@/src/i18n';
-import { useThemeTokens, type Palette } from '@/src/theme/tokens';
+import { DISPLAY_FONT, useThemeTokens, type Palette } from '@/src/theme/tokens';
+import { DATE_TIME_OPTIONS } from '@/src/utils/datetime';
 import { formatMoney } from '@/src/utils/money';
 
 export type DraftDecision = 'confirm' | 'reject';
@@ -52,14 +53,8 @@ function formatLocal(local: string | null | undefined): string | null {
   const match = local?.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
   if (!match) return local ?? null;
   const [year, month, day, hour, minute] = match.slice(1).map(Number);
-  return new Date(year, month - 1, day, hour, minute).toLocaleString(currentLocale(), {
-    weekday: 'short',
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  // UTC on both sides: the browser's own daylight saving change must not move a wall clock time.
+  return new Date(Date.UTC(year, month - 1, day, hour, minute)).toLocaleString(currentLocale(), { ...DATE_TIME_OPTIONS, timeZone: 'UTC' });
 }
 
 function detailRows(draft: DraftAction): [string, string | null | undefined][] {
@@ -115,6 +110,7 @@ export function DraftCard({ draft, busy, onDecide }: Props) {
 
   return (
     <View
+      testID={`draft-card-${draft.id}`}
       style={{
         marginTop: space.md,
         padding: space.md,
@@ -125,7 +121,7 @@ export function DraftCard({ draft, busy, onDecide }: Props) {
       }}
     >
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: space.sm, flexWrap: 'wrap' }}>
-        <Text style={{ fontWeight: '600', color: color.ink, fontFamily: 'Plus Jakarta Sans' }}>
+        <Text style={{ fontWeight: '600', color: color.ink, fontFamily: DISPLAY_FONT }}>
           {t(TITLE_KEYS[draft.type] ?? 'ai.draftUntitled')}
         </Text>
         <View style={{ paddingHorizontal: space.sm + 2, paddingVertical: 2, borderRadius: radius.pill, backgroundColor: `${tone}22` }}>

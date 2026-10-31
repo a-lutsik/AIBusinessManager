@@ -5,6 +5,8 @@ import com.cadence.booking.api.VisitFact;
 import com.cadence.growth.api.MetricDefinitions;
 import com.cadence.growth.api.MetricView;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -54,7 +56,7 @@ class MetricsCalculatorTest {
     }
 
     private static MetricsCalculator.Result compute(List<VisitFact> facts) {
-        return MetricsCalculator.compute(facts, schedule(), ZONE, WS, WE, T, null);
+        return MetricsCalculator.compute(facts, schedule(), ZONE, "GEL", WS, WE, T, null);
     }
 
     private static void assertInsufficient(MetricView m, int sample) {
@@ -128,7 +130,7 @@ class MetricsCalculatorTest {
         f.add(visit(6, M1, CONFIRMED, "2026-09-15T12:00:00Z", 60));
         f.add(visit(7, M1, CONFIRMED, "2026-09-16T06:00:00Z", 60));
         f.add(visit(8, M1, AppointmentStatus.PENDING, "2026-09-29T06:00:00Z", 60));
-        MetricView m = metric(MetricsCalculator.compute(f, schedule(), ZONE, WS, WE, t, null), "NO_SHOW_RATE");
+        MetricView m = metric(MetricsCalculator.compute(f, schedule(), ZONE, "GEL", WS, WE, t, null), "NO_SHOW_RATE");
         assertEquals(2.0 / 5.0, m.value(), 1e-12);
         assertEquals(5, m.sampleSize(), "a visit starting exactly at T has not started before T");
     }
@@ -140,6 +142,34 @@ class MetricsCalculatorTest {
         f.add(visit(2, M1, COMPLETED, "2026-09-03T06:00:00Z", MetricDefinitions.minSampleSize("REVENUE_PER_HOUR")));
         MetricView one = metric(compute(f), "REVENUE_PER_HOUR");
         assertEquals(8000 * 60.0, one.value(), 1e-9, "8000 minor in one minute = 480000 per hour");
+    }
+
+    /** The dashboard shows this text to the owner: money in the currency, rounded hours, no technical units. */
+    @Test
+    void revenuePerHourExplanationIsReadable() {
+        List<VisitFact> f = new ArrayList<>();
+        // 3 x 8000 minor over 3 x 467 minutes = 240.00 GEL over 23.35 hours, a duration with no short decimal form.
+        for (int i = 1; i <= 3; i++) {
+            f.add(visit(i, M1, COMPLETED, "2026-09-0" + i + "T06:00:00Z", 467));
+        }
+        assertEquals("Completed value 240.00 GEL over 23.4 worked hours (3 visits)",
+                metric(compute(f), "REVENUE_PER_HOUR").explanation());
+    }
+
+    /** A currency code without known minor units must neither stop the tenant's recalculation nor scale the amount. */
+    @ParameterizedTest
+    @ValueSource(strings = {"NOPE", "XXX", "XAU"})
+    void revenuePerHourExplanationLeavesOutAnAmountOfAnUnknownCurrency(String code) {
+        List<VisitFact> f = List.of(visit(1, M1, COMPLETED, "2026-09-03T06:00:00Z", 60));
+        MetricsCalculator.Result result = MetricsCalculator.compute(f, schedule(), ZONE, code, WS, WE, T, null);
+        assertEquals("Completed value over 1.0 worked hours (1 visits)", metric(result, "REVENUE_PER_HOUR").explanation());
+    }
+
+    @Test
+    void revenuePerHourExplanationHonoursACurrencyWithoutMinorUnits() {
+        List<VisitFact> f = List.of(visit(1, M1, COMPLETED, "2026-09-03T06:00:00Z", 60));
+        MetricsCalculator.Result result = MetricsCalculator.compute(f, schedule(), ZONE, "JPY", WS, WE, T, null);
+        assertEquals("Completed value 8000 JPY over 1.0 worked hours (1 visits)", metric(result, "REVENUE_PER_HOUR").explanation());
     }
 
     /** n clients with COMPLETED 2026-09-01 and 2026-09-21 (typical 20 days), last visit 14 days before T. */
@@ -186,10 +216,10 @@ class MetricsCalculatorTest {
     void slotUtilizationWithoutActiveSpecialistsHasNoDenominator() {
         var noOne = new MetricsCalculator.Schedule(Set.of(), Map.of(M1, List.of(weekly(M1, 1, 600, 1080))), Map.of());
         List<VisitFact> f = List.of(visit(1, M1, COMPLETED, "2026-09-07T06:00:00Z", 60));
-        assertInsufficient(metric(MetricsCalculator.compute(f, noOne, ZONE, WS, WE, T, null), "SLOT_UTILIZATION"), 0);
+        assertInsufficient(metric(MetricsCalculator.compute(f, noOne, ZONE, "GEL", WS, WE, T, null), "SLOT_UTILIZATION"), 0);
         // A slice of an inactive specialist has an empty S as well.
         var onlyM2 = new MetricsCalculator.Schedule(Set.of(M2), Map.of(M1, List.of(weekly(M1, 1, 600, 1080))), Map.of());
-        assertInsufficient(metric(MetricsCalculator.compute(f, onlyM2, ZONE, WS, WE, T, M1), "SLOT_UTILIZATION"), 0);
+        assertInsufficient(metric(MetricsCalculator.compute(f, onlyM2, ZONE, "GEL", WS, WE, T, M1), "SLOT_UTILIZATION"), 0);
     }
 
     @Test
@@ -224,14 +254,14 @@ class MetricsCalculatorTest {
         List<VisitFact> f = new ArrayList<>(oneVisitClients(10));
         f.add(visit(200, M2, COMPLETED, "2026-09-05T06:00:00Z", 60));
         assertEquals(11, metric(compute(f), "REPEAT_RATE").sampleSize());
-        assertEquals(1, metric(MetricsCalculator.compute(f, schedule(), ZONE, WS, WE, T, M2), "REPEAT_RATE").sampleSize());
+        assertEquals(1, metric(MetricsCalculator.compute(f, schedule(), ZONE, "GEL", WS, WE, T, M2), "REPEAT_RATE").sampleSize());
     }
 
     @Test
     void sameInputGivesTheSameResult() {
         LocalDate ws = LocalDate.of(2026, 9, 1);
-        var a = MetricsCalculator.compute(MetricsGoldenDatasetTest.facts(), schedule(), ZONE, ws, WE, T, null);
-        var b = MetricsCalculator.compute(MetricsGoldenDatasetTest.facts(), schedule(), ZONE, ws, WE, T, null);
+        var a = MetricsCalculator.compute(MetricsGoldenDatasetTest.facts(), schedule(), ZONE, "GEL", ws, WE, T, null);
+        var b = MetricsCalculator.compute(MetricsGoldenDatasetTest.facts(), schedule(), ZONE, "GEL", ws, WE, T, null);
         assertEquals(a.metrics(), b.metrics());
     }
 }

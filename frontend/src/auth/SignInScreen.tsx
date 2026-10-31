@@ -1,7 +1,7 @@
 import { ActivityIndicator, Text, View } from 'react-native';
 import { Button } from '@/components/ui/Button';
 import { t } from '@/src/i18n';
-import { useThemeTokens } from '@/src/theme/tokens';
+import { DISPLAY_FONT, useThemeTokens } from '@/src/theme/tokens';
 import { useAuth } from './AuthContext';
 
 /** Shown by the console group in oidc mode while there is no session. */
@@ -22,7 +22,7 @@ export function SignInScreen() {
           backgroundColor: color.surface,
         }}
       >
-        <Text style={{ fontSize: 24, fontWeight: '700', color: color.ink, fontFamily: 'Plus Jakarta Sans' }}>
+        <Text style={{ fontSize: 24, fontWeight: '700', color: color.ink, fontFamily: DISPLAY_FONT }}>
           {t('app.name')}
         </Text>
         <Text style={{ color: color.muted, lineHeight: 20 }}>{t('auth.signIn.body')}</Text>
