@@ -5,7 +5,6 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { TrustBadge } from '@/components/ui/TrustBadge';
 import {
   api,
-  LUMEN_SLUG,
   LUMEN_TENANT_ID,
   type AppointmentView,
   type SpecialistView,
@@ -13,6 +12,7 @@ import {
 import { useConsoleSession } from '@/src/auth/ConsoleSession';
 import { t } from '@/src/i18n';
 import { DISPLAY_FONT, statusColor, useThemeTokens } from '@/src/theme/tokens';
+import { rescheduleErrorText } from '@/src/utils/catalogErrors';
 import { dayKey, formatDateTime, formatLongDay, formatTime, slotWindow, startOfZoneDay, zoneDate } from '@/src/utils/datetime';
 
 function unwrapAppointment(raw: unknown): AppointmentView {
@@ -102,7 +102,7 @@ export default function CalendarScreen() {
   };
 
   const openRescheduleDialog = async () => {
-    if (!selected?.serviceId || !selected?.specialistId) {
+    if (!selected?.serviceId || !selected?.specialistId || !me?.slug) {
       setError(t('calendar.rescheduleNeedIds'));
       return;
     }
@@ -111,10 +111,11 @@ export default function CalendarScreen() {
     setSlots([]);
     try {
       const window = slotWindow(14, timeZone);
-      const next = await api.publicSlots(me?.slug ?? LUMEN_SLUG, selected.serviceId, selected.specialistId, window.from, window.to);
+      const next = await api.publicSlots(me.slug, selected.serviceId, selected.specialistId, window.from, window.to);
       setSlots(next);
     } catch (e: unknown) {
-      setError(String((e as Error).message ?? e));
+      setSlotOpen(false);
+      setError(rescheduleErrorText(e));
     } finally {
       setSlotsBusy(false);
     }
@@ -130,7 +131,7 @@ export default function CalendarScreen() {
       setSlotOpen(false);
       load();
     } catch (e: unknown) {
-      setError(String((e as Error).message ?? e));
+      setError(rescheduleErrorText(e));
     } finally {
       setSlotsBusy(false);
     }

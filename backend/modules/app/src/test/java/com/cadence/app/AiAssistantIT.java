@@ -264,6 +264,22 @@ class AiAssistantIT extends AbstractTimescaleIT {
                 .containsExactlyInAnyOrder("ai.draft.create", "ai.draft.confirm");
     }
 
+    /** A master deactivated after the draft was written: the confirmation is refused by code and the visit stays. */
+    @Test
+    void aRescheduleDraftOfADeactivatedMasterFailsByCodeAndTheVisitStays() throws Exception {
+        Person client = client();
+        AppointmentView visit = visit(client, slot(3, 20));
+        JsonNode turn = visitTurn(client, visit.serviceStart(), rescheduleDraft(slot(4, 20)));
+        UUID draftId = draftId(turn, 0);
+        as(studio.tenant(), ActorContext.system(), () -> catalog.upsertSpecialist(
+                new SpecialistView(studio.master(), studio.masterName(), null, "#0f766e", false)));
+
+        assertThat(error(call(post("/api/app/ai/drafts/" + draftId + "/confirm")), 409)).isEqualTo("SERVICE_NOT_OFFERED");
+
+        assertThat(one("select failure_code from ai_draft where id = ?", draftId)).isEqualTo("SERVICE_NOT_OFFERED");
+        assertThat(startOf(visitById(visit.id()))).isEqualTo(visit.serviceStart());
+    }
+
     /** (c) a cancel draft that is still current cancels the visit through the engine. */
     @Test
     void cancelDraftConfirmCancelsTheVisit() throws Exception {

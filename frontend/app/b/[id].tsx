@@ -7,20 +7,20 @@ import {
   api,
   API_BASE,
   ApiError,
-  LUMEN_SLUG,
   shortRef,
   type PublicVisitView,
 } from '@/src/api/client';
 import { currentLocale, t } from '@/src/i18n';
 import { DISPLAY_FONT, statusColor, tokens } from '@/src/theme/tokens';
 import { formatDateTime, slotWindow } from '@/src/utils/datetime';
+import { rescheduleErrorText } from '@/src/utils/catalogErrors';
 import { formatMoney } from '@/src/utils/money';
 
 export default function BookingLinkScreen() {
-  const { id, token, slug: slugParam } = useLocalSearchParams<{
+  // A `slug` in the URL of an older link is simply not read: the tenant comes with the visit.
+  const { id, token } = useLocalSearchParams<{
     id: string;
     token?: string;
-    slug?: string;
   }>();
   const [visit, setVisit] = useState<PublicVisitView | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -31,7 +31,6 @@ export default function BookingLinkScreen() {
   const [rescheduleUnavailable, setRescheduleUnavailable] = useState(false);
   const [rescheduleDisabled, setRescheduleDisabled] = useState(false);
 
-  const slug = (typeof slugParam === 'string' && slugParam) || LUMEN_SLUG;
   const ref = shortRef(typeof id === 'string' ? id : undefined);
 
   useEffect(() => {
@@ -60,20 +59,20 @@ export default function BookingLinkScreen() {
       setRescheduleDisabled(true);
       return;
     }
-    if (!visit?.serviceId || !visit?.specialistId) {
+    if (!visit?.serviceId || !visit?.specialistId || !visit?.tenantSlug) {
       setSlotsError(t('visit.rescheduleNoSlots'));
       return;
     }
     const range = slotWindow(14, visit.timezone);
     try {
-      const next = await api.publicSlots(slug, visit.serviceId, visit.specialistId, range.from, range.to);
+      const next = await api.publicSlots(visit.tenantSlug, visit.serviceId, visit.specialistId, range.from, range.to);
       setSlots(next);
       if (next.length === 0) {
         setSlotsError(t('empty.slots'));
       }
     } catch (e: unknown) {
       setSlots([]);
-      setSlotsError(String((e as Error).message ?? e));
+      setSlotsError(rescheduleErrorText(e));
     }
   };
 
@@ -96,7 +95,7 @@ export default function BookingLinkScreen() {
         setRescheduleDisabled(true);
         setVisit((current) => current && { ...current, clientRescheduleAllowed: false });
       } else {
-        setError(String((e as Error).message ?? e));
+        setError(rescheduleErrorText(e));
       }
     } finally {
       setBusy(false);

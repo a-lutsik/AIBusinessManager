@@ -10,8 +10,10 @@ import com.cadence.catalog.api.WeeklyInterval;
 import com.cadence.platform.persistence.TenantAwareDsl;
 import com.cadence.platform.tenancy.TenantContext;
 import com.cadence.platform.time.Utc;
+import org.jooq.Condition;
 import org.jooq.DSLContext;
 import org.jooq.Record;
+import org.jooq.impl.DSL;
 import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
@@ -112,10 +114,29 @@ class CatalogRepository {
                 .onConflict(SPECIALIST.ID)
                 .doUpdate()
                 .set(SPECIALIST.DISPLAY_NAME, specialist.displayName())
-                .set(SPECIALIST.KEYCLOAK_USER_ID, specialist.keycloakUserId())
+                // Null keeps the link: only the operator links a sign-in, and an edit form must not erase it.
+                .set(SPECIALIST.KEYCLOAK_USER_ID, DSL.coalesce(DSL.val(specialist.keycloakUserId(), SPECIALIST.KEYCLOAK_USER_ID), SPECIALIST.KEYCLOAK_USER_ID))
                 .set(SPECIALIST.CALENDAR_COLOR, specialist.calendarColor())
                 .set(SPECIALIST.ACTIVE, specialist.active())
                 .execute();
+    }
+
+    int removeKeycloakLink(UUID specialistId) {
+        return dsl.update(SPECIALIST)
+                .setNull(SPECIALIST.KEYCLOAK_USER_ID)
+                .where(TenantAwareDsl.tenantEquals(SPECIALIST.TENANT_ID)
+                        .and(SPECIALIST.ID.eq(specialistId))
+                        .and(SPECIALIST.KEYCLOAK_USER_ID.isNotNull()))
+                .execute();
+    }
+
+    /** Takes the row lock of the specialist; false when there is no such specialist in this tenant. */
+    boolean lockSpecialist(UUID specialistId) {
+        return dsl.select(SPECIALIST.ID).from(SPECIALIST)
+                .where(TenantAwareDsl.tenantEquals(SPECIALIST.TENANT_ID).and(SPECIALIST.ID.eq(specialistId)))
+                .forUpdate()
+                .fetchOptional()
+                .isPresent();
     }
 
     List<MasterServiceView> listMatrix(UUID specialistId) {
@@ -155,7 +176,10 @@ class CatalogRepository {
                         .and(MASTER_SERVICE.SERVICE_ID.eq(serviceId)))
                 .fetchOptional(this::toMatrix);
         Optional<ServiceView> service = findService(serviceId);
-        if (matrix.isEmpty() || service.isEmpty()) {
+        boolean specialistActive = dsl.fetchExists(SPECIALIST, TenantAwareDsl.tenantEquals(SPECIALIST.TENANT_ID)
+                .and(SPECIALIST.ID.eq(specialistId))
+                .and(SPECIALIST.ACTIVE.isTrue()));
+        if (matrix.isEmpty() || service.isEmpty() || !specialistActive) {
             return Optional.empty();
         }
         return Optional.of(toOffering(matrix.get(), service.get()));
@@ -169,7 +193,9 @@ class CatalogRepository {
         return dsl.selectFrom(MASTER_SERVICE)
                 .where(TenantAwareDsl.tenantEquals(MASTER_SERVICE.TENANT_ID)
                         .and(MASTER_SERVICE.SERVICE_ID.eq(serviceId))
-                        .and(MASTER_SERVICE.OFFERED.isTrue()))
+                        .and(MASTER_SERVICE.OFFERED.isTrue())
+                        .and(MASTER_SERVICE.SPECIALIST_ID.in(dsl.select(SPECIALIST.ID).from(SPECIALIST)
+                                .where(TenantAwareDsl.tenantEquals(SPECIALIST.TENANT_ID).and(SPECIALIST.ACTIVE.isTrue())))))
                 .fetch(this::toMatrix)
                 .stream()
                 .filter(MasterServiceView::offered)
@@ -211,7 +237,8 @@ class CatalogRepository {
                 .execute();
         for (WeeklyInterval interval : intervals) {
             dsl.insertInto(WEEKLY_SCHEDULE)
-                    .set(WEEKLY_SCHEDULE.ID, interval.id() == null ? UUID.randomUUID() : interval.id())
+                    // Always a new id: one sent by the caller could only run into a row it does not own.
+                    .set(WEEKLY_SCHEDULE.ID, UUID.randomUUID())
                     .set(WEEKLY_SCHEDULE.TENANT_ID, tenantId)
                     .set(WEEKLY_SCHEDULE.SPECIALIST_ID, specialistId)
                     .set(WEEKLY_SCHEDULE.WEEKDAY, interval.weekday())
@@ -257,11 +284,34 @@ class CatalogRepository {
                 .set(SCHEDULE_EXCEPTION.NOTE, exception.note())
                 .onConflict(SCHEDULE_EXCEPTION.ID)
                 .doUpdate()
+                .set(SCHEDULE_EXCEPTION.EXCEPTION_DATE, exception.date())
                 .set(SCHEDULE_EXCEPTION.KIND, exception.kind())
                 .set(SCHEDULE_EXCEPTION.START_MINUTE, exception.startMinute())
                 .set(SCHEDULE_EXCEPTION.END_MINUTE, exception.endMinute())
                 .set(SCHEDULE_EXCEPTION.NOTE, exception.note())
                 .execute();
+    }
+
+    Optional<ScheduleExceptionView> findException(UUID specialistId, UUID id) {
+        return dsl.selectFrom(SCHEDULE_EXCEPTION).where(exceptionOf(specialistId, id)).fetchOptional(r -> new ScheduleExceptionView(
+                r.get(SCHEDULE_EXCEPTION.ID),
+                r.get(SCHEDULE_EXCEPTION.SPECIALIST_ID),
+                r.get(SCHEDULE_EXCEPTION.EXCEPTION_DATE),
+                r.get(SCHEDULE_EXCEPTION.KIND),
+                r.get(SCHEDULE_EXCEPTION.START_MINUTE),
+                r.get(SCHEDULE_EXCEPTION.END_MINUTE),
+                r.get(SCHEDULE_EXCEPTION.NOTE)
+        ));
+    }
+
+    int deleteException(UUID specialistId, UUID id) {
+        return dsl.deleteFrom(SCHEDULE_EXCEPTION).where(exceptionOf(specialistId, id)).execute();
+    }
+
+    private static Condition exceptionOf(UUID specialistId, UUID id) {
+        return TenantAwareDsl.tenantEquals(SCHEDULE_EXCEPTION.TENANT_ID)
+                .and(SCHEDULE_EXCEPTION.SPECIALIST_ID.eq(specialistId))
+                .and(SCHEDULE_EXCEPTION.ID.eq(id));
     }
 
     Optional<BookingRulesView> rules() {

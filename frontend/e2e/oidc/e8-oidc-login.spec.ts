@@ -99,6 +99,16 @@ test('MASTER who asked for the calendar gets the calendar, not an owner-only pag
   await expect(page.getByText('The AI assistant is available to the owner only.')).toHaveCount(0);
 });
 
+test('a sign-in with no specialist behind it says why and can sign out', async ({ page }) => {
+  await page.route('**/api/app/me', (route) => route.fulfill({ status: 403, json: { code: 'SPECIALIST_UNMAPPED' } }));
+  await page.goto('/dashboard');
+  await signInAs(page, NINO);
+  const notice = page.getByTestId('profile-problem');
+  await expect(notice).toContainText('This sign-in is not linked to a specialist.');
+  await notice.getByRole('button', { name: 'Sign out' }).click();
+  await expect(page.getByRole('button', SIGN_IN)).toBeVisible();
+});
+
 test('MASTER signs in and gets the master console: three menu items, role MASTER from /api/app/me', async ({ page }) => {
   await page.goto('/dashboard');
   const me = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/app/me');

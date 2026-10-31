@@ -167,6 +167,9 @@ class MasterApiExposureIT extends AbstractTimescaleIT {
         m.put("/api/app/specialists/{id}/schedule", List.of(
                 new Sample("/api/app/specialists/" + DemoIds.NINO + "/schedule", 200),
                 new Sample("/api/app/specialists/" + DemoIds.ANNA + "/schedule", 403)));
+        m.put("/api/app/specialists/{id}/exceptions", List.of(
+                new Sample("/api/app/specialists/" + DemoIds.NINO + "/exceptions", 200),
+                new Sample("/api/app/specialists/" + DemoIds.ANNA + "/exceptions", 403)));
         m.put("/api/app/rules", List.of(new Sample("/api/app/rules", 403)));
         m.put("/api/app/calendar", List.of(
                 new Sample("/api/app/calendar?from=" + from + "&to=" + to, 200),

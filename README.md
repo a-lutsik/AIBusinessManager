@@ -371,7 +371,7 @@ console, or wipe `keycloak_db_data` on a fresh install).
 ### First owner user
 
 The seed is off, so a tenant and its first user are created by hand (no onboarding API for them; the catalog goes through the
-owner API, see "Fill the catalog" below):
+console, see "Fill the catalog" below):
 
 1. Create the tenant as the schema owner:
 
@@ -392,29 +392,42 @@ owner API, see "Fill the catalog" below):
 5. Replace the bootstrap admin with a named admin and a strong password; remove `KC_BOOTSTRAP_ADMIN_*` from `.env.prod`
    afterwards if you like (it is read only on the first start).
 
-### Fill the catalog (owner API)
+### Fill the catalog
 
-The console cannot edit services, masters, the matrix or schedules yet (TD-68); the API can. With the owner's bearer token
-(see the smoke check below for how to get one), `API` is the app origin. `id: null` creates, the response carries the new `id`.
-Order matters: service and master first, then the matrix (needs both ids), then the schedule. Send `color`/`calendarColor`
-always (`#rrggbb`): the database rejects `null`. Money is in minor units (`priceMinor: 8000` is 80.00).
+Sign in to the console as the owner (`<CADENCE_WEB_ORIGIN>`):
+
+1. **Services**: add each service with its duration, price (in the tenant's currency), buffers and color.
+2. **Specialists**: add the masters, then open a master's card.
+3. On the master's page: **Edit** a service in the matrix and switch on "Offers this service" (empty fields use the service's
+   values), fill the **weekly schedule** (local time, `HH:MM`) and save it, add **exceptions** for days off and changed hours.
+4. Open `<CADENCE_WEB_ORIGIN>/book/<slug>`: the service is listed and has free slots.
+
+Nothing is deleted: an inactive service or master leaves the booking page, and their visits stay. The visits of an inactive master
+can only be cancelled, not moved, and the master loses access to the console (403 `SPECIALIST_INACTIVE`) until reactivated; disabling
+the user in Keycloak remains the operator's step. Booking rules are on their own screen. A refused value is explained on the form,
+with its code. Catalog changes are recorded in `audit_log`.
+
+The one step the console does not do is linking a master to a sign-in: `keycloakUserId` is the Keycloak user's id (the JWT `sub`)
+and is set by the operator through the owner API; `null`, which is what the console sends, keeps the stored link, and
+`DELETE $API/api/app/specialists/$SPECIALIST_ID/keycloak-link` removes it. One sign-in links to one master of a tenant.
+Removing the link only ends the sign-in found by the token's `sub`: a token with the `specialist_id` attribute keeps working. To
+revoke access for certain, deactivate the master (403 `SPECIALIST_INACTIVE`) or disable the user in Keycloak.
+The same API suits scripted onboarding. With the owner's bearer token (see the smoke check below for how to get one), `API` is the
+app origin; `id: null` creates, the response carries the new `id`, money is in minor units (`priceMinor: 8000` is 80.00):
 
 ```bash
 H=(-H "Authorization: Bearer $OWNER_TOKEN" -H "Content-Type: application/json")
 curl -sS -X PUT "$API/api/app/services" "${H[@]}" -d '{"id":null,"name":"Haircut","description":null,"durationMinutes":60,"priceMinor":8000,"bufferBeforeMinutes":0,"bufferAfterMinutes":10,"color":"#0f766e","active":true,"publicVisible":true}'
 curl -sS -X PUT "$API/api/app/specialists" "${H[@]}" -d '{"id":null,"displayName":"Nino","keycloakUserId":null,"calendarColor":"#7c3aed","active":true}'
 # $SERVICE_ID and $SPECIALIST_ID are the "id" values from the two responses
-curl -sS -X PUT "$API/api/app/specialists/$SPECIALIST_ID/matrix" "${H[@]}" -d '{"id":null,"serviceId":"'$SERVICE_ID'","offered":true,"durationMinutesOverride":null,"priceMinorOverride":null,"bufferBeforeMinutesOverride":null,"bufferAfterMinutesOverride":null}'
+curl -sS -X PUT "$API/api/app/specialists/$SPECIALIST_ID/matrix" "${H[@]}" -d '{"serviceId":"'$SERVICE_ID'","offered":true,"durationMinutesOverride":null,"priceMinorOverride":null,"bufferBeforeMinutesOverride":null,"bufferAfterMinutesOverride":null}'
 # the whole weekly schedule is replaced; weekday 1=Mon..7=Sun, minutes from midnight (600 = 10:00, end exclusive)
 curl -sS -X PUT "$API/api/app/specialists/$SPECIALIST_ID/schedule" "${H[@]}" -d '[{"id":null,"weekday":1,"startMinute":600,"endMinute":1140},{"id":null,"weekday":2,"startMinute":600,"endMinute":1140}]'
-# optional: a day off (kind DAY_OFF) or changed hours (kind SHIFT with startMinute/endMinute)
-curl -sS -X PUT "$API/api/app/specialists/$SPECIALIST_ID/exceptions" "${H[@]}" -d '{"id":null,"date":"2026-12-31","kind":"DAY_OFF","startMinute":null,"endMinute":null,"note":"Holiday"}'
+# a day off (kind DAY_OFF) or changed hours (kind SHIFT with startMinute/endMinute)
+curl -sS -X PUT "$API/api/app/specialists/$SPECIALIST_ID/exceptions" "${H[@]}" -d '{"id":null,"date":"2031-12-31","kind":"DAY_OFF","startMinute":null,"endMinute":null,"note":"Holiday"}'
 ```
 
-`keycloakUserId` of a master is the Keycloak user's id (the JWT `sub`); it links the sign-in to the specialist. Booking rules
-have defaults; change them with `PUT /api/app/rules` (all nine fields, see `openapi.yaml`). Check: `GET $API/api/public/tenants/<slug>`
-answers with the tenant, `GET $API/api/public/tenants/<slug>/services` lists the service, and `<CADENCE_WEB_ORIGIN>/book/<slug>`
-shows it with free slots.
+All rules and error codes are in `openapi.yaml`.
 
 ### Smoke check of a deployment
 

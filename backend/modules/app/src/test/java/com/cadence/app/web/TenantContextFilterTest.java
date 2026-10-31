@@ -28,6 +28,8 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class TenantContextFilterTest {
@@ -161,6 +163,19 @@ class TenantContextFilterTest {
 
         assertThat(r.actor.role()).isEqualTo(ActorContext.Role.MASTER);
         assertThat(r.actor.specialistId()).isEqualTo(NINO);
+    }
+
+    @Test
+    void anInactiveSpecialistFoundByTheSubjectIsNotLookedUpAgain() throws Exception {
+        authenticate(jwt(LUMEN.toString(), List.of("MASTER"), null));
+        when(catalog.findSpecialistByKeycloakUserId("user-1"))
+                .thenReturn(Optional.of(new SpecialistView(NINO, "Nino", "user-1", "#fff", false)));
+
+        Result r = run(jwtFilter(), appRequest());
+
+        assertProblem(r, 403, "SPECIALIST_INACTIVE");
+        assertThat(r.chainCalled).isFalse();
+        verify(catalog, never()).findSpecialist(NINO);
     }
 
     @Test

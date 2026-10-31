@@ -24,6 +24,9 @@ public interface CatalogService {
 
     SpecialistView upsertSpecialist(SpecialistView specialist);
 
+    /** Removes the sign-in link of a specialist, if there is one. */
+    void removeKeycloakLink(UUID specialistId);
+
     List<MasterServiceView> listMatrix(UUID specialistId);
 
     /** All catalog services joined with matrix overrides for a specialist. */
@@ -44,6 +47,8 @@ public interface CatalogService {
     List<ScheduleExceptionView> exceptions(UUID specialistId, LocalDate from, LocalDate to);
 
     ScheduleExceptionView upsertException(ScheduleExceptionView exception);
+
+    void deleteException(UUID specialistId, UUID exceptionId);
 
     BookingRulesView rules();
 

@@ -96,6 +96,7 @@ CREATE TABLE specialist (
 );
 
 CREATE INDEX specialist_tenant_idx ON specialist (tenant_id);
+CREATE UNIQUE INDEX specialist_keycloak_user_uq ON specialist (tenant_id, keycloak_user_id) WHERE keycloak_user_id IS NOT NULL;
 
 CREATE TABLE master_service (
     id                              UUID NOT NULL,

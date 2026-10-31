@@ -575,7 +575,8 @@ public class BookingServiceImpl implements BookingService {
     }
 
     private PublicVisit publicVisit(AppointmentView row, boolean rescheduleAllowed) {
-        return new PublicVisit(publicView(row), rescheduleAllowed, tenants.requireById(TenantContext.require()).getTimezone());
+        TenantRecord tenant = tenants.requireById(TenantContext.require());
+        return new PublicVisit(publicView(row), rescheduleAllowed, tenant.getTimezone(), tenant.getSlug());
     }
 
     /** As {@link #requireToken(String)}, and the token must belong to this visit: checked before anything is written. */

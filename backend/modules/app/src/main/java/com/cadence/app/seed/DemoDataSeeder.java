@@ -118,7 +118,7 @@ public class DemoDataSeeder implements ApplicationRunner {
             weekdays(DemoIds.ANNA);
             weekdays(DemoIds.ELENA);
             catalog.upsertException(new ScheduleExceptionView(
-                    UUID.randomUUID(), DemoIds.NINO, LocalDate.now().plusDays(10), "DAY_OFF", null, null, "Training day"
+                    null, DemoIds.NINO, LocalDate.now().plusDays(10), "DAY_OFF", null, null, "Training day"
             ));
             List<ClientView> clients = new ArrayList<>();
             for (int i = 1; i <= 40; i++) {

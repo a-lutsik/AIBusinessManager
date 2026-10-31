@@ -39,7 +39,7 @@ export type BookingRulesView = {
 export type ServiceView = {
   id: string;
   name: string;
-  description?: string;
+  description?: string | null;
   durationMinutes: number;
   priceMinor: number;
   bufferBeforeMinutes?: number;
@@ -52,7 +52,7 @@ export type ServiceView = {
 export type SpecialistView = {
   id: string;
   displayName: string;
-  keycloakUserId?: string;
+  keycloakUserId?: string | null;
   calendarColor?: string;
   active?: boolean;
 };
@@ -60,6 +60,7 @@ export type SpecialistView = {
 /** Current MasterServiceView shape; enriched MatrixRowView fields are optional until BE lands. */
 export type MatrixRowView = {
   id?: string;
+  matrixId?: string | null;
   specialistId?: string;
   serviceId: string;
   offered: boolean;
@@ -76,6 +77,31 @@ export type MatrixRowView = {
   defaultBufferBeforeMinutes?: number;
   defaultBufferAfterMinutes?: number;
   service?: Partial<ServiceView>;
+};
+
+export type WeeklyInterval = { weekday: number; startMinute: number; endMinute: number };
+
+export type ScheduleExceptionKind = 'DAY_OFF' | 'SHIFT';
+
+export type ScheduleExceptionView = {
+  id: string;
+  date: string;
+  kind: ScheduleExceptionKind;
+  startMinute?: number | null;
+  endMinute?: number | null;
+  note?: string | null;
+};
+
+/** What a form sends: an id that is null creates. */
+export type New<T extends { id: string }> = Omit<T, 'id'> & { id: string | null };
+
+export type MatrixRowBody = {
+  serviceId: string;
+  offered: boolean;
+  durationMinutesOverride: number | null;
+  priceMinorOverride: number | null;
+  bufferBeforeMinutesOverride: number | null;
+  bufferAfterMinutesOverride: number | null;
 };
 
 export type MetricView = {
@@ -181,6 +207,8 @@ export type PublicVisitView = {
   clientRescheduleAllowed?: boolean;
   /** The tenant's IANA zone: times of the visit and its slots are shown in it. */
   timezone?: string;
+  /** Where the page asks for reschedule slots. */
+  tenantSlug?: string;
 };
 
 /**
@@ -315,6 +343,15 @@ export function shortRef(id: string | undefined | null): string {
   return hex.slice(-6).toUpperCase();
 }
 
+/** The API refuses this actor as such, whatever the request: the session has to show why instead of each screen failing. */
+const SESSION_REFUSALS: readonly string[] = ['SPECIALIST_INACTIVE', 'SPECIALIST_UNMAPPED'];
+
+let sessionRefusalListener: ((code: string) => void) | null = null;
+
+export function setSessionRefusalListener(listener: ((code: string) => void) | null) {
+  sessionRefusalListener = listener;
+}
+
 async function request<T>(path: string, init: RequestInit = {}, tenantId?: string): Promise<T> {
   const oidc = AUTH_MODE === 'oidc';
   const headers: Record<string, string> = {
@@ -369,6 +406,9 @@ async function request<T>(path: string, init: RequestInit = {}, tenantId?: strin
     }
     const code = typeof problem.code === 'string' ? problem.code : undefined;
     const detail = typeof problem.detail === 'string' ? problem.detail : undefined;
+    if (code && SESSION_REFUSALS.includes(code) && path.startsWith('/api/app/')) {
+      sessionRefusalListener?.(code);
+    }
     throw new ApiError(res.status, code, detail, detail || text || res.statusText);
   }
   if (res.headers.get('content-type')?.includes('text/calendar')) {
@@ -445,7 +485,11 @@ export const api = {
       tenantId
     ),
   services: (tenantId: string) => request<ServiceView[]>('/api/app/services', {}, tenantId),
+  saveService: (tenantId: string, body: New<ServiceView>) =>
+    request<ServiceView>('/api/app/services', { method: 'PUT', body: JSON.stringify(body) }, tenantId),
   specialists: (tenantId: string) => request<SpecialistView[]>('/api/app/specialists', {}, tenantId),
+  saveSpecialist: (tenantId: string, body: New<SpecialistView>) =>
+    request<SpecialistView>('/api/app/specialists', { method: 'PUT', body: JSON.stringify(body) }, tenantId),
   clients: (tenantId: string, q = '') =>
     request<unknown[]>(`/api/app/clients?q=${encodeURIComponent(q)}`, {}, tenantId),
   client: (tenantId: string, id: string) => request<unknown>(`/api/app/clients/${id}`, {}, tenantId),
@@ -457,6 +501,18 @@ export const api = {
     request<BookingRulesView>('/api/app/rules', { method: 'PUT', body: JSON.stringify(body) }, tenantId),
   matrix: (tenantId: string, specialistId: string) =>
     request<MatrixRowView[]>(`/api/app/specialists/${specialistId}/matrix`, {}, tenantId),
+  saveMatrixRow: (tenantId: string, specialistId: string, body: MatrixRowBody) =>
+    request<unknown>(`/api/app/specialists/${specialistId}/matrix`, { method: 'PUT', body: JSON.stringify(body) }, tenantId),
+  schedule: (tenantId: string, specialistId: string) =>
+    request<WeeklyInterval[]>(`/api/app/specialists/${specialistId}/schedule`, {}, tenantId),
+  saveSchedule: (tenantId: string, specialistId: string, body: WeeklyInterval[]) =>
+    request<WeeklyInterval[]>(`/api/app/specialists/${specialistId}/schedule`, { method: 'PUT', body: JSON.stringify(body) }, tenantId),
+  scheduleExceptions: (tenantId: string, specialistId: string, from: string) =>
+    request<ScheduleExceptionView[]>(`/api/app/specialists/${specialistId}/exceptions?from=${from}`, {}, tenantId),
+  saveScheduleException: (tenantId: string, specialistId: string, body: New<ScheduleExceptionView>) =>
+    request<ScheduleExceptionView>(`/api/app/specialists/${specialistId}/exceptions`, { method: 'PUT', body: JSON.stringify(body) }, tenantId),
+  deleteScheduleException: (tenantId: string, specialistId: string, id: string) =>
+    request<void>(`/api/app/specialists/${specialistId}/exceptions/${id}`, { method: 'DELETE' }, tenantId),
   tasks: (tenantId: string) => request<OwnerTaskView[]>('/api/app/tasks', {}, tenantId),
   /** Issues a fresh manage-link token for the appointment (new token on every call). */
   issueAccessLink: (tenantId: string, appointmentId: string) =>
@@ -489,5 +545,5 @@ export const api = {
     request<AiSettingsView>('/api/app/ai/settings', { method: 'PUT', body: JSON.stringify({ notesToLlm }) }, tenantId),
 };
 
+/** dev-headers only: `request` sends it as X-Tenant-Id; with oidc the tenant comes from the token. */
 export const LUMEN_TENANT_ID = '00000000-0000-4000-8000-000000000001';
-export const LUMEN_SLUG = 'lumen-studio';

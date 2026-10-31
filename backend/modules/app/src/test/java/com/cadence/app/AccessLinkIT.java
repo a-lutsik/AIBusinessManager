@@ -249,7 +249,8 @@ class AccessLinkIT extends AbstractTimescaleIT {
         mvc.perform(get("/api/public/bookings/" + booking.id()).param("token", booking.token()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.clientRescheduleAllowed", is(true)))
-                .andExpect(jsonPath("$.timezone", is("Asia/Tbilisi")));
+                .andExpect(jsonPath("$.timezone", is("Asia/Tbilisi")))
+                .andExpect(jsonPath("$.tenantSlug", is("lumen-studio")));
 
         setClientRescheduleAllowed(false);
         try {

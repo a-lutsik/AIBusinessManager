@@ -182,14 +182,14 @@ class MetricsJournalReplayIT extends AbstractTimescaleIT {
             // the rule of WorkingHours.appliedException, mirrored by the replay SQL.
             LocalDate monthStart = LocalDate.ofInstant(clock.instant(), zone).withDayOfMonth(1);
             LocalDate previous = monthStart.minusMonths(1);
-            exception(m2, previous.withDayOfMonth(3), "TRAINING", null, null);
+            legacyException(m2, previous.withDayOfMonth(3), "TRAINING", null, null);
             exception(m2, previous.withDayOfMonth(3), "DAY_OFF", null, null);
             exception(m2, previous.withDayOfMonth(3), "SHIFT", 600, 720);
             exception(m2, previous.withDayOfMonth(4), "SHIFT", 660, 900);
             exception(m2, previous.withDayOfMonth(4), "SHIFT", 600, 960);
-            exception(m2, previous.withDayOfMonth(4), "SHIFT", null, 700);
+            legacyException(m2, previous.withDayOfMonth(4), "SHIFT", null, 700);
             exception(m2, monthStart, "DAY_OFF", null, null);
-            exception(m1, monthStart, "TRAINING", null, null);
+            legacyException(m1, monthStart, "TRAINING", null, null);
             exception(m1, monthStart, "SHIFT", 0, 600);
             return null;
         });
@@ -197,6 +197,26 @@ class MetricsJournalReplayIT extends AbstractTimescaleIT {
 
     private void exception(UUID master, LocalDate date, String kind, Integer start, Integer end) {
         catalog.upsertException(new ScheduleExceptionView(null, master, date, kind, start, end, kind));
+    }
+
+    /** A row the catalog no longer accepts but older data can hold (TD-31): the rule has to ignore it, so it goes in by SQL. */
+    private void legacyException(UUID master, LocalDate date, String kind, Integer start, Integer end) {
+        try (Connection c = DriverManager.getConnection(DB.getJdbcUrl(), OWNER_USER, OWNER_PASSWORD);
+             PreparedStatement ps = c.prepareStatement("""
+                     insert into schedule_exception (id, tenant_id, specialist_id, exception_date, kind, start_minute, end_minute, note)
+                     values (?, ?, ?, ?, ?, ?, ?, ?)""")) {
+            ps.setObject(1, UUID.randomUUID());
+            ps.setObject(2, tenant);
+            ps.setObject(3, master);
+            ps.setObject(4, date);
+            ps.setString(5, kind);
+            ps.setObject(6, start);
+            ps.setObject(7, end);
+            ps.setString(8, kind);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     private String nextPhone() {

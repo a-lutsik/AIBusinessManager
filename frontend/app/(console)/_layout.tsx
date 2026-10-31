@@ -5,6 +5,7 @@ import { MaterialIcon } from '@/components/ui/MaterialIcon';
 import { api, LUMEN_TENANT_ID } from '@/src/api/client';
 import { useAuth } from '@/src/auth/AuthContext';
 import { ConsoleSessionProvider, useConsoleSession } from '@/src/auth/ConsoleSession';
+import { isSessionRefusal, ProfileProblemNotice } from '@/src/auth/ProfileProblemNotice';
 import { AuthLoading, SignInScreen } from '@/src/auth/SignInScreen';
 import { setLocale, t, useLocale, type AppLocale } from '@/src/i18n';
 import { DISPLAY_FONT, useThemeTokens } from '@/src/theme/tokens';
@@ -52,7 +53,7 @@ export default function ConsoleLayout() {
 
 function ConsoleShell() {
   const { mode, signOut } = useAuth();
-  const { me, role: sessionRole, switchRole } = useConsoleSession();
+  const { me, role: sessionRole, profileProblem, retryProfile, switchRole } = useConsoleSession();
   const role = sessionRole ?? (mode === 'dev-headers' ? 'OWNER' : null);
   const path = usePathname();
   const { width } = useWindowDimensions();
@@ -68,7 +69,8 @@ function ConsoleShell() {
   const switchLocale = (locale: AppLocale) => setLocale(locale);
 
   const visibleNav = NAV.filter((item) => role === 'OWNER' || !item.ownerOnly);
-  const activeItem = visibleNav.find((item) => path.startsWith(item.href));
+  // The title of the page, also of one a master reaches by a link and has no menu item for.
+  const activeItem = NAV.find((item) => path.startsWith(item.href));
   const activeLabelKey =
     role === 'MASTER' && activeItem?.masterLabelKey ? activeItem.masterLabelKey : activeItem?.key ?? 'nav.dashboard';
   const tenantName = me?.displayName ?? '…';
@@ -312,7 +314,8 @@ function ConsoleShell() {
         </View>
 
         <View style={{ flex: 1, padding: space.xl }}>
-          <Slot />
+          {profileProblem ? <ProfileProblemNotice problem={profileProblem} onRetry={retryProfile} onSignOut={mode === 'oidc' ? signOut : undefined} /> : null}
+          {isSessionRefusal(profileProblem) ? null : <Slot />}
         </View>
       </View>
     </View>

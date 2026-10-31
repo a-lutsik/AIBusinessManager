@@ -170,7 +170,7 @@ paths:
         serviceNameSnapshot, priceSnapshot, currencyCode), enteredName, the name typed at booking (for rows from
         before stage 03 that held "typed / stored", everything from the first " / " is dropped), and
         clientRescheduleAllowed, the tenant's rule (when false, the reschedule route answers 403 RESCHEDULE_DISABLED),
-        and timezone, the tenant's IANA zone.
+        timezone, the tenant's IANA zone, and tenantSlug, the slug under which the page asks for reschedule slots.
         Never the stored client name, phone or trust. The status still differs for a returning client when new clients
         need confirmation (accepted, rate-limited). The cancel and reschedule routes answer the same way.
       responses:
@@ -261,6 +261,7 @@ paths:
       responses:
         "200": { description: Actor + tenant }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "SPECIALIST_INACTIVE - a master whose specialist is inactive; every /api/app route answers so" }
   /api/app/dashboard:
     get:
       summary: Owner/master dashboard
@@ -288,7 +289,8 @@ paths:
           application/json:
             schema:
               type: object
-              description: Service; an id that is null creates, a known id updates
+              required: [name, durationMinutes, priceMinor, bufferBeforeMinutes, bufferAfterMinutes, color, active, publicVisible]
+              description: "Service; an id that is null creates, a known id updates, any other id answers 404. name up to 256 characters, description up to 2048, durationMinutes 1..1440, priceMinor >= 0, buffers 0..1440, color #rrggbb"
               properties:
                 id: { type: string, format: uuid, nullable: true }
                 name: { type: string }
@@ -302,8 +304,10 @@ paths:
                 publicVisible: { type: boolean }
       responses:
         "200": { description: Saved service }
+        "400": { description: "INVALID_NAME, INVALID_DESCRIPTION, INVALID_DURATION, INVALID_PRICE, INVALID_BUFFER, INVALID_COLOR, INVALID_REQUEST_BODY" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
+        "404": { description: "SERVICE_NOT_FOUND - the id is not a service of this tenant" }
   /api/app/specialists:
     get:
       summary: Specialists (owner - all; MASTER - only their own record)
@@ -318,7 +322,8 @@ paths:
           application/json:
             schema:
               type: object
-              description: Specialist; an id that is null creates, a known id updates
+              required: [displayName, calendarColor, active]
+              description: "Specialist; an id that is null creates, a known id updates, any other id answers 404. displayName up to 256 characters, calendarColor #rrggbb. keycloakUserId null keeps the stored sign-in link; DELETE keycloak-link removes it. active false also locks the master out: every /api/app request of theirs answers 403 SPECIALIST_INACTIVE until reactivation"
               properties:
                 id: { type: string, format: uuid, nullable: true }
                 displayName: { type: string }
@@ -327,8 +332,28 @@ paths:
                 active: { type: boolean }
       responses:
         "200": { description: Saved specialist }
+        "400": { description: "INVALID_NAME, INVALID_COLOR, INVALID_KEYCLOAK_USER_ID, INVALID_REQUEST_BODY" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
+        "404": { description: "SPECIALIST_NOT_FOUND - the id is not a specialist of this tenant" }
+        "409": { description: "KEYCLOAK_USER_ALREADY_LINKED - the sign-in belongs to another specialist" }
+  /api/app/specialists/{id}/keycloak-link:
+    delete:
+      summary: Remove the sign-in link of a specialist (owner only); idempotent
+      description: >
+        Ends only the sign-in found by the token's subject: such a token then answers 403 SPECIALIST_UNMAPPED. It does not
+        revoke access: a token with a specialist_id claim keeps working, whatever its subject. The guaranteed revocation
+        is deactivating the specialist (403 SPECIALIST_INACTIVE for both kinds of token) or disabling the user in Keycloak.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "204": { description: "The specialist has no link now, also when it had none before" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
+        "404": { description: "SPECIALIST_NOT_FOUND" }
   /api/app/specialists/{id}/matrix:
     get:
       summary: Services matrix of a specialist
@@ -340,10 +365,11 @@ paths:
       responses:
         "200": { description: "Matrix rows. MASTER: defaultPriceMinor and priceMinorOverride are null" }
         "403": { description: "FORBIDDEN_RESOURCE - a master asked for another specialist" }
+        "404": { description: "SPECIALIST_NOT_FOUND" }
         "401": { $ref: "#/components/responses/Unauthorized" }
     put:
       summary: Create or update one service row of a specialist's matrix (owner only)
-      description: The specialist is taken from the path; specialistId in the body is ignored.
+      description: "The specialist is taken from the path; specialistId and id in the body are ignored: one row per specialist and service, saved again it keeps its id. An override that is null uses the service default; otherwise duration 1..1440, price >= 0, buffers 0..1440."
       parameters:
         - in: path
           name: id
@@ -355,6 +381,7 @@ paths:
           application/json:
             schema:
               type: object
+              required: [serviceId, offered]
               properties:
                 id: { type: string, format: uuid, nullable: true }
                 serviceId: { type: string, format: uuid }
@@ -365,8 +392,10 @@ paths:
                 bufferAfterMinutesOverride: { type: integer, nullable: true }
       responses:
         "200": { description: Saved matrix row }
+        "400": { description: "INVALID_MATRIX_ROW, INVALID_DURATION, INVALID_PRICE, INVALID_BUFFER, INVALID_REQUEST_BODY" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
+        "404": { description: "SPECIALIST_NOT_FOUND, SERVICE_NOT_FOUND" }
   /api/app/specialists/{id}/schedule:
     get:
       summary: Weekly schedule of a specialist
@@ -378,6 +407,7 @@ paths:
       responses:
         "200": { description: Weekly intervals }
         "403": { description: "FORBIDDEN_RESOURCE - a master asked for another specialist" }
+        "404": { description: "SPECIALIST_NOT_FOUND" }
         "401": { $ref: "#/components/responses/Unauthorized" }
     put:
       summary: Replace the weekly schedule of a specialist (owner only)
@@ -394,16 +424,40 @@ paths:
               type: array
               items:
                 type: object
+                required: [weekday, startMinute, endMinute]
                 properties:
-                  id: { type: string, format: uuid, nullable: true }
-                  weekday: { type: integer }
-                  startMinute: { type: integer, description: Minutes from midnight }
-                  endMinute: { type: integer, description: Minutes from midnight }
+                  id: { type: string, format: uuid, nullable: true, description: Ignored; every interval gets a new id }
+                  weekday: { type: integer, description: "ISO weekday: 1 = Monday .. 7 = Sunday" }
+                  startMinute: { type: integer, description: "Minutes from midnight, 0..1439" }
+                  endMinute: { type: integer, description: "Minutes from midnight, exclusive, up to 1440; after startMinute. Intervals of one weekday must not overlap; at most 70 in a week" }
       responses:
         "200": { description: The weekly intervals after the replacement }
+        "400": { description: "INVALID_SCHEDULE_INTERVAL, SCHEDULE_OVERLAP, INVALID_REQUEST_BODY; the stored schedule stays" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
+        "404": { description: "SPECIALIST_NOT_FOUND" }
   /api/app/specialists/{id}/exceptions:
+    get:
+      summary: Schedule exceptions of a specialist, by date (owner; a master only their own)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+        - in: query
+          name: from
+          description: First date, inclusive; open when absent
+          schema: { type: string, format: date }
+        - in: query
+          name: to
+          description: Last date, inclusive; open when absent
+          schema: { type: string, format: date }
+      responses:
+        "200": { description: Exceptions ordered by date }
+        "400": { description: "INVALID_PARAMETER - from or to is not a date" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "FORBIDDEN_RESOURCE - a master asked for another specialist" }
+        "404": { description: "SPECIALIST_NOT_FOUND" }
     put:
       summary: Create or update a schedule exception (day off or changed hours) of a specialist (owner only)
       parameters:
@@ -417,18 +471,37 @@ paths:
           application/json:
             schema:
               type: object
-              description: The specialist is taken from the path; specialistId in the body is ignored.
+              description: "The specialist is taken from the path; specialistId in the body is ignored. An id that is null creates; an id of this specialist's exception updates it, date included; any other id answers 404."
               properties:
                 id: { type: string, format: uuid, nullable: true }
                 date: { type: string, format: date }
-                kind: { type: string }
-                startMinute: { type: integer, nullable: true }
-                endMinute: { type: integer, nullable: true }
-                note: { type: string, nullable: true }
+                kind: { type: string, enum: [DAY_OFF, SHIFT] }
+                startMinute: { type: integer, nullable: true, description: "SHIFT: minutes from midnight, 0..1439. DAY_OFF: null" }
+                endMinute: { type: integer, nullable: true, description: "SHIFT: minutes from midnight, up to 1440, after startMinute. DAY_OFF: null" }
+                note: { type: string, nullable: true, description: Up to 512 characters }
       responses:
         "200": { description: Saved exception }
+        "400": { description: "INVALID_EXCEPTION_DATE, INVALID_EXCEPTION_KIND, INVALID_EXCEPTION_MINUTES, INVALID_NOTE, INVALID_REQUEST_BODY" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
+        "404": { description: "SPECIALIST_NOT_FOUND, EXCEPTION_NOT_FOUND" }
+  /api/app/specialists/{id}/exceptions/{exceptionId}:
+    delete:
+      summary: Delete a schedule exception of a specialist (owner only)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+        - in: path
+          name: exceptionId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
+        "404": { description: "SPECIALIST_NOT_FOUND, EXCEPTION_NOT_FOUND" }
   /api/app/rules:
     get:
       summary: Tenant booking rules (owner only)

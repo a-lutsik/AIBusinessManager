@@ -10,8 +10,10 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import java.net.URI;
 import java.util.NoSuchElementException;
@@ -38,6 +40,18 @@ public class ApiExceptionHandler {
     @ExceptionHandler(NoSuchElementException.class)
     public ResponseEntity<ProblemDetail> onMissing(NoSuchElementException ex) {
         return problem(404, "NOT_FOUND", ex.getMessage() == null ? "Not found" : ex.getMessage());
+    }
+
+    /** Malformed JSON or a wrong type in the body. Neither the detail nor the log holds the parser's message: it quotes the input. */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ProblemDetail> onUnreadableBody(HttpMessageNotReadableException ex) {
+        log.debug("Request body refused: {}", ex.getClass().getSimpleName());
+        return problem(400, "INVALID_REQUEST_BODY", "The request body cannot be read.");
+    }
+
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ProblemDetail> onBadParameter(MethodArgumentTypeMismatchException ex) {
+        return problem(400, "INVALID_PARAMETER", "Parameter " + ex.getName() + " has an invalid value.");
     }
 
     /**

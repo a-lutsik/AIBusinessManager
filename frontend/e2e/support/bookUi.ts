@@ -32,14 +32,16 @@ export type BookOptions = {
   name: string;
   /** Typed without the country code, as a client would: the page adds the preselected +995. */
   localPhone: string;
+  /** The tenant of the page; the demo tenant when not given. */
+  slug?: string;
   /** Called when a step is on screen, before the page moves on. */
   at?: (step: BookStep) => Promise<void>;
 };
 
 /** Walks /book/lumen-studio as a client: service, specialist, first slot, contact data, consent, Book. */
 export async function bookThroughUi(page: Page, options: BookOptions): Promise<UiBooking> {
-  const { service, specialist, name, localPhone, at } = options;
-  await page.goto(`/book/${TENANT_SLUG}`);
+  const { service, specialist, name, localPhone, at, slug = TENANT_SLUG } = options;
+  await page.goto(`/book/${slug}`);
   await page.getByText(service, { exact: true }).waitFor();
   await at?.('service');
 
@@ -59,7 +61,7 @@ export async function bookThroughUi(page: Page, options: BookOptions): Promise<U
   await page.getByText('I agree to receive visit messages').click();
   await at?.('contact');
 
-  const bookResponse = page.waitForResponse((r) => r.url().endsWith(`/tenants/${TENANT_SLUG}/bookings`) && r.request().method() === 'POST');
+  const bookResponse = page.waitForResponse((r) => r.url().endsWith(`/tenants/${slug}/bookings`) && r.request().method() === 'POST');
   await page.getByRole('button', { name: 'Book', exact: true }).click();
   const response = await bookResponse;
   return {

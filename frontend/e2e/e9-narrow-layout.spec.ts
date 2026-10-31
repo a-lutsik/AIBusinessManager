@@ -39,13 +39,17 @@ type Screen = { path: string; content: (page: Page) => Locator; allowedScroller?
 
 const text = (value: string) => (page: Page): Locator => page.getByText(value, { exact: true }).first();
 
+async function expectNothingPastEdge(page: Page, what: string, allowedScroller?: string): Promise<void> {
+  expect(await page.evaluate(() => document.documentElement.scrollWidth), `${what}: document scrollWidth`).toBeLessThanOrEqual(WIDTH);
+  expect(await elementsPastRightEdge(page, allowedScroller), `${what}: elements past the right edge`).toEqual([]);
+}
+
 /** Opens the screen, waits for its own content (an empty page must not pass) and looks for anything past the edge. */
 async function expectFits(page: Page, { path, content, allowedScroller }: Screen): Promise<void> {
   await page.goto(path);
   await expect(content(page), `${path}: content`).toBeVisible();
   await page.waitForLoadState('networkidle');
-  expect(await page.evaluate(() => document.documentElement.scrollWidth), `${path}: document scrollWidth`).toBeLessThanOrEqual(WIDTH);
-  expect(await elementsPastRightEdge(page, allowedScroller), `${path}: elements past the right edge`).toEqual([]);
+  await expectNothingPastEdge(page, path, allowedScroller);
 }
 
 const MATRIX: Screen = { path: `/specialists/${NINO_ID}`, content: text('Haircut'), allowedScroller: 'matrix-scroller' };
@@ -117,6 +121,36 @@ test.describe(`at ${WIDTH} px`, () => {
     const box = await required(scroller);
     expect(box.x + box.width, 'scroller right edge').toBeLessThanOrEqual(WIDTH);
     expect(await scroller.evaluate((element) => element.scrollWidth > element.clientWidth), 'the table scrolls inside it').toBe(true);
+  });
+
+  test('catalog forms stay on screen, a refusal included', async ({ page }) => {
+    await useRole(page, 'OWNER');
+    await page.goto('/services');
+    await page.getByRole('button', { name: 'Add service' }).click();
+    const serviceForm = page.getByTestId('service-form');
+    await expect(serviceForm).toBeVisible();
+    await serviceForm.getByRole('button', { name: 'Save' }).click();
+    await expect(serviceForm.getByTestId('form-error')).toContainText('PRICE_REQUIRED');
+    await expectNothingPastEdge(page, 'new service form');
+
+    await page.goto('/specialists');
+    await page.getByRole('button', { name: 'Add specialist' }).click();
+    await expect(page.getByTestId('specialist-form')).toBeVisible();
+    await expectNothingPastEdge(page, 'new specialist form');
+
+    await page.goto(MATRIX.path);
+    await page.getByTestId('matrix-row-Haircut').getByRole('button', { name: 'Edit' }).click();
+    const matrixForm = page.getByTestId('matrix-form');
+    await expect(matrixForm).toBeVisible();
+    await expect(matrixForm).toBeInViewport();
+    await expectNothingPastEdge(page, 'matrix row form', MATRIX.allowedScroller);
+
+    const monday = page.getByTestId('schedule-day-1');
+    await monday.getByRole('button', { name: 'Add interval' }).click();
+    await expect(monday.getByLabel('From').last()).toBeVisible();
+    await expectNothingPastEdge(page, 'weekly schedule', MATRIX.allowedScroller);
+    await expect(page.getByTestId('schedule-exceptions').getByRole('button', { name: 'Add exception' })).toBeVisible();
+    await expectNothingPastEdge(page, 'exceptions', MATRIX.allowedScroller);
   });
 
   test('calendar: the visit panel covers the feed and takes the width of the content', async ({ page, request }) => {

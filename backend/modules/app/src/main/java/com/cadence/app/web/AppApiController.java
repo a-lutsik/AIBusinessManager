@@ -36,6 +36,8 @@ import com.cadence.platform.tenancy.TenantContext;
 import com.cadence.platform.tenant.TenantDirectory;
 import com.cadence.retention.api.RetentionService;
 import com.cadence.retention.api.TrustView;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -43,7 +45,9 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+import tools.jackson.databind.JsonNode;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -168,8 +172,14 @@ public class AppApiController {
     }
 
     @PutMapping("/services")
-    public ServiceView saveService(@RequestBody ServiceView body) {
+    public ServiceView saveService(@RequestBody JsonNode json) {
         assertOwner();
+        ServiceView body = CatalogRequests.service(json);
+        // Checked here, not in the catalog: the seed creates rows with chosen ids, the API never does. Another tenant's
+        // id is invisible through RLS and answers like an unknown one.
+        if (body.id() != null && catalogService.findService(body.id()).isEmpty()) {
+            throw DomainException.notFound("SERVICE_NOT_FOUND", "Service not found");
+        }
         return catalogService.upsertService(body);
     }
 
@@ -183,22 +193,36 @@ public class AppApiController {
     }
 
     @PutMapping("/specialists")
-    public SpecialistView saveSpecialist(@RequestBody SpecialistView body) {
+    public SpecialistView saveSpecialist(@RequestBody JsonNode json) {
         assertOwner();
+        SpecialistView body = CatalogRequests.specialist(json);
+        if (body.id() != null) {
+            requireSpecialist(body.id());
+        }
         return catalogService.upsertSpecialist(body);
+    }
+
+    /** Takes the sign-in away from a specialist; only this route does, a save keeps the link. Idempotent. */
+    @DeleteMapping("/specialists/{id}/keycloak-link")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void removeKeycloakLink(@PathVariable UUID id) {
+        assertOwner();
+        catalogService.removeKeycloakLink(id);
     }
 
     @GetMapping("/specialists/{id}/matrix")
     public List<MatrixRowView> matrix(@PathVariable UUID id) {
         assertOwnerOrSelf(id);
+        requireSpecialist(id);
         return catalogService.listMatrixRows(id);
     }
 
     @PutMapping("/specialists/{id}/matrix")
-    public MasterServiceView saveMatrix(@PathVariable UUID id, @RequestBody MasterServiceView body) {
+    public MasterServiceView saveMatrix(@PathVariable UUID id, @RequestBody JsonNode json) {
         assertOwner();
+        MasterServiceView body = CatalogRequests.matrixRow(json);
         return catalogService.upsertMatrix(new MasterServiceView(
-                body.id(),
+                null,
                 id,
                 body.serviceId(),
                 body.offered(),
@@ -212,22 +236,42 @@ public class AppApiController {
     @GetMapping("/specialists/{id}/schedule")
     public List<WeeklyInterval> schedule(@PathVariable UUID id) {
         assertOwnerOrSelf(id);
+        requireSpecialist(id);
         return catalogService.weeklySchedule(id);
     }
 
     @PutMapping("/specialists/{id}/schedule")
-    public List<WeeklyInterval> saveSchedule(@PathVariable UUID id, @RequestBody List<WeeklyInterval> body) {
+    public List<WeeklyInterval> saveSchedule(@PathVariable UUID id, @RequestBody JsonNode json) {
         assertOwner();
-        catalogService.replaceWeeklySchedule(id, body);
+        catalogService.replaceWeeklySchedule(id, CatalogRequests.weeklySchedule(json));
         return catalogService.weeklySchedule(id);
     }
 
+    @GetMapping("/specialists/{id}/exceptions")
+    public List<ScheduleExceptionView> exceptions(
+            @PathVariable UUID id,
+            @RequestParam(required = false) LocalDate from,
+            @RequestParam(required = false) LocalDate to
+    ) {
+        assertOwnerOrSelf(id);
+        requireSpecialist(id);
+        return catalogService.exceptions(id, from, to);
+    }
+
     @PutMapping("/specialists/{id}/exceptions")
-    public ScheduleExceptionView saveException(@PathVariable UUID id, @RequestBody ScheduleExceptionView body) {
+    public ScheduleExceptionView saveException(@PathVariable UUID id, @RequestBody JsonNode json) {
         assertOwner();
+        ScheduleExceptionView body = CatalogRequests.exception(json);
         return catalogService.upsertException(new ScheduleExceptionView(
                 body.id(), id, body.date(), body.kind(), body.startMinute(), body.endMinute(), body.note()
         ));
+    }
+
+    @DeleteMapping("/specialists/{id}/exceptions/{exceptionId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteException(@PathVariable UUID id, @PathVariable UUID exceptionId) {
+        assertOwner();
+        catalogService.deleteException(id, exceptionId);
     }
 
     @GetMapping("/rules")
@@ -430,6 +474,12 @@ public class AppApiController {
             throw DomainException.badRequest("INVALID_AI_SETTINGS", "notesToLlm is required");
         }
         return aiAssistantService.setNotesToLlm(body.notesToLlm());
+    }
+
+    private void requireSpecialist(UUID id) {
+        if (catalogService.findSpecialist(id).isEmpty()) {
+            throw DomainException.notFound("SPECIALIST_NOT_FOUND", "Specialist not found");
+        }
     }
 
     /** OWNER: any specialist of the tenant; MASTER: only their own specialist record. */

@@ -210,7 +210,7 @@ class HiddenClientResponsesTest {
     @Test
     void publicVisitRoutesAnswerWithVisitFactsAndTheTypedNameOnly() {
         AppointmentView view = visit(SHARED_CLIENT, false);
-        PublicVisit visit = new PublicVisit(view, true, "Asia/Tbilisi");
+        PublicVisit visit = new PublicVisit(view, true, "Asia/Tbilisi", "lumen-studio");
         when(booking.publicVisitByAccessToken(view.id(), "t")).thenReturn(visit);
         when(booking.cancelByAccessToken(view.id(), "t", true)).thenReturn(visit);
         when(booking.rescheduleByAccessToken(eq(view.id()), eq("t"), any())).thenReturn(visit);
@@ -220,7 +220,7 @@ class HiddenClientResponsesTest {
             JsonNode json = mapper.valueToTree(body);
             assertThat(keys(json)).containsExactlyInAnyOrder("id", "specialistId", "serviceId", "status",
                     "serviceStart", "serviceEnd", "serviceNameSnapshot", "priceSnapshot", "currencyCode", "enteredName",
-                    "clientRescheduleAllowed", "timezone");
+                    "clientRescheduleAllowed", "timezone", "tenantSlug");
             assertThat(json.get("enteredName").asString()).isEqualTo("Typed");
             assertThat(json.toString()).doesNotContain("Stored Name").doesNotContain("995555000001").doesNotContain("LOW");
         }

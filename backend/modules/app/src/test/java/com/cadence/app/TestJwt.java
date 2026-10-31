@@ -29,6 +29,14 @@ final class TestJwt {
                 .claim("specialist_id", specialist.toString()));
     }
 
+    /** Master of {@code tenant} resolved by the token's subject (the specialist's keycloak link): no {@code specialist_id}. */
+    static RequestPostProcessor masterBySubject(UUID tenant, String subject) {
+        return SecurityMockMvcRequestPostProcessors.jwt().jwt(jwt -> jwt
+                .subject(subject)
+                .claim("tenant_id", tenant.toString())
+                .claim("roles", List.of("MASTER")));
+    }
+
     /** Valid token that carries only a role: no {@code tenant_id}. */
     static RequestPostProcessor ownerWithoutTenant() {
         return SecurityMockMvcRequestPostProcessors.jwt().jwt(jwt -> jwt

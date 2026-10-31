@@ -4,6 +4,7 @@ import com.cadence.app.config.SecurityProperties;
 import com.cadence.catalog.api.CatalogService;
 import com.cadence.platform.tenancy.ActorContext;
 import com.cadence.platform.tenancy.TenantContext;
+import com.cadence.catalog.api.SpecialistView;
 import com.cadence.platform.tenant.TenantDirectory;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -11,6 +12,8 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.Authentication;
@@ -44,6 +47,8 @@ import java.util.regex.Pattern;
 @Component
 @Order(Ordered.LOWEST_PRECEDENCE - 20)
 public class TenantContextFilter extends OncePerRequestFilter {
+
+    private static final Logger log = LoggerFactory.getLogger(TenantContextFilter.class);
 
     public static final String HEADER_TENANT_ID = "X-Tenant-Id";
     public static final String HEADER_ACTOR_ROLE = "X-Actor-Role";
@@ -126,9 +131,21 @@ public class TenantContextFilter extends OncePerRequestFilter {
         TenantContext.set(tenantId);
         UUID specialistId = null;
         if (role == ActorContext.Role.MASTER) {
-            specialistId = specialistIdFromJwt(jwt);
+            String claim = jwt.getClaimAsString("specialist_id");
+            boolean active;
+            if (claim != null && !claim.isBlank()) {
+                specialistId = parseUuid(claim);
+                active = specialistId == null || isNotDeactivated(specialistId);
+            } else {
+                SpecialistView linked = catalogService.findSpecialistByKeycloakUserId(jwt.getSubject()).orElse(null);
+                specialistId = linked == null ? null : linked.id();
+                active = linked == null || linked.active();
+            }
             if (specialistId == null) {
                 return new Rejection(HttpStatus.FORBIDDEN, "SPECIALIST_UNMAPPED", "Master is not mapped to a specialist");
+            }
+            if (!active) {
+                return specialistInactive(specialistId);
             }
         }
         ActorContext.set(new ActorContext.Actor(jwt.getSubject(), role, specialistId));
@@ -148,12 +165,14 @@ public class TenantContextFilter extends OncePerRequestFilter {
         return null;
     }
 
-    private UUID specialistIdFromJwt(Jwt jwt) {
-        String claim = jwt.getClaimAsString("specialist_id");
-        if (claim != null && !claim.isBlank()) {
-            return parseUuid(claim);
-        }
-        return catalogService.findSpecialistByKeycloakUserId(jwt.getSubject()).map(s -> s.id()).orElse(null);
+    /** An id that resolves to nothing in this tenant stays what it was: every handler finds no data for it. */
+    private boolean isNotDeactivated(UUID specialistId) {
+        return catalogService.findSpecialist(specialistId).map(SpecialistView::active).orElse(true);
+    }
+
+    private static Rejection specialistInactive(UUID specialistId) {
+        log.info("Master refused, specialist is inactive: specialistId={}", specialistId);
+        return new Rejection(HttpStatus.FORBIDDEN, "SPECIALIST_INACTIVE", "This specialist is inactive");
     }
 
     private Rejection bindFromHeaders(HttpServletRequest request) {
@@ -186,6 +205,9 @@ public class TenantContextFilter extends OncePerRequestFilter {
         }
         String actorId = request.getHeader(HEADER_ACTOR_ID);
         TenantContext.set(tenantId);
+        if (role == ActorContext.Role.MASTER && !isNotDeactivated(specialistId)) {
+            return specialistInactive(specialistId);
+        }
         ActorContext.set(new ActorContext.Actor(
                 actorId == null || actorId.isBlank() ? "local" : actorId,
                 role,

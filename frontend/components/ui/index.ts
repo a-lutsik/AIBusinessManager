@@ -3,6 +3,8 @@ export { EmptyState } from './EmptyState';
 export { MaterialIcon } from './MaterialIcon';
 export { MetricCard } from './MetricCard';
 export { Pill } from './Pill';
+export { Segment } from './Segment';
 export { SignalCard } from './SignalCard';
+export { TextField } from './TextField';
 export { Toggle } from './Toggle';
 export { TrustBadge } from './TrustBadge';

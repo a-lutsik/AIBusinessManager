@@ -15,7 +15,8 @@ import java.util.UUID;
  * Built as an allow-list: a field added to {@link AppointmentView} later does not reach the public page by itself.
  * {@code specialistId} and {@code serviceId} let the page offer reschedule slots; {@code clientRescheduleAllowed} is
  * the tenant's rule, so the page does not offer slots the reschedule route would refuse; {@code timezone} is the
- * tenant's zone, in which the page shows times.
+ * tenant's zone, in which the page shows times; {@code tenantSlug} (public anyway, it is in the booking URL) is where
+ * the page asks for those slots.
  */
 public record PublicVisitView(
         UUID id,
@@ -29,9 +30,10 @@ public record PublicVisitView(
         String currencyCode,
         String enteredName,
         boolean clientRescheduleAllowed,
-        String timezone
+        String timezone,
+        String tenantSlug
 ) {
-    public static PublicVisitView of(AppointmentView visit, boolean clientRescheduleAllowed, String timezone) {
+    public static PublicVisitView of(AppointmentView visit, boolean clientRescheduleAllowed, String timezone, String tenantSlug) {
         return new PublicVisitView(
                 visit.id(),
                 visit.specialistId(),
@@ -44,7 +46,8 @@ public record PublicVisitView(
                 visit.currencyCode(),
                 visit.enteredName(),
                 clientRescheduleAllowed,
-                timezone
+                timezone,
+                tenantSlug
         );
     }
 }

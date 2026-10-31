@@ -180,7 +180,7 @@ public class PublicApiController {
     private static PublicVisitView publicView(PublicVisit result) {
         log.debug("Public visit {}: status={}, clientRescheduleAllowed={}",
                 result.visit().id(), result.visit().status(), result.clientRescheduleAllowed());
-        return PublicVisitView.of(result.visit(), result.clientRescheduleAllowed(), result.timezone());
+        return PublicVisitView.of(result.visit(), result.clientRescheduleAllowed(), result.timezone(), result.tenantSlug());
     }
 
     /**

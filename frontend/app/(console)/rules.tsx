@@ -1,7 +1,8 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { ScrollView, Text, TextInput, View } from 'react-native';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { Segment } from '@/components/ui/Segment';
 import { Toggle } from '@/components/ui/Toggle';
 import { api, ApiError, LUMEN_TENANT_ID, type BookingRulesView } from '@/src/api/client';
 import { t } from '@/src/i18n';
@@ -33,33 +34,6 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
     <View style={{ marginBottom: space.lg }}>
       <Text style={{ color: color.ink, fontWeight: '600', marginBottom: space.sm }}>{label}</Text>
       {children}
-    </View>
-  );
-}
-
-function Segment<V>({ options, value, onChange }: { options: { value: V; label: string }[]; value: V; onChange: (v: V) => void }) {
-  const { color, space, radius } = useThemeTokens();
-  return (
-    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>
-      {options.map((opt) => {
-        const active = value === opt.value;
-        return (
-          <Pressable
-            key={String(opt.value)}
-            onPress={() => onChange(opt.value)}
-            style={{
-              paddingVertical: space.sm,
-              paddingHorizontal: space.md,
-              borderRadius: radius.control,
-              borderWidth: 1,
-              borderColor: active ? color.primary : color.line,
-              backgroundColor: active ? `${color.primary}14` : color.surface,
-            }}
-          >
-            <Text style={{ color: active ? color.primary : color.muted, fontWeight: active ? '700' : '500' }}>{opt.label}</Text>
-          </Pressable>
-        );
-      })}
     </View>
   );
 }
