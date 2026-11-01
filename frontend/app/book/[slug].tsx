@@ -36,6 +36,7 @@ export default function PublicBookScreen() {
   const [chosenDay, setChosenDay] = useState<string | null>(null);
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [slotsRequest, setSlotsRequest] = useState(0);
+  const [slotsFailure, setSlotsFailure] = useState<'limit' | 'other' | null>(null);
   const [slotTaken, setSlotTaken] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
   const activeLocale = useLocale();
@@ -70,6 +71,7 @@ export default function PublicBookScreen() {
     let current = true;
     /* eslint-disable react-hooks/set-state-in-effect */
     setSlots([]);
+    setSlotsFailure(null);
     setSlotsLoading(true);
     /* eslint-enable react-hooks/set-state-in-effect */
     api
@@ -79,8 +81,8 @@ export default function PublicBookScreen() {
         setSlots(next);
         setSlot((chosen) => (chosen && next.includes(chosen) ? chosen : null));
       })
-      .catch(() => {
-        if (current) setSlots([]);
+      .catch((e: unknown) => {
+        if (current) setSlotsFailure(e instanceof ApiError && e.status === 429 ? 'limit' : 'other');
       })
       .finally(() => {
         if (current) setSlotsLoading(false);
@@ -118,7 +120,10 @@ export default function PublicBookScreen() {
       });
       setResult(booked);
     } catch (e: any) {
-      if (e instanceof ApiError && e.status === 409) {
+      if (e instanceof ApiError && (e.code === 'CONCURRENT_RETRY' || e.code === 'CLIENT_CONFLICT')) {
+        // Nothing was saved and the slot may well be free: the client tries again with the same choice.
+        setError(t('book.retry'));
+      } else if (e instanceof ApiError && e.status === 409) {
         // Taken while the client was typing: what was typed stays, the slot goes, the list is fresh again.
         setSlot(null);
         setSlotTaken(true);
@@ -248,7 +253,16 @@ export default function PublicBookScreen() {
             {t('book.slot')}
           </Text>
           {slotTaken ? <Text accessibilityRole="alert" style={{ color: color.status.noShow, marginBottom: space.sm }}>{t('book.slotTaken')}</Text> : null}
-          {slots.length === 0 && !slotsLoading ? <Text style={{ color: color.muted, marginVertical: space.md }}>{t('empty.slots')}</Text> : null}
+          {/* A refused or failed request is not "no slots": the client must not read it as a fully booked specialist. */}
+          {slotsFailure ? (
+            <View testID="slots-failure" style={{ marginVertical: space.md, gap: space.sm }}>
+              <Text accessibilityRole="alert" style={{ color: color.status.noShow }}>
+                {t(slotsFailure === 'limit' ? 'book.slotsRateLimited' : 'book.slotsFailed')}
+              </Text>
+              <Button label={t('action.retry')} variant="ghost" onPress={() => setSlotsRequest((n) => n + 1)} />
+            </View>
+          ) : null}
+          {slots.length === 0 && !slotsLoading && !slotsFailure ? <Text style={{ color: color.muted, marginVertical: space.md }}>{t('empty.slots')}</Text> : null}
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginBottom: space.md }}>
             {slotDays.map((d) => (
               <Pressable

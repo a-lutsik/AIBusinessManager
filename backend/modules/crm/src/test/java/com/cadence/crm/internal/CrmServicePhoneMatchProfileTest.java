@@ -36,6 +36,7 @@ class CrmServicePhoneMatchProfileTest {
                 null, null, 0, 0, 0, 0);
         when(repository.findByPhone(PHONE)).thenReturn(Optional.of(client));
         when(repository.findById(id)).thenReturn(Optional.of(client));
+        when(repository.updateProfile(any(), any(), any(), any(), any(), any(), any())).thenReturn(1);
         return client;
     }
 

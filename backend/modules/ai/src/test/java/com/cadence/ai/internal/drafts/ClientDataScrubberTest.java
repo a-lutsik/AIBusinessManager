@@ -2,6 +2,7 @@ package com.cadence.ai.internal.drafts;
 
 import com.cadence.ai.internal.privacy.InMemoryPseudonymStore;
 import com.cadence.booking.api.AppointmentStatus;
+import com.cadence.platform.ai.AiConversationStore;
 import com.cadence.platform.ai.AiDraftStore;
 import com.cadence.platform.ai.AiPseudonymStore;
 import com.cadence.platform.audit.AuditLogger;
@@ -19,6 +20,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -26,6 +28,8 @@ import static org.mockito.Mockito.when;
 class ClientDataScrubberTest {
 
     private static final UUID CLIENT = UUID.randomUUID();
+
+    private final AiConversationStore conversations = mock(AiConversationStore.class);
 
     private static String cancelJson(UUID client) {
         return DraftPayloads.write(new DraftPayloads.Cancel(1, DraftPayloads.CANCEL, client, UUID.randomUUID(),
@@ -71,7 +75,8 @@ class ClientDataScrubberTest {
         when(drafts.lockByClient(CLIENT)).thenReturn(List.of(record(pending), record(confirmed)));
         when(drafts.markFailed(pending, "DRAFT_STALE", "The client was anonymized")).thenReturn(true);
 
-        new ClientDataScrubber(drafts, pseudonyms, audit).clientRetiring(CLIENT);
+        new ClientDataScrubber(conversations, drafts, pseudonyms, audit).clientRetiring(CLIENT);
+        verifyNoInteractions(conversations);
 
         verify(drafts).replacePayload(eq(pending), argThat(json -> !json.contains("Maria")));
         verify(drafts).replacePayload(eq(confirmed), argThat(json -> !json.contains("Maria")));

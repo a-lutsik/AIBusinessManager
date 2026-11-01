@@ -32,8 +32,23 @@ public record AppointmentView(
         String clientDisplayName,
         String clientPhone,
         String trustLevel,
-        boolean clientHiddenFromMaster
+        boolean clientHiddenFromMaster,
+        boolean clientAnonymized
 ) {
+    /** A row or a change of it, before the client is looked up. */
+    public AppointmentView(
+            UUID id, UUID specialistId, UUID serviceId, UUID clientId, AppointmentStatus status,
+            Instant serviceStart, Instant serviceEnd, Instant occupiedStart, Instant occupiedEnd,
+            String serviceNameSnapshot, int priceSnapshot, int durationSnapshot, int bufferBeforeSnapshot, int bufferAfterSnapshot,
+            String currencyCode, int discountAmount, Integer amountReceived, String enteredName, String note, String source,
+            String clientDisplayName, String clientPhone, String trustLevel, boolean clientHiddenFromMaster
+    ) {
+        this(id, specialistId, serviceId, clientId, status, serviceStart, serviceEnd, occupiedStart, occupiedEnd,
+                serviceNameSnapshot, priceSnapshot, durationSnapshot, bufferBeforeSnapshot, bufferAfterSnapshot,
+                currencyCode, discountAmount, amountReceived, enteredName, note, source,
+                clientDisplayName, clientPhone, trustLevel, clientHiddenFromMaster, false);
+    }
+
     /**
      * Whether a MASTER's view of this visit carries no live client data: hidden from the master (decision A) or
      * cancelled (a cancelled visit gives no access to the client, TD-19). Such a visit shows the master only the typed
@@ -52,7 +67,18 @@ public record AppointmentView(
                 serviceNameSnapshot, priceSnapshot, durationSnapshot,
                 bufferBeforeSnapshot, bufferAfterSnapshot, currencyCode,
                 discountAmount, amountReceived, enteredName, note, source,
-                clientDisplayName, clientPhone, level, clientHiddenFromMaster
+                clientDisplayName, clientPhone, level, clientHiddenFromMaster, clientAnonymized
+        );
+    }
+
+    public AppointmentView withClientAnonymized() {
+        return new AppointmentView(
+                id, specialistId, serviceId, clientId, status,
+                serviceStart, serviceEnd, occupiedStart, occupiedEnd,
+                serviceNameSnapshot, priceSnapshot, durationSnapshot,
+                bufferBeforeSnapshot, bufferAfterSnapshot, currencyCode,
+                discountAmount, amountReceived, enteredName, note, source,
+                clientDisplayName, clientPhone, trustLevel, clientHiddenFromMaster, true
         );
     }
 }

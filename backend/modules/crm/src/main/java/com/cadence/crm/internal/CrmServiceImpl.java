@@ -1,6 +1,7 @@
 package com.cadence.crm.internal;
 
 import com.cadence.crm.api.ClientName;
+import com.cadence.crm.api.ClientRetirement;
 import com.cadence.crm.api.ClientRetirementListener;
 import com.cadence.crm.api.ClientView;
 import com.cadence.crm.api.CrmService;
@@ -10,6 +11,8 @@ import com.cadence.platform.error.DomainException;
 import com.cadence.platform.persistence.SqlStates;
 import com.cadence.platform.phone.PhoneShape;
 import com.cadence.platform.tenancy.ActorContext;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
@@ -17,8 +20,11 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Instant;
+import java.util.ArrayDeque;
 import java.util.Collection;
+import java.util.Deque;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.text.Normalizer;
 import java.util.Locale;
@@ -30,6 +36,7 @@ import java.util.UUID;
 @Service
 public class CrmServiceImpl implements CrmService {
 
+    private static final Logger log = LoggerFactory.getLogger(CrmServiceImpl.class);
     private static final int NOTES_MAX = 4096;
     private static final int TAGS_MAX = 1024;
     /** {@code client.consent_version} is VARCHAR(32). */
@@ -72,9 +79,10 @@ public class CrmServiceImpl implements CrmService {
             boolean marketingConsent,
             String consentVersion
     ) {
-        Optional<ClientView> existing = repository.findByPhone(e164Phone);
+        Optional<ClientView> existing = repository.findByPhone(e164Phone)
+                .flatMap(row -> refresh(row, locale, marketingConsent, consentVersion));
         if (existing.isPresent()) {
-            return refresh(existing.get(), locale, marketingConsent, consentVersion);
+            return existing.get();
         }
         ClientView created = new ClientView(
                 UUID.randomUUID(),
@@ -97,7 +105,8 @@ public class CrmServiceImpl implements CrmService {
             // statement sees it (READ COMMITTED) and we continue exactly as for a returning client.
             ClientView winner = repository.findByPhone(e164Phone).orElseThrow(() -> DomainException.conflict(
                     "CLIENT_CONFLICT", "Client with this phone is being created, retry"));
-            return refresh(winner, locale, marketingConsent, consentVersion);
+            return refresh(winner, locale, marketingConsent, consentVersion).orElseThrow(() -> DomainException.conflict(
+                    "CLIENT_CONFLICT", "Client with this phone is being created, retry"));
         }
         repository.updateProfile(created.id(), displayName, null, null, locale, marketingConsent, consentVersion);
         return repository.findById(created.id()).orElse(created);
@@ -106,14 +115,19 @@ public class CrmServiceImpl implements CrmService {
     /**
      * Decision D (stage 03): a booking that matches this client by phone only adds to the profile. Consent {@code true}
      * is recorded with the booking's consent version and time; {@code false} never revokes a consent and leaves the
-     * stored one untouched. The locale is set only when the client has none; the stored name is kept.
+     * stored one untouched. The locale is set only when the client has none; the stored name is kept. Empty when the client
+     * was anonymized after {@code row} was read, which writes nothing: the row holds no phone to match any more.
      */
-    private ClientView refresh(ClientView row, String locale, boolean marketingConsent, String consentVersion) {
+    private Optional<ClientView> refresh(ClientView row, String locale, boolean marketingConsent, String consentVersion) {
         String newLocale = row.preferredLocale() == null ? locale : null;
         Boolean consent = marketingConsent ? Boolean.TRUE : null;
-        repository.updateProfile(row.id(), row.displayName(), null, null, newLocale, consent,
+        int updated = repository.updateProfile(row.id(), row.displayName(), null, null, newLocale, consent,
                 marketingConsent ? consentVersion : null);
-        return repository.findById(row.id()).orElse(row);
+        if (updated == 0) {
+            log.info("Client anonymized while a booking waited for it, the phone becomes a new client: client={}", row.id());
+            return Optional.empty();
+        }
+        return repository.findById(row.id());
     }
 
     /**
@@ -168,6 +182,26 @@ public class CrmServiceImpl implements CrmService {
 
     @Override
     @Transactional(readOnly = true)
+    public ClientRetirement retirementOf(UUID clientId) {
+        return repository.findState(clientId)
+                .map(state -> new ClientRetirement(state.anonymizedAt(), state.mergedIntoClientId()))
+                .orElseThrow(() -> DomainException.notFound("CLIENT_NOT_FOUND", "Client not found"));
+    }
+
+    @Override
+    @Transactional
+    public ClientView requireActive(UUID clientId) {
+        ClientRepository.ClientState state = repository.findStateForKeyShare(clientId)
+                .orElseThrow(() -> DomainException.notFound("CLIENT_NOT_FOUND", "Client not found"));
+        if (state.retired()) {
+            log.info("Write refused for an anonymized client: client={}", clientId);
+            throw DomainException.conflict("CLIENT_ANONYMIZED", "This client was anonymized");
+        }
+        return state.view();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public List<ClientName> findByNameWords(Set<String> words) {
         if (words.isEmpty()) {
             return List.of();
@@ -209,8 +243,7 @@ public class CrmServiceImpl implements CrmService {
     @Override
     @Transactional
     public ClientView withdrawMarketingConsent(UUID clientId, String source) {
-        ClientView existing = repository.findById(clientId)
-                .orElseThrow(() -> DomainException.notFound("CLIENT_NOT_FOUND", "Client not found"));
+        ClientView existing = requireActive(clientId);
         String version = "withdrawn:" + source;
         repository.updateProfile(clientId, existing.displayName(), null, null, null, false,
                 version.length() > CONSENT_VERSION_MAX ? version.substring(0, CONSENT_VERSION_MAX) : version);
@@ -249,10 +282,37 @@ public class CrmServiceImpl implements CrmService {
     @Override
     @Transactional
     public ClientView anonymize(UUID clientId) {
-        retirementListeners.forEach(listener -> listener.clientRetiring(clientId));
+        // Before the client lock, in the order a draft confirmation takes them (draft row, then client): see DraftApplier.
+        // Whoever was merged into this person is this person: what the dialogues about them hold goes as well.
+        Set<UUID> person = withAbsorbed(clientId);
+        person.forEach(id -> retirementListeners.forEach(listener -> listener.clientErasing(id)));
+        repository.lockForUpdate(clientId, clientId);
+        if (!withAbsorbed(clientId).equals(person)) {
+            // A merge into this client committed while this waited: its dialogues were not erased, so nothing is.
+            log.info("Client anonymization refused, a merge into the client finished meanwhile: client={}", clientId);
+            throw DomainException.conflict("CONCURRENT_RETRY", "The client was merged with another profile meanwhile, nothing was erased. Please retry.");
+        }
+        ClientRepository.ClientState state = repository.findState(clientId)
+                .orElseThrow(() -> DomainException.notFound("CLIENT_NOT_FOUND", "Client not found"));
+        if (state.retired()) {
+            throw DomainException.conflict("CLIENT_ALREADY_ANONYMIZED", "Client is already anonymized or merged");
+        }
         repository.anonymize(clientId);
         return repository.findById(clientId)
                 .orElseThrow(() -> DomainException.notFound("CLIENT_NOT_FOUND", "Client not found"));
+    }
+
+    /** {@code clientId} and every profile merged into it, directly or along a chain; the set ends a cycle in damaged data. */
+    private Set<UUID> withAbsorbed(UUID clientId) {
+        Set<UUID> person = new LinkedHashSet<>();
+        Deque<UUID> pending = new ArrayDeque<>(List.of(clientId));
+        while (!pending.isEmpty()) {
+            UUID next = pending.poll();
+            if (person.add(next)) {
+                pending.addAll(repository.absorbedBy(next));
+            }
+        }
+        return person;
     }
 
     @Override

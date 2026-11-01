@@ -50,6 +50,8 @@ test('a pending visit: panel, confirm, reschedule to another day, cancel by the 
   const panel = page.getByTestId('visit-panel');
   await row.click();
   await expect(panel).toContainText(visit.phone);
+  // The price the visit was booked at.
+  await expect(panel.getByTestId('visit-price')).toHaveText(/^Price: GEL\s*\d/);
   await expect(panel.getByText('New', { exact: true })).toBeVisible();
   await expect(panel.getByText('Pending', { exact: true })).toBeVisible();
   // The buttons name the action, the status stands apart from them.
@@ -71,7 +73,11 @@ test('a pending visit: panel, confirm, reschedule to another day, cancel by the 
 
   // Reschedule: the slot dialog lists the free slots, the last one is on another day.
   const bookedDay = (iso: string): string => new Date(iso).toLocaleDateString('en-CA', { timeZone: 'Asia/Tbilisi' });
+  // TD-76: the dialog asks the console's own route, so the public per-IP limit cannot get in its way.
+  await page.route('**/api/public/tenants/*/slots?*', (route) => route.fulfill({ status: 429, json: { code: 'RATE_LIMITED' } }));
+  const consoleSlots = page.waitForRequest((r) => new URL(r.url()).pathname === '/api/app/slots');
   await panel.getByRole('button', { name: 'Reschedule' }).click();
+  await consoleSlots;
   const slots = page.getByRole('button', { name: SLOT_LABEL });
   await expect(slots.first()).toBeVisible();
   await screenshotWidths(page, 'calendar-slots');

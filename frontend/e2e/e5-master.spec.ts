@@ -44,9 +44,11 @@ test('MASTER sees a visit without the phone and a client without phone or counte
   const detail = page.waitForResponse((r) => new URL(r.url()).pathname === `/api/app/appointments/${visit.id}`);
   await page.getByTestId(`visit-row-${visit.id}`).click();
   expect((await detail).status()).toBe(200);
+  expect(((await (await detail).json()) as { appointment: { priceSnapshot: unknown } }).appointment.priceSnapshot).toBeNull();
   const panel = page.getByTestId('visit-panel');
   await expect(panel).toContainText(name);
   await expect(panel.getByText('New', { exact: true })).toBeVisible();
+  await expect(panel.getByTestId('visit-price'), 'a master gets no price').toHaveCount(0);
   await expectNoPhoneNoMoney(page);
 
   await page.goto('/clients');

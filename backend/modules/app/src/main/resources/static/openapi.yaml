@@ -121,6 +121,7 @@ paths:
           description: Instant[]
         "429":
           description: Rate limited (problem+json, code RATE_LIMITED, Retry-After header in seconds)
+        "400": { description: "INVALID_SLOT_RANGE - to is before from, or the range spans more than 62 days" }
   /api/public/tenants/{slug}/bookings:
     post:
       summary: Create public booking
@@ -150,7 +151,7 @@ paths:
         "200":
           description: Booking created (CONFIRMED or PENDING)
         "409":
-          description: Slot occupied or validation
+          description: "Slot occupied or validation; CONCURRENT_RETRY - collided with another change, nothing was saved, retry"
         "429":
           description: Rate limited (problem+json, code RATE_LIMITED, Retry-After header in seconds)
   /api/public/bookings/{id}:
@@ -193,6 +194,7 @@ paths:
         "200": { description: "Cancelled visit: visit facts and the typed name only, as GET /api/public/bookings/{id}" }
         "403": { description: "TOKEN_INVALID - the token belongs to another visit (also for a visit id that does not exist); nothing is written" }
         "404": { description: "TOKEN_INVALID - unknown, revoked or expired token" }
+        "409": { description: "CONCURRENT_RETRY - collided with another change, nothing was saved, retry" }
   /api/public/bookings/{id}/reschedule:
     post:
       summary: Move the visit to another start by opaque token
@@ -213,7 +215,7 @@ paths:
         "200": { description: "Moved visit: visit facts and the typed name only, as GET /api/public/bookings/{id}" }
         "403": { description: "TOKEN_INVALID - the token belongs to another visit (also for a visit id that does not exist), or RESCHEDULE_DISABLED - the tenant's rule forbids it; nothing is written" }
         "404": { description: "TOKEN_INVALID - unknown, revoked or expired token" }
-        "409": { description: "Slot occupied or rule violation (problem+json with a machine code)" }
+        "409": { description: "Slot occupied or rule violation (problem+json with a machine code); CONCURRENT_RETRY - collided with another change, nothing was saved, retry" }
   /api/public/bookings/{id}/consent/withdraw:
     post:
       summary: Withdraw the client's marketing consent by the manage link
@@ -581,7 +583,7 @@ paths:
       responses:
         "200": { description: "Created visit. MASTER: money fields null, client fields as typed" }
         "403": { description: "FORBIDDEN_RESOURCE - master booking for another specialist, bypassing the rules, or a clientId outside the master's clients" }
-        "409": { description: "SLOT_OCCUPIED, MIN_NOTICE, BEYOND_HORIZON, VISIT_NOT_STARTED" }
+        "409": { description: "SLOT_OCCUPIED, MIN_NOTICE, BEYOND_HORIZON, VISIT_NOT_STARTED; CLIENT_ANONYMIZED - this client was anonymized; CONCURRENT_RETRY - collided with another change, nothing was saved, retry" }
         "401": { $ref: "#/components/responses/Unauthorized" }
   /api/app/appointments/{id}/transition:
     post:
@@ -604,7 +606,7 @@ paths:
       responses:
         "200": { description: Updated visit }
         "403": { description: "FORBIDDEN_RESOURCE - master on another specialist's visit, or confirming a visit of a client who needs the owner's confirmation" }
-        "409": { description: "INVALID_TRANSITION, or VISIT_NOT_STARTED - COMPLETED or NO_SHOW before serviceStart" }
+        "409": { description: "INVALID_TRANSITION, or VISIT_NOT_STARTED - COMPLETED or NO_SHOW before serviceStart; CONCURRENT_RETRY - collided with another change, nothing was saved, retry" }
         "401": { $ref: "#/components/responses/Unauthorized" }
       description: >
         COMPLETED and NO_SHOW are reachable only once the visit has started (serviceStart not in the future), for every
@@ -640,7 +642,7 @@ paths:
                   expiresAt: { type: string, format: date-time }
         "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
         "404": { description: "APPOINTMENT_NOT_FOUND - no such visit in the current tenant" }
-        "409": { description: "APPOINTMENT_CANCELLED - cancelled visits cannot be managed" }
+        "409": { description: "APPOINTMENT_CANCELLED - cancelled visits cannot be managed; CLIENT_ANONYMIZED - this client was anonymized" }
         "401": { $ref: "#/components/responses/Unauthorized" }
   /api/app/appointments/{id}/reschedule:
     post:
@@ -658,7 +660,7 @@ paths:
         "200": { description: Updated visit }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { description: "FORBIDDEN_RESOURCE - master on another specialist's visit" }
-        "409": { description: "Slot occupied or rule violation (problem+json with a machine code)" }
+        "409": { description: "Slot occupied or rule violation (problem+json with a machine code); CLIENT_ANONYMIZED - this client was anonymized; CONCURRENT_RETRY - collided with another change, nothing was saved, retry" }
   /api/app/clients:
     get:
       summary: Search clients
@@ -694,6 +696,7 @@ paths:
         "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
         "404": { description: "CLIENT_NOT_FOUND" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { description: "CLIENT_ANONYMIZED - this client was anonymized" }
   /api/app/clients/{id}/merge:
     post:
       summary: Merge a duplicate client into this one (owner only)
@@ -718,8 +721,63 @@ paths:
         "400": { description: "INVALID_MERGE - a client cannot be merged with itself" }
         "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
         "404": { description: "CLIENT_NOT_FOUND - no such client in the current tenant" }
-        "409": { description: "CLIENT_ALREADY_MERGED - the absorbed client is already anonymized or merged" }
+        "409": { description: "CLIENT_ALREADY_MERGED - the absorbed client is already anonymized or merged; CONCURRENT_RETRY - collided with another change, nothing was saved, retry" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/app/clients/{id}/anonymize:
+    post:
+      summary: Erase a client's personal data on request (owner only, irreversible)
+      description: >
+        Right to erasure (PRODUCT_PLAN section 10). The name and phone become placeholders (displayName "anonymized",
+        normalizedPhone null); notes, tags, locale, Telegram chat and consent, the typed name and note of every visit, manage links,
+        owner tasks about the client, the trust state and package names are erased, and every AI conversation that names the client is
+        deleted with its drafts and logs. Package balances are kept but can no longer be used.
+        Visit facts, the journal, the counters and package balances stay, so metrics of past periods do not move. The same phone can
+        book again as a new client with no link to this profile. Atomic. A repeat is refused, not answered 200.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: The emptied client }
+        "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
+        "404": { description: "CLIENT_NOT_FOUND - no such client in the current tenant" }
+        "409": { description: "CLIENT_HAS_UPCOMING_VISITS - cancel the pending or confirmed visits that have not ended first; CLIENT_ALREADY_ANONYMIZED - the profile is already anonymized or merged away; CONCURRENT_RETRY - collided with another change, nothing was saved, retry" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/app/slots:
+    get:
+      summary: Free slots for the console (owner, or a master for their own specialist id)
+      description: >
+        Same calculation and answer as GET /api/public/tenants/{slug}/slots, behind the sign-in and outside the public per-IP limit.
+      parameters:
+        - in: query
+          name: serviceId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: query
+          name: specialistId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: query
+          name: from
+          required: true
+          schema: { type: string, format: date }
+        - in: query
+          name: to
+          required: true
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Free service starts, ascending
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: string, format: date-time }
+        "403": { description: "FORBIDDEN_RESOURCE - a master asked for another specialist" }
+        "409": { description: "SERVICE_NOT_OFFERED or SERVICE_INACTIVE - the specialist does not offer this service" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "400": { description: "INVALID_SLOT_RANGE - to is before from, or the range spans more than 62 days" }
   /api/app/clients/{id}/trust:
     post:
       summary: Override the trust level of a client (owner only)
@@ -740,6 +798,7 @@ paths:
         "200": { description: Updated trust }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
+        "409": { description: "CLIENT_ANONYMIZED - this client was anonymized" }
   /api/app/clients/{id}/packages:
     post:
       summary: Sell a session package to a client (owner only)
@@ -765,6 +824,7 @@ paths:
         "200": { description: The sold package }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
+        "409": { description: "CLIENT_ANONYMIZED - this client was anonymized" }
   /api/app/tasks:
     get:
       summary: Open owner tasks (owner only)
@@ -854,6 +914,7 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
         "404": { description: "CONVERSATION_NOT_FOUND" }
+        "409": { description: "AI_CONVERSATION_ERASED - the conversation was erased with a client's data during this turn, the text was not carried on; CONCURRENT_RETRY - collided with another change, nothing was saved, retry" }
         "429": { description: "AI_BUDGET_EXCEEDED - the monthly token budget of the tenant is spent" }
         "502": { description: "LLM_UNAVAILABLE or LLM_UNAUTHORIZED - the language model provider failed or refused the key" }
   /api/app/ai/conversations/{id}:

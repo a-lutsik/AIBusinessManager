@@ -59,6 +59,8 @@ import java.util.stream.Collectors;
 public class AiAssistantServiceImpl implements AiAssistantService {
 
     private static final Logger log = LoggerFactory.getLogger(AiAssistantServiceImpl.class);
+    private static final String CONVERSATION_NOT_FOUND = "CONVERSATION_NOT_FOUND";
+    private static final String CONVERSATION_ERASED = "AI_CONVERSATION_ERASED";
     /** ADR 0002 §2.2 step 1: supported conversation locales; anything else is stored as {@code en}. */
     private static final Set<String> LOCALES = Set.of("en", "ru", "ka", "uk", "cs");
     private static final String FINISH_ERROR = "ERROR";
@@ -188,6 +190,11 @@ public class AiAssistantServiceImpl implements AiAssistantService {
                     new ChatResponse.UsageView(month.used(), month.limit()));
         } catch (DomainException e) {
             turn.outcome = e.code();
+            if (CONVERSATION_NOT_FOUND.equals(e.code())) {
+                // It stood when the turn began, so it was erased during the turn: the text must not be sent on to a new one.
+                log.info("AI conversation erased during a turn: tenant={}, conversation={}", tenant.id(), convo);
+                throw DomainException.conflict(CONVERSATION_ERASED, "This conversation was erased with a client's data");
+            }
             throw e;
         } finally {
             log.info("AI turn finished: tenant={}, conversation={}, outcome={}, iterations={}, toolCalls={}, promptTokens={}, "
@@ -247,6 +254,8 @@ public class AiAssistantServiceImpl implements AiAssistantService {
 
     /** Budget check, the provider call with failover, then usage of whichever provider answered and the prompt log. */
     private LlmResponse callLlm(Turn turn, List<LlmMessage> sent, ToolChoice choice) {
+        // Erased during the turn: nothing more goes to the provider, chat() answers AI_CONVERSATION_ERASED.
+        conversations.require(turn.conversationId);
         budget.assertAvailable(turn.tenant, turn.limit);
         // tools go along with NONE as well: tool_choice is only serialised with them, and past tool messages need them.
         LlmRequest request = new LlmRequest(sent, tools.specs(), choice, properties.maxCompletionTokens());

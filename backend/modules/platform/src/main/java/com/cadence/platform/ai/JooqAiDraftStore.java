@@ -24,6 +24,7 @@ import java.util.UUID;
 import java.util.function.UnaryOperator;
 
 import static com.cadence.platform.jooq.Tables.AI_DRAFT;
+import static com.cadence.platform.jooq.Tables.AI_PSEUDONYM;
 
 @Repository
 @Transactional
@@ -94,6 +95,17 @@ public class JooqAiDraftStore implements AiDraftStore {
                 .orderBy(AI_DRAFT.ID.asc())
                 .forUpdate()
                 .fetch(JooqAiDraftStore::toRecord);
+    }
+
+    @Override
+    public int countPendingInConversationsNaming(AiPseudonymStore.Kind kind, UUID entityId) {
+        return dsl.fetchCount(AI_DRAFT, TenantAwareDsl.tenantEquals(AI_DRAFT.TENANT_ID)
+                .and(AI_DRAFT.STATUS.eq(Status.PENDING.name()))
+                .and(AI_DRAFT.CONVERSATION_ID.in(dsl.select(AI_PSEUDONYM.CONVERSATION_ID)
+                        .from(AI_PSEUDONYM)
+                        .where(TenantAwareDsl.tenantEquals(AI_PSEUDONYM.TENANT_ID)
+                                .and(AI_PSEUDONYM.KIND.eq(kind.name()))
+                                .and(AI_PSEUDONYM.ENTITY_ID.eq(entityId))))));
     }
 
     @Override

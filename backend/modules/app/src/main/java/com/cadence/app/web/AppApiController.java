@@ -4,6 +4,7 @@ import com.cadence.ai.api.AiAssistantService;
 import com.cadence.ai.api.AiSettingsView;
 import com.cadence.ai.api.ChatResponse;
 import com.cadence.ai.api.ConversationHistoryView;
+import com.cadence.app.usecase.ClientAnonymizationService;
 import com.cadence.app.usecase.ClientMergeService;
 import com.cadence.app.web.dto.AiSettingsRequest;
 import com.cadence.app.web.dto.AppointmentDetailView;
@@ -22,6 +23,7 @@ import com.cadence.catalog.api.ScheduleExceptionView;
 import com.cadence.catalog.api.ServiceView;
 import com.cadence.catalog.api.SpecialistView;
 import com.cadence.catalog.api.WeeklyInterval;
+import com.cadence.crm.api.ClientRetirement;
 import com.cadence.crm.api.ClientView;
 import com.cadence.crm.api.CrmService;
 import com.cadence.growth.api.GrowthService;
@@ -71,6 +73,7 @@ public class AppApiController {
     private final OwnerTaskService ownerTaskService;
     private final TenantDirectory tenants;
     private final ClientMergeService clientMerge;
+    private final ClientAnonymizationService clientAnonymization;
 
     public AppApiController(
             CatalogService catalogService,
@@ -81,7 +84,8 @@ public class AppApiController {
             AiAssistantService aiAssistantService,
             OwnerTaskService ownerTaskService,
             TenantDirectory tenants,
-            ClientMergeService clientMerge
+            ClientMergeService clientMerge,
+            ClientAnonymizationService clientAnonymization
     ) {
         this.catalogService = catalogService;
         this.bookingService = bookingService;
@@ -92,6 +96,7 @@ public class AppApiController {
         this.ownerTaskService = ownerTaskService;
         this.tenants = tenants;
         this.clientMerge = clientMerge;
+        this.clientAnonymization = clientAnonymization;
     }
 
     @GetMapping("/health")
@@ -125,9 +130,7 @@ public class AppApiController {
     @GetMapping("/dashboard")
     public DashboardView dashboard() {
         Instant now = Instant.now();
-        Instant from = now.minusSeconds(3600);
-        Instant to = now.plusSeconds(86400);
-        List<AppointmentView> today = bookingService.calendar(from, to, null);
+        List<AppointmentView> today = todayOfTenant(null);
         ActorContext.Actor actor = ActorContext.current().orElse(null);
         boolean master = actor != null && actor.isMaster();
         return new DashboardView(
@@ -146,12 +149,8 @@ public class AppApiController {
             throw DomainException.forbidden("FORBIDDEN_RESOURCE", "Master today is available only for MASTER actors");
         }
         UUID specialistId = actor.specialistId();
-        var tenant = tenants.requireById(TenantContext.require());
-        ZoneId zone = ZoneId.of(tenant.getTimezone());
-        LocalDate day = LocalDate.now(zone);
-        Instant from = day.atStartOfDay(zone).toInstant();
-        Instant to = day.plusDays(1).atStartOfDay(zone).toInstant();
-        List<AppointmentView> appointments = bookingService.calendar(from, to, specialistId);
+        LocalDate day = LocalDate.now(ZoneId.of(tenants.requireById(TenantContext.require()).getTimezone()));
+        List<AppointmentView> appointments = todayOfTenant(specialistId);
         List<MasterTodayView.Item> items = new ArrayList<>();
         for (AppointmentView appointment : appointments) {
             // Decision A and TD-19: a visit hidden from the master or cancelled carries neither the trust nor the
@@ -286,6 +285,21 @@ public class AppApiController {
         return catalogService.saveRules(body);
     }
 
+    /**
+     * Free slots for the console's dialogs: the rules of the public route, behind the sign-in and outside its per-IP limit.
+     * OWNER: any specialist of the tenant; MASTER: their own.
+     */
+    @GetMapping("/slots")
+    public List<Instant> slots(
+            @RequestParam UUID serviceId,
+            @RequestParam UUID specialistId,
+            @RequestParam LocalDate from,
+            @RequestParam LocalDate to
+    ) {
+        assertOwnerOrSelf(specialistId);
+        return bookingService.freeSlots(specialistId, serviceId, from, to);
+    }
+
     @GetMapping("/calendar")
     public List<AppointmentView> calendar(
             @RequestParam Instant from,
@@ -350,9 +364,13 @@ public class AppApiController {
         ClientView client = crmService.findById(id).orElseThrow();
         TrustView trust = retentionService.assess(id);
         Map<String, Object> body = new LinkedHashMap<>();
+        ClientRetirement retirement = crmService.retirementOf(id);
         body.put("client", client);
+        body.put("anonymizedAt", retirement.anonymizedAt());
+        body.put("mergedIntoClientId", retirement.mergedIntoClientId());
         body.put("trust", trust);
         body.put("history", history);
+        body.put("packages", retentionService.packagesForClient(id));
         return body;
     }
 
@@ -360,6 +378,12 @@ public class AppApiController {
     @PostMapping("/clients/{id}/merge")
     public ClientView mergeClients(@PathVariable UUID id, @RequestParam UUID absorbedId) {
         return clientMerge.merge(id, absorbedId);
+    }
+
+    /** Owner-only, irreversible: erases the client's personal data and keeps the visit facts (PRODUCT_PLAN §10). */
+    @PostMapping("/clients/{id}/anonymize")
+    public ClientView anonymizeClient(@PathVariable UUID id) {
+        return clientAnonymization.anonymize(id);
     }
 
     /** Owner-only: withdraws a client's marketing consent on their request (PRODUCT_PLAN §10); audited. */
@@ -474,6 +498,20 @@ public class AppApiController {
             throw DomainException.badRequest("INVALID_AI_SETTINGS", "notesToLlm is required");
         }
         return aiAssistantService.setNotesToLlm(body.notesToLlm());
+    }
+
+    /**
+     * Visits whose service starts today as the tenant counts days, past ones too (their outcome is still to be marked), ordered by
+     * start. The calendar answers by occupied time, so a buffer across midnight must not bring in a visit of another day.
+     */
+    private List<AppointmentView> todayOfTenant(UUID specialistId) {
+        ZoneId zone = ZoneId.of(tenants.requireById(TenantContext.require()).getTimezone());
+        LocalDate day = LocalDate.now(zone);
+        Instant from = day.atStartOfDay(zone).toInstant();
+        Instant to = day.plusDays(1).atStartOfDay(zone).toInstant();
+        return bookingService.calendar(from, to, specialistId).stream()
+                .filter(visit -> !visit.serviceStart().isBefore(from) && visit.serviceStart().isBefore(to))
+                .toList();
     }
 
     private void requireSpecialist(UUID id) {

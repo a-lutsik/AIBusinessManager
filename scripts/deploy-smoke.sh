@@ -16,7 +16,7 @@
 #                                      network tab (it is valid for a few minutes).
 #   --realm NAME        KC_REALM       realm name (default: cadence)
 #   --check-ports       CHECK_PORTS=1  also inspect listening sockets of THIS host (ss, or lsof on macOS): no 5432/5433
-#                                      on a public address, 8080/8081 only on loopback
+#                                      on a public address, 8080/8081/8082 only on loopback
 #   --strict            STRICT=1       treat WARN as FAIL (use this for the real production run)
 #
 # The access token is never put on a command line (it would be visible in `ps`): curl reads it from a 0600 header file
@@ -266,7 +266,7 @@ if [ "$CHECK_PORTS" = 1 ]; then
                 else warn "port $port listens on loopback only ($(echo $addrs)): not part of the prod stack, check what it is"; fi
             fi
         done
-        for port in 8080 8081; do
+        for port in 8080 8081 8082; do
             addrs=$(port_addrs "$port")
             if [ -z "$addrs" ]; then
                 warn "port $port was not seen listening (docker may publish it without a userland proxy; confirm with 'docker compose ps')"

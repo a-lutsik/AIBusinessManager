@@ -1,0 +1,10 @@
+# Only what the image needs out of the repository root; BuildKit reads this file for docker/web/Dockerfile.
+*
+!frontend
+!docker/web
+frontend/node_modules
+frontend/.expo
+frontend/dist
+frontend/e2e
+frontend/e2e-results
+frontend/.env*

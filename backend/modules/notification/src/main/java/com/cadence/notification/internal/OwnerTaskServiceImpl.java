@@ -6,6 +6,8 @@ import com.cadence.platform.persistence.TenantAwareDsl;
 import com.cadence.platform.tenancy.TenantContext;
 import com.cadence.platform.time.Utc;
 import org.jooq.DSLContext;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -17,6 +19,8 @@ import static com.cadence.platform.jooq.Tables.OWNER_TASK;
 
 @Service
 public class OwnerTaskServiceImpl implements OwnerTaskService {
+
+    private static final Logger log = LoggerFactory.getLogger(OwnerTaskServiceImpl.class);
 
     private final DSLContext dsl;
 
@@ -99,5 +103,15 @@ public class OwnerTaskServiceImpl implements OwnerTaskService {
                 .set(OWNER_TASK.CLIENT_ID, to)
                 .where(TenantAwareDsl.tenantEquals(OWNER_TASK.TENANT_ID).and(OWNER_TASK.CLIENT_ID.eq(from)))
                 .execute();
+    }
+
+    @Override
+    @Transactional
+    public int eraseForClient(UUID clientId) {
+        int deleted = dsl.deleteFrom(OWNER_TASK)
+                .where(TenantAwareDsl.tenantEquals(OWNER_TASK.TENANT_ID).and(OWNER_TASK.CLIENT_ID.eq(clientId)))
+                .execute();
+        log.info("Client erased from owner tasks: client={}, tasks={}", clientId, deleted);
+        return deleted;
     }
 }

@@ -8,8 +8,9 @@
 #   keycloak-db  Separate PostgreSQL for Keycloak (see the note on the Keycloak database below).
 #   keycloak     Identity provider, production mode (`start`), plain HTTP behind your TLS-terminating reverse proxy.
 #   app          Spring Boot backend, profile `prod`.
+#   web          Web console and public booking pages: the static web export behind nginx (docker/web).
 #   backup       Scheduled pg_dump of both databases into ${BACKUP_DIR:-./backups} (see README, "Backups and restore").
-# Host ports: only 127.0.0.1:8080 (app) and 127.0.0.1:8081 (Keycloak), for the reverse proxy on the same host.
+# Host ports: only 127.0.0.1:8080 (app), 127.0.0.1:8081 (Keycloak) and 127.0.0.1:8082 (web), for the reverse proxy on the same host.
 #
 # Every secret is required: `docker compose config` / `up` fails with the variable name when one is missing.
 # Do not put `$`, `'`, spaces or `#` in secret values: the application's Flyway migration rejects `'` and `$` in
@@ -155,6 +156,33 @@ services:
       timeout: 5s
       retries: 5
       start_period: 90s
+
+  # Static host of the web console. The URLs are compiled into the bundle, so changing one needs `up -d --build web`.
+  # No application data and no secret in here; nginx runs as a non-root user with a read-only root file system.
+  web:
+    build:
+      context: .
+      dockerfile: docker/web/Dockerfile
+      args:
+        EXPO_PUBLIC_API_URL: ${CADENCE_API_URL:?CADENCE_API_URL is required (public https URL of the API, e.g. https://api.example.com)}
+        EXPO_PUBLIC_OIDC_ISSUER: ${KC_HOSTNAME:?KC_HOSTNAME is required (public https URL of Keycloak)}/realms/cadence
+        EXPO_PUBLIC_AUTH_MODE: oidc
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8082:8082"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8082/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
 
   # Scheduled logical backups of BOTH databases (application DB + Keycloak DB), see docker/backup/backup.sh.
   # The image is the application database's own image, so pg_dump/pg_restore match the server version; it is only used

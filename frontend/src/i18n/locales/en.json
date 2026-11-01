@@ -300,5 +300,21 @@
   "catalog.error.PRICE_PRECISION": "This currency has fewer digits after the separator.",
   "catalog.error.EXCEPTION_DATE_TAKEN": "This date already has an exception. Delete it first.",
   "profile.error.generic": "Could not load your profile, so prices and editing are unavailable.",
-  "catalog.error.SPECIALIST_UNMAPPED": "This sign-in is not linked to a specialist. Ask the owner or the operator to link it."
+  "catalog.error.SPECIALIST_UNMAPPED": "This sign-in is not linked to a specialist. Ask the owner or the operator to link it.",
+  "book.slotsRateLimited": "Too many requests right now. Please try again in a minute.",
+  "book.slotsFailed": "Could not load the free times. Please try again.",
+  "client.anonymizedName": "Anonymized client",
+  "client.anonymize.action": "Anonymize client",
+  "client.anonymize.done": "The personal data of this client was erased on request. Visits stay in the statistics without the person.",
+  "client.anonymize.confirmTitle": "Anonymize this client for good?",
+  "client.anonymize.confirmBody": "The name, phone, notes, tags, booking links and everything typed on their visits are erased, along with the AI conversations about this client and the drafts in them, also about other clients. This cannot be undone. Visits stay in the statistics without the person. If the same phone books again, it becomes a new client.",
+  "client.anonymize.confirmAction": "Anonymize permanently",
+  "client.anonymize.errorUpcoming": "This client has upcoming visits. Cancel them first, then anonymize.",
+  "client.anonymize.errorGeneric": "Could not anonymize the client. Please try again.",
+  "client.mergedName": "Merged client",
+  "client.merged.done": "This profile was merged into another client. Its visits are there now.",
+  "client.anonymize.packagesWarning": "{count, plural, one {# unused package session will be lost.} other {# unused package sessions will be lost.}}",
+  "ai.conversationErased": "This conversation was erased together with a client's data, so your message was not sent. It is still in the field: press Send to start a new conversation with it.",
+  "book.retry": "The booking did not go through, nothing was saved. Please press Book again.",
+  "ai.conversationGone": "This conversation no longer exists, so your message was not sent. It is still in the field: press Send to start a new conversation with it."
 }

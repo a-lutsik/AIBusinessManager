@@ -2,8 +2,10 @@ package com.cadence.app.web;
 
 import com.cadence.app.ratelimit.RateLimitedException;
 import com.cadence.platform.error.DomainException;
+import com.cadence.platform.persistence.SqlStates;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.ConcurrencyFailureException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -60,8 +62,16 @@ public class ApiExceptionHandler {
      */
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<ProblemDetail> onDataIntegrity(DataIntegrityViolationException ex) {
-        log.warn("Unmapped data integrity violation, answering 409 DATA_CONFLICT", ex);
+        // No exception and no detail in the log: PostgreSQL's DETAIL quotes the values of the row, a phone among them.
+        log.warn("Unmapped data integrity violation, answering 409 DATA_CONFLICT: {}", SqlStates.summaryOf(ex));
         return problem(409, "DATA_CONFLICT", "The request conflicts with the current state of the data. Reload and retry.");
+    }
+
+    /** A deadlock or a serialization failure: the transaction was rolled back and nothing happened, TD-81. */
+    @ExceptionHandler(ConcurrencyFailureException.class)
+    public ResponseEntity<ProblemDetail> onConcurrencyFailure(ConcurrencyFailureException ex) {
+        log.warn("Transaction lost to a concurrent one, answering 409 CONCURRENT_RETRY: {}", SqlStates.summaryOf(ex));
+        return problem(409, "CONCURRENT_RETRY", "The request collided with another change and nothing was saved. Please retry.");
     }
 
     private static ResponseEntity<ProblemDetail> problem(int status, String code, String detail) {

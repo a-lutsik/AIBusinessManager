@@ -64,6 +64,7 @@ class CrmServiceFindOrCreateTest {
         repository = mock(ClientRepository.class);
         transactions = new RecordingTransactionManager();
         service = new CrmServiceImpl(repository, transactions, mock(com.cadence.platform.audit.AuditLogger.class), List.of());
+        when(repository.updateProfile(any(), any(), any(), any(), any(), any(), any())).thenReturn(1);
     }
 
     private static ClientView client(UUID id, String name) {

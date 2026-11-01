@@ -47,6 +47,35 @@ test('AI-1 a chat turn answers, remembers the conversation and shows real names 
   await screenshotWidths(page, 'ai-chat');
 });
 
+test('AI-1b a conversation that is gone at send time: nothing is forwarded, the text stays, sending again starts a new one', async ({ page }) => {
+  await openAi(page);
+  for (const [code, status, text] of [
+    ['AI_CONVERSATION_ERASED', 409, "This conversation was erased together with a client's data, so your message was not sent."],
+    ['CONVERSATION_NOT_FOUND', 404, 'This conversation no longer exists, so your message was not sent.'],
+  ] as const) {
+    const { conversationId } = await say(page, '>>text Noted');
+    let chats = 0;
+    await page.route('**/api/app/ai/chat', (route) => {
+      chats += 1;
+      return route.fulfill({ status, contentType: 'application/problem+json', json: { code, detail: 'Gone' } });
+    });
+    const input = page.getByPlaceholder('Ask about today, no-shows, or a draft cancel');
+    await input.fill('>>text Please note this');
+    await page.getByRole('button', { name: 'Send', exact: true }).click();
+
+    await expect(page.getByText(text)).toBeVisible();
+    expect(chats, 'not forwarded on its own').toBe(1);
+    await expect(input, 'the text stays in the field').toHaveValue('>>text Please note this');
+    await expect.poll(() => page.evaluate((key) => localStorage.getItem(key), CONVERSATION_KEY)).toBeNull();
+
+    await page.unroute('**/api/app/ai/chat');
+    const { conversationId: fresh } = await say(page, '>>text Please note this');
+    expect(fresh).not.toBe(conversationId);
+    await expect(page.getByText('Please note this', { exact: true })).toBeVisible();
+    await expect(page.getByText(text)).toHaveCount(0);
+  }
+});
+
 test('AI-2 get_schedule of a seed day answers with the real client names', async ({ page, request }) => {
   const { day, clients } = await seedDay(request);
   await openAi(page);

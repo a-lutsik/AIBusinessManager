@@ -8,7 +8,6 @@ import {
   api,
   ApiError,
   LUMEN_TENANT_ID,
-  type AiChatResponse,
   type AiSettingsView,
   type ConversationHistoryView,
   type DraftAction,
@@ -154,15 +153,7 @@ function AiScreen() {
     setBusy(true);
     setError(null);
     try {
-      let res: AiChatResponse;
-      try {
-        res = await api.aiChat(LUMEN_TENANT_ID, text, currentLocale(), conversationId);
-      } catch (e: unknown) {
-        if (!conversationId || !(e instanceof ApiError) || e.code !== 'CONVERSATION_NOT_FOUND') throw e;
-        // The remembered conversation is gone (retention, another tenant): start a new one with the same message.
-        forgetConversation();
-        res = await api.aiChat(LUMEN_TENANT_ID, text, currentLocale());
-      }
+      const res = await api.aiChat(LUMEN_TENANT_ID, text, currentLocale(), conversationId);
       storeConversation(res.conversationId);
       setConversationId(res.conversationId);
       mergeDrafts(res.drafts);
@@ -177,7 +168,12 @@ function AiScreen() {
       setBudgetExceeded(false);
       setMessage('');
     } catch (e: unknown) {
-      if (e instanceof ApiError && e.code === 'AI_BUDGET_EXCEEDED') {
+      // Gone (erased with a client's data, retention): the text may be about that person, so it goes nowhere on its own and
+      // stays in the field. The owner reads why and sends it to a new conversation, or does not.
+      if (e instanceof ApiError && (e.code === 'AI_CONVERSATION_ERASED' || e.code === 'CONVERSATION_NOT_FOUND')) {
+        forgetConversation();
+        setError(t(e.code === 'AI_CONVERSATION_ERASED' ? 'ai.conversationErased' : 'ai.conversationGone'));
+      } else if (e instanceof ApiError && e.code === 'AI_BUDGET_EXCEEDED') {
         // The turn may have stored the message and some drafts before the budget ran out: show them. The text stays typed.
         setBudgetExceeded(true);
         await refresh(conversationId);

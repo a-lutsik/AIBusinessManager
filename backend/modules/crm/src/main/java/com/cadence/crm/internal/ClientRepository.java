@@ -13,6 +13,7 @@ import org.jooq.impl.DSL;
 import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -41,6 +42,14 @@ class ClientRepository {
                 .fetchOptional(this::toView);
     }
 
+    /** The profiles merged directly into this one. */
+    List<UUID> absorbedBy(UUID id) {
+        return dsl.select(CLIENT.ID)
+                .from(CLIENT)
+                .where(TenantAwareDsl.tenantEquals(CLIENT.TENANT_ID).and(CLIENT.MERGED_INTO_CLIENT_ID.eq(id)))
+                .fetch(CLIENT.ID);
+    }
+
     /** Merge-relevant state of a profile: the view plus whether it was anonymized or absorbed. */
     record ClientState(ClientView view, Instant anonymizedAt, UUID mergedIntoClientId) {
         boolean retired() {
@@ -51,6 +60,21 @@ class ClientRepository {
     Optional<ClientState> findState(UUID id) {
         return dsl.selectFrom(CLIENT)
                 .where(TenantAwareDsl.tenantEquals(CLIENT.TENANT_ID).and(CLIENT.ID.eq(id)))
+                .fetchOptional(r -> new ClientState(
+                        toView(r),
+                        r.get(CLIENT.ANONYMIZED_AT) == null ? null : Utc.toInstant(r.get(CLIENT.ANONYMIZED_AT)),
+                        r.get(CLIENT.MERGED_INTO_CLIENT_ID)
+                ));
+    }
+
+    /**
+     * {@link #findState} with a key-share lock until the transaction ends. It conflicts only with {@link #lockForUpdate}, so
+     * it waits for an anonymization and reads the row as that left it, and blocks none of the ordinary profile updates.
+     */
+    Optional<ClientState> findStateForKeyShare(UUID id) {
+        return dsl.selectFrom(CLIENT)
+                .where(TenantAwareDsl.tenantEquals(CLIENT.TENANT_ID).and(CLIENT.ID.eq(id)))
+                .forKeyShare()
                 .fetchOptional(r -> new ClientState(
                         toView(r),
                         r.get(CLIENT.ANONYMIZED_AT) == null ? null : Utc.toInstant(r.get(CLIENT.ANONYMIZED_AT)),
@@ -153,7 +177,11 @@ class ClientRepository {
         return client;
     }
 
-    void updateProfile(UUID id, String name, String notes, String tags, String locale, Boolean consent, String consentVersion) {
+    /**
+     * Returns the rows written: 0 for an anonymized profile. The condition is checked again after waiting for the row lock, so a
+     * caller that read the profile before an anonymization committed cannot write the name back.
+     */
+    int updateProfile(UUID id, String name, String notes, String tags, String locale, Boolean consent, String consentVersion) {
         var update = dsl.update(CLIENT)
                 .set(CLIENT.DISPLAY_NAME, name);
         if (notes != null) {
@@ -170,7 +198,10 @@ class ClientRepository {
                     .set(CLIENT.CONSENT_VERSION, consentVersion)
                     .set(CLIENT.CONSENT_AT, Utc.toLocal(Instant.now()));
         }
-        update.where(TenantAwareDsl.tenantEquals(CLIENT.TENANT_ID).and(CLIENT.ID.eq(id))).execute();
+        return update.where(TenantAwareDsl.tenantEquals(CLIENT.TENANT_ID)
+                        .and(CLIENT.ID.eq(id))
+                        .and(CLIENT.ANONYMIZED_AT.isNull()))
+                .execute();
     }
 
     /**
@@ -257,13 +288,12 @@ class ClientRepository {
         anonymize(absorbedId);
         dsl.update(CLIENT)
                 .set(CLIENT.MERGED_INTO_CLIENT_ID, survivorId)
-                .set(CLIENT.TAGS, (String) null)
                 .set(CLIENT.COMPLETED_VISIT_COUNT, 0)
                 .set(CLIENT.NO_SHOW_COUNT, 0)
                 .set(CLIENT.LATE_CANCEL_COUNT, 0)
                 .set(CLIENT.COMPLETED_VALUE_MINOR, 0)
-                .set(CLIENT.FIRST_VISIT_AT, (java.time.LocalDateTime) null)
-                .set(CLIENT.LAST_VISIT_AT, (java.time.LocalDateTime) null)
+                .set(CLIENT.FIRST_VISIT_AT, (LocalDateTime) null)
+                .set(CLIENT.LAST_VISIT_AT, (LocalDateTime) null)
                 .where(TenantAwareDsl.tenantEquals(CLIENT.TENANT_ID).and(CLIENT.ID.eq(absorbedId)))
                 .execute();
     }
@@ -273,7 +303,12 @@ class ClientRepository {
                 .set(CLIENT.DISPLAY_NAME, "anonymized")
                 .set(CLIENT.NORMALIZED_PHONE, AnonymizedPhone.forClient(id))
                 .set(CLIENT.NOTES, (String) null)
+                .set(CLIENT.TAGS, (String) null)
+                .set(CLIENT.PREFERRED_LOCALE, (String) null)
                 .set(CLIENT.TELEGRAM_CHAT_ID, (String) null)
+                .set(CLIENT.MARKETING_CONSENT, false)
+                .set(CLIENT.CONSENT_VERSION, (String) null)
+                .set(CLIENT.CONSENT_AT, (LocalDateTime) null)
                 .set(CLIENT.ANONYMIZED_AT, Utc.toLocal(Instant.now()))
                 .where(TenantAwareDsl.tenantEquals(CLIENT.TENANT_ID).and(CLIENT.ID.eq(id)))
                 .execute();
@@ -282,7 +317,7 @@ class ClientRepository {
     private ClientView toView(Record r) {
         return new ClientView(
                 r.get(CLIENT.ID),
-                r.get(CLIENT.NORMALIZED_PHONE),
+                r.get(CLIENT.ANONYMIZED_AT) == null ? r.get(CLIENT.NORMALIZED_PHONE) : null,
                 r.get(CLIENT.DISPLAY_NAME),
                 r.get(CLIENT.NOTES),
                 r.get(CLIENT.TAGS),

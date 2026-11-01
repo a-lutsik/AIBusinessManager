@@ -8,6 +8,8 @@ import { useRole } from './support/role';
 import { screenshotWidths } from './support/screenshots';
 
 test.beforeEach(async ({ page }) => {
+  // Several chat turns per test: 25 s on a loaded machine (AI-5), over the default 30 s once (AI-4).
+  test.slow();
   await useRole(page, 'OWNER');
 });
 

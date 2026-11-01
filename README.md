@@ -269,11 +269,12 @@ export JAVA_HOME="$HOME/Library/Java/JavaVirtualMachines/corretto-21.0.7/Content
 
 `.github/workflows/ci.yml` runs on every push and pull request:
 
-- **backend**: Gradle on JDK 21 with the JDK 25 toolchain, `./gradlew build --no-build-cache` (jOOQ codegen, ArchUnit, unit tests and Testcontainers ITs). The build cache is off so cached results never hide a test run. A per-module test summary goes to the job summary; reports are uploaded on failure. Two guards keep a runner without a working Docker daemon from going green with the Testcontainers ITs skipped: with `CI` set (GitHub sets it) `AbstractTimescaleIT` fails instead of skipping when Docker is unreachable (on a developer machine without Docker the ITs are still skipped), and `.github/scripts/junit_summary.py --fail-on-skipped --min-tests 400 --require-class 'IT$'` fails the job when any test case was skipped, fewer than 400 ran (1042 at the time of writing; lower the number only when tests were removed on purpose) or no `*IT` class executed.
+- **backend**: Gradle on JDK 21 with the JDK 25 toolchain, `./gradlew build --no-build-cache` (jOOQ codegen, ArchUnit, unit tests and Testcontainers ITs). The build cache is off so cached results never hide a test run. A per-module test summary goes to the job summary; reports are uploaded on failure. Two guards keep a runner without a working Docker daemon from going green with the Testcontainers ITs skipped: with `CI` set (GitHub sets it) `AbstractTimescaleIT` fails instead of skipping when Docker is unreachable (on a developer machine without Docker the ITs are still skipped), and `.github/scripts/junit_summary.py --fail-on-skipped --min-tests 400 --require-class 'IT$'` fails the job when any test case was skipped, fewer than 400 ran (1115 at the time of writing; lower the number only when tests were removed on purpose) or no `*IT` class executed.
 - **frontend**: Node 22, `npm ci`, `npm run lint` (zero warnings, includes the ban on hardcoded JSX text) and `npm run lint:selftest`, `npm run i18n:check`, `npm run typecheck`, `npx expo export --platform web`.
 - **e2e**: Playwright on the isolated stack described in [End-to-end tests](#end-to-end-tests-playwright): `npm run e2e`, then `npm run e2e:oidc` (also when the first one failed), Chromium only. The results of each run are uploaded as the artifacts `e2e-results` and `e2e-results-oidc` (reports, screenshots, traces and logs, without the exported bundles; 7 days). It is not a required check: do not add it to branch protection until it has proven stable on the runners.
-- **compose**: the production compose file must reject `.env.prod.example` (empty secrets) and accept a fully generated env file.
+- **compose**: the production compose file must reject `.env.prod.example` (empty secrets) and accept a fully generated env file; the `web` service must be refused without `CADENCE_API_URL` and stay on `127.0.0.1:8082` with its URLs.
 - **docker**: builds `backend/Dockerfile` without pushing.
+- **web**: `scripts/web-host-check.sh` builds `docker/web/Dockerfile` and checks the rules of `docker/web/default.conf` on the real nginx: dynamic routes, the 404 page, leaving the web root, security and cache headers, non-root user, no `localhost` in the bundle, no token in the access log. Only docker and curl.
 
 Dependabot (`.github/dependabot.yml`) proposes weekly updates for Gradle, npm, GitHub Actions and Docker base images; Expo/React majors are held back until an SDK upgrade.
 
@@ -294,15 +295,17 @@ docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
 | Service | Image | Host port | Notes |
 |---------|-------|-----------|-------|
 | `app` | built from `backend/Dockerfile` (JRE 25, non-root, read-only root fs) | `127.0.0.1:8080` | Spring profile `prod`; `/actuator/health` only |
+| `web` | built from `docker/web/Dockerfile` (nginx, non-root, read-only root fs) | `127.0.0.1:8082` | static web export; dynamic routes and the 404 page in `docker/web/default.conf` |
 | `keycloak` | `quay.io/keycloak/keycloak:26.2.5`, `start --import-realm` | `127.0.0.1:8081` | production mode, plain HTTP behind the proxy (`KC_PROXY_HEADERS=xforwarded`, `KC_HOSTNAME` = public URL) |
 | `timescaledb` | `timescale/timescaledb:2.30.0-pg16` | none | application database, compose network only |
 | `keycloak-db` | `postgres:16.9-alpine` | none | Keycloak's own database, separate from the application database |
 | `backup` | `timescale/timescaledb:2.30.0-pg16` (client tools only) | none | scheduled `pg_dump` of both databases into `BACKUP_DIR` (see [Backups and restore](#backups-and-restore)) |
 
-Nothing is published on 5432/5433. The two published ports are bound to loopback only, for the reverse proxy.
+Nothing is published on 5432/5433. The three published ports are bound to loopback only, for the reverse proxy.
 
 - **Reverse proxy (not part of this repo):** TLS terminates in front. Route `https://auth.example.com` (= `KC_HOSTNAME`) to
-  `127.0.0.1:8081` and the API host to `127.0.0.1:8080`, forwarding `X-Forwarded-For`, `-Proto` and `-Host`. Expose
+  `127.0.0.1:8081`, the API host (= `CADENCE_API_URL`) to `127.0.0.1:8080` and the console host (= `CADENCE_WEB_ORIGIN`) to
+  `127.0.0.1:8082`, forwarding `X-Forwarded-For`, `-Proto` and `-Host`. Expose
   **only** `/realms/cadence/**` and `/resources/**` of Keycloak on the public hostname. Do not expose `/admin/**`,
   `/realms/master/**` (the admin realm: its token endpoint accepts the bootstrap admin's password) or anything else. Admin
   work is done from a separate, IP-allow-listed/VPN-only proxy location or hostname (Keycloak builds its admin links from
@@ -329,9 +332,14 @@ Nothing is published on 5432/5433. The two published ports are bound to loopback
   ```
 
   Together with the proxy rule above this keeps the admin realm off the internet; the setting is a second layer.
-- **Web console:** serve it from `CADENCE_WEB_ORIGIN` (e.g. `https://app.example.com`) built with
-  `EXPO_PUBLIC_API_URL`, `EXPO_PUBLIC_OIDC_ISSUER=<KC_HOSTNAME>/realms/cadence`. That origin is the only CORS origin of the
-  API (`APP_CORS_ALLOWED_ORIGINS`) and the only web redirect/origin of the Keycloak client.
+- **Web console:** the `web` service serves the static export at `CADENCE_WEB_ORIGIN` (e.g. `https://app.example.com`), built
+  with `EXPO_PUBLIC_API_URL=<CADENCE_API_URL>`, `EXPO_PUBLIC_OIDC_ISSUER=<KC_HOSTNAME>/realms/cadence` and
+  `EXPO_PUBLIC_AUTH_MODE=oidc`. These are compiled into the bundle: an empty one stops the build, and a changed one needs
+  `up -d --build web`. That origin is the only CORS origin of the API (`APP_CORS_ALLOWED_ORIGINS`) and the only web
+  redirect/origin of the Keycloak client. `scripts/web-host-check.sh` builds the image and checks on its nginx that `/book/<slug>`,
+  `/b/<id>?token=`, `/clients/<id>` and `/specialists/<id>` open their pages and that an unknown URL answers 404 with
+  `+not-found` (also a CI job). Tokens of manage links stay out of the access log, which records paths without the query. HSTS
+  belongs on the proxy, where TLS ends.
 
 ### What the `prod` profile enforces
 
@@ -471,6 +479,28 @@ the proxy on the Docker host the peer is the compose network gateway; find it wi
 `docker network inspect cadence_default --format '{{(index .IPAM.Config 0).Gateway}}'` and set e.g.
 `APP_RATE_LIMIT_TRUSTED_PROXIES=172.18.0.1/32`. Leave it empty and every client shares the proxy's address (and its
 limit). Do not list ranges clients can reach directly. See [Public API rate limits](#public-api-rate-limits).
+
+### Erasing a client on request
+
+Right to erasure (PRODUCT_PLAN §10): the owner opens the client's card and uses **Anonymize client** (`POST
+/api/app/clients/{id}/anonymize`, OWNER only). It is irreversible and refused with `CLIENT_HAS_UPCOMING_VISITS` while the client
+has a pending or confirmed visit that has not ended: cancel those first.
+
+- **Goes:** name, phone, notes, tags, locale, Telegram chat and consent on the profile; the typed name and note on every visit;
+  manage links (revoked at once, a new one is refused); owner tasks about the client; the trust override and its reason; the
+  owner's package names; every AI conversation that names the client, with its messages, drafts and logs.
+- **Stays, without the person:** visits and their journal, the profile's counters and the package balances (unused sessions can no
+  longer be used, the confirmation says how many), so metrics of past periods do not move. `audit_log` holds ids and counters only and records `client.anonymize`.
+- The same phone can book again and becomes a new client with no link to the old profile.
+- **Stays until its own retention:** database backups (`BACKUP_RETENTION_DAYS`, offsite by your own schedule); state this in the
+  privacy notice. Two limits are in `docs/tech-debt.md`: a name typed in an AI chat that was not recognised at the time (TD-36,
+  TD-79) and the masked phone in a rate-limit audit record (TD-80).
+- **Out of reach once sent:** prompts that already went to a real LLM provider (masked names, but free text such as notes and reasons)
+  stay with the provider under its own retention, whatever is erased here. With `APP_AI_PROVIDER=stub` this does not exist. Before a
+  real provider, this must be in the privacy notice and covered by the DPA.
+- **Logs outside the application:** PostgreSQL's server log can quote a phone in the `DETAIL` of a failed statement, and an access
+  log of your reverse proxy holds the query string of manage links unless you strip it. Anonymization does not reach them: keep
+  their retention no longer than the privacy notice says, and leave `$args` out of the proxy's log format.
 
 ### Backups and restore
 
@@ -629,7 +659,7 @@ Open `waitlist/index.html` (or any static file server). Submissions stay in `loc
 
 - Telegram bot is stubbed (no live Bot API / chat_id deep-link).
 - LLM defaults to the stub. Set `APP_AI_PROVIDER=deepseek` plus `DEEPSEEK_API_KEY` (or gitignored `application-local.yml`) to use DeepSeek. The DeepSeek tool-call format is confirmed only by the operator's live check ([Live check DeepSeek](#live-check-deepseek), TD-41); thinking mode is not supported with the tool loop.
-- AI: name masking is best effort (an unrecognised or misspelled name in an owner message reaches the provider, TD-36; notes are off by default and masked by denylist and regex, TD-37); the monthly token budget is set by the operator in the database, there is no admin surface (TD-42); no right-to-erasure route yet (`crm.anonymize` has no caller). Full list in `docs/tech-debt.md`.
+- AI: name masking is best effort (an unrecognised or misspelled name in an owner message reaches the provider, TD-36; notes are off by default and masked by denylist and regex, TD-37); the monthly token budget is set by the operator in the database, there is no admin surface (TD-42). Full list in `docs/tech-debt.md`.
 - Playwright E2E runs in CI as a separate, non-required `e2e` job; the booking core is also covered by `BookingCoreIT` (Testcontainers TimescaleDB).
 - Mobile store builds are not published (in-bounds for MVP).
 - Figma pixel-match was skipped (quota). Calendar is list+panel, not a dense week grid.

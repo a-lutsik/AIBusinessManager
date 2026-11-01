@@ -210,22 +210,8 @@ public class GrowthServiceImpl implements GrowthService {
     public List<GrowthSignalView> signals() {
         // Only the current period (the tenant's month now): older periods are history, as are resolved signals.
         ZoneId zone = ZoneId.of(tenants.requireById(TenantContext.require()).getTimezone());
-        List<GrowthSignalView> stored = signals.open(YearMonth.now(clock.withZone(zone)).toString(), 20);
-        if (!stored.isEmpty()) {
-            return stored;
-        }
-        return List.of(new GrowthSignalView(
-                null,
-                "METRICS_PENDING",
-                "Metrics not calculated yet",
-                "Run the monthly metrics job to populate signals",
-                "Open the dashboard after seed/recalculate",
-                "INFO",
-                "OPEN_METRICS",
-                null,
-                clock.instant(),
-                null
-        ));
+        // None open is an answer of its own: the screen says so, and a card without an action would claim metrics are missing.
+        return signals.open(YearMonth.now(clock.withZone(zone)).toString(), 20);
     }
 
     @Override

@@ -18,7 +18,8 @@ public interface CrmService {
     /**
      * The client with this phone, created with the given name, locale and consent when there is none. For an existing
      * client the booking only adds: marketing consent {@code true} is recorded with {@code consentVersion}, {@code false}
-     * never revokes it; the locale is set only when the client has none; the stored name is kept.
+     * never revokes it; the locale is set only when the client has none; the stored name is kept. A client anonymized
+     * while this waited for the row is left alone: the phone is free again and a new client is created.
      */
     ClientView findOrCreate(String e164Phone, String displayName, String locale, boolean marketingConsent, String consentVersion);
 
@@ -26,6 +27,18 @@ public interface CrmService {
 
     /** {@link #findById} of a client that is neither anonymized nor merged away; empty otherwise. */
     Optional<ClientView> findActiveById(UUID clientId);
+
+    /** When the client was anonymized and which profile absorbed them; both null for an active client. {@code CLIENT_NOT_FOUND} (404). */
+    ClientRetirement retirementOf(UUID clientId);
+
+    /**
+     * The client, who must not be anonymized or merged away, with a key-share row lock until the transaction ends: a write
+     * that must not land on a retired client calls it first, and an anonymization ({@link #anonymize}) either waits for that
+     * write and sees it, or wins and this answers 409.
+     *
+     * @throws com.cadence.platform.error.DomainException {@code CLIENT_NOT_FOUND} (404), {@code CLIENT_ANONYMIZED} (409)
+     */
+    ClientView requireActive(UUID clientId);
 
     Optional<ClientView> findByPhone(String e164Phone);
 
@@ -55,7 +68,7 @@ public interface CrmService {
      * {@code client.consent.withdraw} with the source. Idempotent. No marketing messages are sent yet, so for now it
      * only records the client's choice that later sends must honour.
      *
-     * @throws com.cadence.platform.error.DomainException {@code CLIENT_NOT_FOUND} (404)
+     * @throws com.cadence.platform.error.DomainException {@code CLIENT_NOT_FOUND} (404), {@code CLIENT_ANONYMIZED} (409), nothing audited
      */
     ClientView withdrawMarketingConsent(UUID clientId, String source);
 
@@ -65,6 +78,15 @@ public interface CrmService {
 
     void recordLateCancel(UUID clientId);
 
+    /**
+     * CRM half of erasing a client (PRODUCT_PLAN §10): tells the {@link ClientRetirementListener}s ({@code clientErasing}, also for every profile merged into this one, along a chain too), locks the profile against
+     * bookings, and empties it: name and phone become placeholders, notes, tags, locale, Telegram chat and consent go; the
+     * counters and first/last visit stay. The phone is free for a new client from the commit on. The caller
+     * ({@code ClientAnonymizationService}) erases what the other modules hold in the same transaction.
+     *
+     * @throws com.cadence.platform.error.DomainException {@code CLIENT_NOT_FOUND} (404), {@code CLIENT_ALREADY_ANONYMIZED}
+     *     (409) for a profile already anonymized or merged away
+     */
     ClientView anonymize(UUID clientId);
 
     /**

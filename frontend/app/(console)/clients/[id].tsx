@@ -4,32 +4,69 @@ import { Button } from '@/components/ui/Button';
 import { ScrollView, Text, View } from 'react-native';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { TrustBadge } from '@/components/ui/TrustBadge';
-import { api, LUMEN_TENANT_ID } from '@/src/api/client';
+import { api, ApiError, LUMEN_TENANT_ID } from '@/src/api/client';
 import { useConsoleSession } from '@/src/auth/ConsoleSession';
 import { t } from '@/src/i18n';
 import { DISPLAY_FONT, useThemeTokens } from '@/src/theme/tokens';
+import { clientNameText, clientRetirement } from '@/src/utils/clientName';
 import { formatDateTime } from '@/src/utils/datetime';
 
 export default function ClientDetail() {
   const { color, space, radius } = useThemeTokens();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { me } = useConsoleSession();
+  const { me, role } = useConsoleSession();
   const [data, setData] = useState<any>(null);
+  const [confirmingAnonymize, setConfirmingAnonymize] = useState(false);
+  const [anonymizeBusy, setAnonymizeBusy] = useState(false);
+  const [anonymizeError, setAnonymizeError] = useState<string | null>(null);
   useEffect(() => {
     if (id) {
       api.client(LUMEN_TENANT_ID, id).then(setData).catch(() => setData(null));
     }
   }, [id]);
 
+  const reload = () => {
+    if (id) api.client(LUMEN_TENANT_ID, id).then(setData).catch(() => undefined);
+  };
+
+  const anonymize = async () => {
+    if (!id) return;
+    setAnonymizeBusy(true);
+    setAnonymizeError(null);
+    try {
+      await api.anonymizeClient(LUMEN_TENANT_ID, id);
+      setConfirmingAnonymize(false);
+    } catch (e: unknown) {
+      const code = e instanceof ApiError ? e.code : undefined;
+      if (code === 'CLIENT_ALREADY_ANONYMIZED') {
+        // Done by another tab or an earlier request whose answer was lost: the card shows the result.
+        setConfirmingAnonymize(false);
+      } else {
+        setAnonymizeError(t(code === 'CLIENT_HAS_UPCOMING_VISITS' ? 'client.anonymize.errorUpcoming' : 'client.anonymize.errorGeneric'));
+        return;
+      }
+    } finally {
+      setAnonymizeBusy(false);
+    }
+    // Outside the try: a card that fails to reload does not mean the erasure failed.
+    reload();
+  };
+
   if (!data) {
     return <EmptyState title={t('empty.clients')} />;
   }
 
+  const retirement = clientRetirement(data);
+  const remainingSessions: number = (data.packages ?? []).reduce((sum: number, p: { remainingSessions: number }) => sum + p.remainingSessions, 0);
+
   return (
     <ScrollView>
       <Text style={{ fontSize: 28, fontWeight: '700', color: color.ink, fontFamily: DISPLAY_FONT }}>
-        {data.client?.displayName ?? '—'}
+        {clientNameText(data.client?.displayName, retirement)}
       </Text>
+      {retirement ? (
+        <Text style={{ color: color.muted, marginTop: 4 }}>{t(retirement === 'merged' ? 'client.merged.done' : 'client.anonymize.done')}</Text>
+      ) : null}
       {/* Owner only (a master gets marketingConsent null): withdraw consent on the client's request. */}
       {data.client?.marketingConsent === true && id ? (
         <Button
@@ -44,7 +81,49 @@ export default function ClientDetail() {
           }
         />
       ) : null}
-      {/* A master gets no phone (null). */}
+      {/* Owner only: erasure on the client's request; irreversible, so it asks in place before anything is sent. */}
+      {role === 'OWNER' && !retirement && !confirmingAnonymize ? (
+        <Button
+          label={t('client.anonymize.action')}
+          variant="ghost"
+          onPress={() => {
+            setAnonymizeError(null);
+            setConfirmingAnonymize(true);
+          }}
+        />
+      ) : null}
+      {role === 'OWNER' && !retirement && confirmingAnonymize ? (
+        <View
+          testID="anonymize-confirm"
+          style={{
+            marginTop: space.sm,
+            padding: space.lg,
+            gap: space.sm,
+            backgroundColor: color.surface,
+            borderRadius: radius.card,
+            borderWidth: 1,
+            borderColor: color.status.noShow,
+          }}
+        >
+          <Text style={{ color: color.ink, fontWeight: '600' }}>{t('client.anonymize.confirmTitle')}</Text>
+          <Text style={{ color: color.muted }}>{t('client.anonymize.confirmBody')}</Text>
+          {remainingSessions > 0 ? (
+            <Text testID="anonymize-packages" style={{ color: color.status.noShow }}>
+              {t('client.anonymize.packagesWarning', { count: remainingSessions })}
+            </Text>
+          ) : null}
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>
+            <Button label={t('client.anonymize.confirmAction')} disabled={anonymizeBusy} onPress={anonymize} />
+            <Button label={t('action.cancel')} variant="ghost" disabled={anonymizeBusy} onPress={() => setConfirmingAnonymize(false)} />
+          </View>
+        </View>
+      ) : null}
+      {anonymizeError ? (
+        <Text accessibilityRole="alert" style={{ color: color.status.noShow, marginTop: space.sm }}>
+          {anonymizeError}
+        </Text>
+      ) : null}
+      {/* A master gets no phone (null), and neither does anyone for an anonymized client. */}
       {data.client?.normalizedPhone ? (
         <Text style={{ color: color.muted, marginTop: 4 }}>{data.client.normalizedPhone}</Text>
       ) : null}

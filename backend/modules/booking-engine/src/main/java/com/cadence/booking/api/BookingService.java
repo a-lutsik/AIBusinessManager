@@ -11,10 +11,11 @@ public interface BookingService {
 
     String moduleName();
 
+    /** {@code INVALID_SLOT_RANGE}, 400, when {@code to} is before {@code from} or the range spans more than 62 days. */
     List<Instant> freeSlots(UUID specialistId, UUID serviceId, LocalDate from, LocalDate to);
 
     /**
-     * Creates a console visit. No role creates a visit already COMPLETED or NO_SHOW before its start
+     * Creates a console visit; a {@code clientId} of an anonymized client is {@code CLIENT_ANONYMIZED}, 409. No role creates a visit already COMPLETED or NO_SHOW before its start
      * ({@code VISIT_NOT_STARTED}, 409). A MASTER books a {@code clientId} only within their scope (a non-cancelled
      * visit with them that is not hidden from them; otherwise {@code FORBIDDEN_RESOURCE}, 403). When a master books by
      * phone, the response carries the name the master typed and no stored name, phone or trust; if the client behind
@@ -53,10 +54,11 @@ public interface BookingService {
      * Moves a visit through the status machine; COMPLETED and NO_SHOW only once it has started, an owner correction
      * of a row settled before its start included ({@code VISIT_NOT_STARTED}, 409, with an explicit message for that
      * legacy case). A MASTER cannot confirm a visit hidden from them (403); the OWNER's confirmation clears the flag,
-     * a cancellation keeps it.
+     * a cancellation keeps it. On a visit of an anonymized client the transition counts as usual and {@code note} is dropped.
      */
     AppointmentView transition(UUID appointmentId, AppointmentStatus target, String note);
 
+    /** {@code CLIENT_ANONYMIZED}, 409, for a visit of an anonymized client. */
     AppointmentView reschedule(UUID appointmentId, Instant newStart);
 
     /**
@@ -90,9 +92,17 @@ public interface BookingService {
 
     /**
      * Issues a fresh client manage link for a visit (OWNER only). Each call mints a new token; only its hash is
-     * stored, so the raw value is returned here once and cannot be recovered later.
+     * stored, so the raw value is returned here once and cannot be recovered later. {@code CLIENT_ANONYMIZED}, 409, for a
+     * visit of an anonymized client.
      */
     AccessLinkView issueAccessLink(UUID appointmentId);
+
+    /**
+     * Booking half of erasing a client: refuses while a pending or confirmed visit of the client has not ended
+     * ({@code CLIENT_HAS_UPCOMING_VISITS}, 409), then clears the typed name and the note of every visit and revokes all their
+     * manage links. The visit facts and the journal stay. Runs after the client row is locked. Returns the visits touched.
+     */
+    int eraseClientVisits(UUID clientId);
 
     /**
      * Moves every visit of client {@code from} to client {@code to} within the current tenant (client merge) and

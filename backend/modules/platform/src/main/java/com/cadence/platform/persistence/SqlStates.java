@@ -56,6 +56,24 @@ public final class SqlStates {
         return false;
     }
 
+    /**
+     * SQLSTATE and the first line of the first {@link SQLException} in the chain, safe to log: PostgreSQL's first line names the
+     * constraint, the {@code DETAIL} on the next lines quotes row values.
+     */
+    public static String summaryOf(Throwable failure) {
+        Set<Throwable> seen = Collections.newSetFromMap(new IdentityHashMap<>());
+        Throwable current = failure;
+        for (int depth = 0; current != null && depth < MAX_DEPTH && seen.add(current); depth++) {
+            if (current instanceof SQLException sql) {
+                String message = sql.getMessage() == null ? "" : sql.getMessage();
+                int end = message.indexOf('\n');
+                return "sqlState=" + sql.getSQLState() + ", " + (end < 0 ? message : message.substring(0, end)).trim();
+            }
+            current = current.getCause();
+        }
+        return failure.getClass().getSimpleName();
+    }
+
     private static boolean matches(SQLException head, String sqlState, String constraint, Set<Throwable> seen) {
         SQLException sql = head;
         for (int hops = 0; sql != null && hops < MAX_DEPTH; hops++) {

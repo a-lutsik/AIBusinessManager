@@ -60,8 +60,8 @@ class AppointmentRepository {
      * </ul>
      * The event time is the clock (micro precision), and for every event after CREATED at least 1 µs after the
      * visit's previous event ({@link #notBeforePreviousEvent}).
-     * Not facts, written elsewhere without an event: {@link #revealToMaster} (decision-A flag) and the visit
-     * {@code note} on its own. Every caller passes the current {@code clientHiddenFromMaster} on unless it means to
+     * Not facts, written elsewhere without an event: {@link #revealToMaster} (decision-A flag), {@link #eraseTypedText}
+     * (erasure of a client) and the visit {@code note} on its own. Every caller passes the current {@code clientHiddenFromMaster} on unless it means to
      * change it (the owner's confirmation clears it).
      */
     void record(AppointmentView after, AppointmentEventType type, JournalPayloads.Payload payload) {
@@ -299,6 +299,39 @@ class AppointmentRepository {
                         .and(APPOINTMENT.CLIENT_ID.eq(clientId))
                         .and(APPOINTMENT.SPECIALIST_ID.eq(specialistId))
                         .and(APPOINTMENT.CLIENT_HIDDEN_FROM_MASTER.isTrue()))
+                .execute();
+    }
+
+    /** Whether a pending or confirmed visit of the client has not ended; a visit in progress counts. */
+    boolean hasUnfinishedVisit(UUID clientId, Instant now) {
+        return dsl.fetchExists(dsl.selectOne()
+                .from(APPOINTMENT)
+                .where(TenantAwareDsl.tenantEquals(APPOINTMENT.TENANT_ID)
+                        .and(APPOINTMENT.CLIENT_ID.eq(clientId))
+                        .and(APPOINTMENT.STATUS.in(AppointmentStatus.PENDING.name(), AppointmentStatus.CONFIRMED.name()))
+                        .and(APPOINTMENT.SERVICE_END.gt(Utc.toLocal(now)))));
+    }
+
+    /** Client erasure: what was typed on the visits goes, the facts stay. Returns the visits of the client. */
+    int eraseTypedText(UUID clientId) {
+        return dsl.update(APPOINTMENT)
+                .set(APPOINTMENT.ENTERED_NAME, (String) null)
+                .set(APPOINTMENT.NOTE, (String) null)
+                .set(APPOINTMENT.UPDATED_AT, Utc.toLocal(now()))
+                .where(TenantAwareDsl.tenantEquals(APPOINTMENT.TENANT_ID).and(APPOINTMENT.CLIENT_ID.eq(clientId)))
+                .execute();
+    }
+
+    /** Client erasure: every live manage link of the client's visits stops working. Returns how many. */
+    int revokeTokensOfClient(UUID clientId, Instant now) {
+        return dsl.update(BOOKING_ACCESS_TOKEN)
+                .set(BOOKING_ACCESS_TOKEN.REVOKED_AT, Utc.toLocal(now))
+                .where(TenantAwareDsl.tenantEquals(BOOKING_ACCESS_TOKEN.TENANT_ID)
+                        .and(BOOKING_ACCESS_TOKEN.REVOKED_AT.isNull())
+                        .and(BOOKING_ACCESS_TOKEN.APPOINTMENT_ID.in(dsl.select(APPOINTMENT.ID)
+                                .from(APPOINTMENT)
+                                .where(TenantAwareDsl.tenantEquals(APPOINTMENT.TENANT_ID)
+                                        .and(APPOINTMENT.CLIENT_ID.eq(clientId))))))
                 .execute();
     }
 

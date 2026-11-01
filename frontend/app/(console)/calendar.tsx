@@ -10,10 +10,12 @@ import {
   type SpecialistView,
 } from '@/src/api/client';
 import { useConsoleSession } from '@/src/auth/ConsoleSession';
-import { t } from '@/src/i18n';
+import { currentLocale, t } from '@/src/i18n';
 import { DISPLAY_FONT, statusColor, useThemeTokens } from '@/src/theme/tokens';
 import { rescheduleErrorText } from '@/src/utils/catalogErrors';
+import { clientNameText } from '@/src/utils/clientName';
 import { dayKey, formatDateTime, formatLongDay, formatTime, slotWindow, startOfZoneDay, zoneDate } from '@/src/utils/datetime';
+import { formatMoney } from '@/src/utils/money';
 
 function unwrapAppointment(raw: unknown): AppointmentView {
   if (raw && typeof raw === 'object' && 'appointment' in (raw as object)) {
@@ -102,7 +104,7 @@ export default function CalendarScreen() {
   };
 
   const openRescheduleDialog = async () => {
-    if (!selected?.serviceId || !selected?.specialistId || !me?.slug) {
+    if (!selected?.serviceId || !selected?.specialistId) {
       setError(t('calendar.rescheduleNeedIds'));
       return;
     }
@@ -111,7 +113,7 @@ export default function CalendarScreen() {
     setSlots([]);
     try {
       const window = slotWindow(14, timeZone);
-      const next = await api.publicSlots(me.slug, selected.serviceId, selected.specialistId, window.from, window.to);
+      const next = await api.consoleSlots(LUMEN_TENANT_ID, selected.serviceId, selected.specialistId, window.from, window.to);
       setSlots(next);
     } catch (e: unknown) {
       setSlotOpen(false);
@@ -218,7 +220,7 @@ export default function CalendarScreen() {
                   </Text>
                   <View style={{ flex: 1 }}>
                     <Text style={{ fontWeight: '700', color: color.ink }} numberOfLines={1}>
-                      {v.serviceNameSnapshot ?? '—'} · {v.clientDisplayName ?? '—'}
+                      {v.serviceNameSnapshot ?? '—'} · {clientNameText(v.clientDisplayName, v.clientAnonymized ? 'anonymized' : null)}
                     </Text>
                     <Text style={{ color: color.muted, marginTop: 2 }}>{t(`status.${v.status}`)}</Text>
                   </View>
@@ -251,13 +253,19 @@ export default function CalendarScreen() {
                 {error}
               </Text>
             ) : null}
-            <Text style={{ color: color.ink }}>{selected.clientDisplayName ?? '—'}</Text>
+            <Text style={{ color: color.ink }}>{clientNameText(selected.clientDisplayName, selected.clientAnonymized ? 'anonymized' : null)}</Text>
             <TrustBadge level={selectedTrust ?? selected.trustLevel} />
             <Text style={{ color: color.muted, marginTop: 4 }}>{t(`status.${selected.status}`)}</Text>
             <Text style={{ color: color.muted, marginTop: 4 }}>
               {selected.serviceStart ? formatDateTime(selected.serviceStart, timeZone) : ''}
             </Text>
             {selected.clientPhone ? <Text style={{ color: color.muted, marginTop: 4 }}>{selected.clientPhone}</Text> : null}
+            {/* The price at booking time; a master gets no price (null). */}
+            {selected.priceSnapshot != null && selected.currencyCode ? (
+              <Text testID="visit-price" style={{ color: color.muted, marginTop: 4 }}>
+                {t('visit.price')}: {formatMoney(selected.priceSnapshot, selected.currencyCode, currentLocale())}
+              </Text>
+            ) : null}
             {selected.note ? <Text style={{ color: color.ink, marginTop: 4 }}>{selected.note}</Text> : null}
             <View style={{ marginTop: space.md, gap: space.sm }}>
               {selected.clientHiddenFromMaster && role === 'MASTER' ? (

@@ -54,6 +54,9 @@ public final class SlotCalculator {
         Instant maxStart = now.plus(horizonDays, ChronoUnit.DAYS);
         List<Instant> result = new ArrayList<>();
         for (LocalDate date = fromInclusive; !date.isAfter(toInclusive); date = date.plusDays(1)) {
+            if (date.atStartOfDay(zone).toInstant().isAfter(maxStart)) {
+                break;
+            }
             List<WeeklyWindow> windows = windowsFor(date, weekly, exceptions);
             for (WeeklyWindow window : windows) {
                 Instant windowStart = local(date, window.startMinute(), zone);

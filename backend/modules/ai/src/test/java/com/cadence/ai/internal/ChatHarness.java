@@ -288,6 +288,11 @@ final class ChatHarness {
         public int deleteOlderThan(Instant cutoff) {
             return 0;
         }
+
+        @Override
+        public int deleteNaming(AiPseudonymStore.Kind kind, UUID entityId) {
+            throw new UnsupportedOperationException();
+        }
     }
 
     static final class FakeMessages implements AiMessageStore {
@@ -347,6 +352,11 @@ final class ChatHarness {
             rows.put(id, new DraftRecord(id, r.conversationId(), r.messageId(), r.toolName(), r.payload(), status, r.createdAt(),
                     r.expiresAt(), status == Status.CONFIRMED ? NOW : null, NOW, applied, code, message));
             return true;
+        }
+
+        @Override
+        public int countPendingInConversationsNaming(AiPseudonymStore.Kind kind, UUID entityId) {
+            throw new UnsupportedOperationException();
         }
 
         @Override

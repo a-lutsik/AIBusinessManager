@@ -57,6 +57,9 @@ public interface AiDraftStore {
      */
     List<DraftRecord> lockByClient(UUID clientId);
 
+    /** How many PENDING drafts sit in the conversations with a pseudonym of this entity. */
+    int countPendingInConversationsNaming(AiPseudonymStore.Kind kind, UUID entityId);
+
     /** Rewrites the payload whatever the status; only for erasing personal data, see {@link #MAX_PAYLOAD_CHARS}. */
     void replacePayload(UUID id, String payloadJson);
 

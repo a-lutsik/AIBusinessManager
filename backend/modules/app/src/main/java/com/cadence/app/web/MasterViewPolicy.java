@@ -74,7 +74,7 @@ public class MasterViewPolicy implements ResponseBodyAdvice<Object> {
                     "id", "specialistId", "serviceId", "clientId", "status",
                     "serviceStart", "serviceEnd", "occupiedStart", "occupiedEnd",
                     "serviceNameSnapshot", "durationSnapshot", "bufferBeforeSnapshot", "bufferAfterSnapshot",
-                    "currencyCode", "note", "source", "clientDisplayName", "trustLevel", "clientHiddenFromMaster"
+                    "currencyCode", "note", "source", "clientDisplayName", "trustLevel", "clientHiddenFromMaster", "clientAnonymized"
             ),
             TrustView.class, Set.of(
                     "clientId", "level", "overrideLevel", "effectiveLevel", "reasonCodes", "new", "low"

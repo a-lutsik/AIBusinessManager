@@ -17,6 +17,7 @@ import {
 import { useConsoleSession } from '@/src/auth/ConsoleSession';
 import { t } from '@/src/i18n';
 import { DISPLAY_FONT, statusColor, useThemeTokens } from '@/src/theme/tokens';
+import { clientNameText } from '@/src/utils/clientName';
 import { formatDateTime } from '@/src/utils/datetime';
 import { copyOwnerTaskMessage, MANAGE_LINK_PLACEHOLDER } from '@/src/utils/ownerTask';
 
@@ -143,7 +144,7 @@ export default function DashboardScreen() {
         >
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: space.sm, alignItems: 'center' }}>
             <Text style={{ fontWeight: '700', color: color.ink, flexShrink: 1 }}>
-              {v.serviceNameSnapshot ?? '—'} · {v.clientDisplayName ?? '—'}
+              {v.serviceNameSnapshot ?? '—'} · {clientNameText(v.clientDisplayName, v.clientAnonymized ? 'anonymized' : null)}
             </Text>
             <TrustBadge level={v.trustLevel} />
           </View>

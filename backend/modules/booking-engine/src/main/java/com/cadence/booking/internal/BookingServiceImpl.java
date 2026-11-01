@@ -37,6 +37,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -46,6 +47,7 @@ public class BookingServiceImpl implements BookingService {
 
     private static final Logger log = LoggerFactory.getLogger(BookingServiceImpl.class);
     private static final Duration ACCESS_TOKEN_TTL = Duration.ofDays(365);
+    private static final int MAX_SLOT_RANGE_DAYS = 62;
 
     private final CatalogService catalogService;
     private final CrmService crmService;
@@ -95,6 +97,10 @@ public class BookingServiceImpl implements BookingService {
     @Override
     @Transactional(readOnly = true)
     public List<Instant> freeSlots(UUID specialistId, UUID serviceId, LocalDate from, LocalDate to) {
+        if (to.isBefore(from) || ChronoUnit.DAYS.between(from, to) > MAX_SLOT_RANGE_DAYS) {
+            log.info("Slot range refused: from={}, to={}", from, to);
+            throw DomainException.badRequest("INVALID_SLOT_RANGE", "The range must run forward and span at most " + MAX_SLOT_RANGE_DAYS + " days");
+        }
         return freeSlots(specialistId, serviceId, from, to, null);
     }
 
@@ -200,6 +206,9 @@ public class BookingServiceImpl implements BookingService {
             // Decision A: a master's phone booking onto a client outside their scope (known or just created, the
             // master cannot tell) hides that client from the master until the owner confirms the visit.
             hideClient = isMaster() && !appointments.hasActiveVisit(clientId, command.specialistId());
+        } else {
+            // Held until the visit commits: an anonymization waits and then sees it, or won and this refuses.
+            crmService.requireActive(clientId);
         }
 
         AppointmentStatus status = command.statusOverride();
@@ -368,7 +377,9 @@ public class BookingServiceImpl implements BookingService {
         // The owner's confirmation clears the decision-A flag; any other change (a cancellation too) keeps it.
         boolean ownerConfirms = target == AppointmentStatus.CONFIRMED && isOwner();
         boolean hidden = current.clientHiddenFromMaster() && !ownerConfirms;
-        AppointmentView updated = withStatus(current, target, note == null ? current.note() : note, hidden);
+        // A settled visit of an erased client still counts, but what is typed on it now would be personal data again.
+        boolean keepNote = note == null || crmService.findById(current.clientId()).filter(ClientView::retired).isEmpty();
+        AppointmentView updated = withStatus(current, target, keepNote && note != null ? note : current.note(), hidden);
         appointments.record(updated, JournalPayloads.eventTypeFor(target),
                 new JournalPayloads.StatusChange(current.status(), target, correction));
         if (current.clientHiddenFromMaster() && ownerConfirms) {
@@ -440,6 +451,20 @@ public class BookingServiceImpl implements BookingService {
 
     @Override
     @Transactional
+    public int eraseClientVisits(UUID clientId) {
+        Instant now = clock.instant();
+        if (appointments.hasUnfinishedVisit(clientId, now)) {
+            log.info("Client erasure refused, a visit has not ended: client={}", clientId);
+            throw DomainException.conflict("CLIENT_HAS_UPCOMING_VISITS", "Cancel the client's upcoming visits first");
+        }
+        int links = appointments.revokeTokensOfClient(clientId, now);
+        int visits = appointments.eraseTypedText(clientId);
+        log.info("Client erased from visits: client={}, visits={}, linksRevoked={}", clientId, visits, links);
+        return visits;
+    }
+
+    @Override
+    @Transactional
     public AppointmentView reschedule(UUID appointmentId, Instant newStart) {
         return enrich(applyReschedule(appointmentId, newStart));
     }
@@ -452,6 +477,8 @@ public class BookingServiceImpl implements BookingService {
         if (current.status() != AppointmentStatus.PENDING && current.status() != AppointmentStatus.CONFIRMED) {
             throw DomainException.conflict("INVALID_TRANSITION", "Only pending or confirmed visits can be moved");
         }
+        // Held until the move commits, like a new visit: an erased client gets no visit that lies ahead.
+        crmService.requireActive(current.clientId());
         SlotCalculator.OccupiedInterval occupied = SlotCalculator.occupiedFor(
                 newStart, current.durationSnapshot(), current.bufferBeforeSnapshot(), current.bufferAfterSnapshot()
         );
@@ -610,6 +637,7 @@ public class BookingServiceImpl implements BookingService {
                 || appointment.status() == AppointmentStatus.CANCELLED_BY_BUSINESS) {
             throw DomainException.conflict("APPOINTMENT_CANCELLED", "Visit is cancelled");
         }
+        crmService.requireActive(appointment.clientId());
         Instant expiresAt = clock.instant().plus(ACCESS_TOKEN_TTL);
         String raw = BookingTokens.raw();
         appointments.insertToken(appointmentId, BookingTokens.hash(raw), expiresAt);
@@ -659,7 +687,8 @@ public class BookingServiceImpl implements BookingService {
             return trustLevel == null ? row : row.withTrustLevel(trustLevel);
         }
         String entered = master ? row.enteredName() : ownerHint(row.enteredName(), client.displayName());
-        return withClientShown(row, entered, client.displayName(), client.normalizedPhone(), trustLevel);
+        AppointmentView shown = withClientShown(row, entered, client.displayName(), client.normalizedPhone(), trustLevel);
+        return client.retired() ? shown.withClientAnonymized() : shown;
     }
 
     private static final String HINT_SEPARATOR = " / ";

@@ -268,8 +268,31 @@ class ClientMergeIT extends AbstractTimescaleIT {
         Visit a1 = lumenVisit("+995555820002", "Absorbed Two", false);
         merge(DemoIds.LUMEN, s1.clientId(), a1.clientId()).andExpect(status().isOk());
 
-        // A visit booked on the already absorbed profile would be moved by the ports before CRM rejects the merge.
-        Visit late = lumenVisitFor(a1.clientId());
+        // The console no longer books a retired profile. A visit that sits on it anyway would be moved by the ports before
+        // CRM rejects the merge, so it is put there by hand.
+        mvc.perform(post("/api/app/appointments")
+                        .with(owner(DemoIds.LUMEN))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "specialistId": "%s",
+                                  "serviceId": "%s",
+                                  "serviceStart": "%s",
+                                  "clientId": "%s",
+                                  "marketingConsent": false,
+                                  "source": "CONSOLE",
+                                  "skipNoticeAndHorizon": true
+                                }
+                                """.formatted(DemoIds.NINO, DemoIds.HAIRCUT, nextStart(), a1.clientId())))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code", is("CLIENT_ANONYMIZED")));
+        Visit late = lumenVisitFor(s1.clientId());
+        try (Connection c = ownerConnection();
+             PreparedStatement ps = c.prepareStatement("update appointment set client_id = ? where id = ?")) {
+            ps.setObject(1, UUID.fromString(a1.clientId()));
+            ps.setObject(2, UUID.fromString(late.id()));
+            assertThat(ps.executeUpdate()).isEqualTo(1);
+        }
         merge(DemoIds.LUMEN, s1.clientId(), a1.clientId()).andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code", is("CLIENT_ALREADY_MERGED")));
 

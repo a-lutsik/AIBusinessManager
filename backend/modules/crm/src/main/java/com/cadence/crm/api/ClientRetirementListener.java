@@ -9,4 +9,12 @@ import java.util.UUID;
 public interface ClientRetirementListener {
 
     void clientRetiring(UUID clientId);
+
+    /**
+     * The stronger case: the person asked to be erased, so a module also drops what it cannot tell apart from them. A merge never
+     * comes here, the person lives on in the surviving profile. Same transaction and order as {@link #clientRetiring}.
+     */
+    default void clientErasing(UUID clientId) {
+        clientRetiring(clientId);
+    }
 }

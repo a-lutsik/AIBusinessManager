@@ -8,6 +8,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.transaction.PlatformTransactionManager;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -41,8 +42,8 @@ class CrmServiceConsentWithdrawTest {
     @Test
     void withdrawalSetsConsentFalseWithItsSourceAndIsAudited() {
         UUID id = UUID.randomUUID();
-        when(repository.findById(id)).thenReturn(Optional.of(new ClientView(id, "+995555000333", "Mariam", null, null,
-                "ka", null, true, null, null, 0, 0, 0, 0)));
+        when(repository.findStateForKeyShare(id)).thenReturn(Optional.of(new ClientRepository.ClientState(new ClientView(id, "+995555000333", "Mariam", null, null,
+                "ka", null, true, null, null, 0, 0, 0, 0), null, null)));
         ActorContext.set(new ActorContext.Actor("owner-1", ActorContext.Role.OWNER, null));
 
         service.withdrawMarketingConsent(id, "owner");
@@ -55,10 +56,22 @@ class CrmServiceConsentWithdrawTest {
     @Test
     void anUnknownClientIsNotFoundAndNothingIsWritten() {
         UUID id = UUID.randomUUID();
-        when(repository.findById(id)).thenReturn(Optional.empty());
+        when(repository.findStateForKeyShare(id)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.withdrawMarketingConsent(id, "public-link"))
                 .isInstanceOfSatisfying(DomainException.class, ex -> assertThat(ex.status()).isEqualTo(404));
+        verify(repository, never()).updateProfile(any(), any(), any(), any(), any(), any(), any());
+        verifyNoInteractions(audit);
+    }
+
+    @Test
+    void anAnonymizedClientIsRefusedAndNothingIsAudited() {
+        UUID id = UUID.randomUUID();
+        when(repository.findStateForKeyShare(id)).thenReturn(Optional.of(new ClientRepository.ClientState(new ClientView(id, null, "anonymized", null, null,
+                null, null, false, null, null, 0, 0, 0, 0), Instant.now(), null)));
+
+        assertThatThrownBy(() -> service.withdrawMarketingConsent(id, "owner"))
+                .isInstanceOfSatisfying(DomainException.class, ex -> assertThat(ex.code()).isEqualTo("CLIENT_ANONYMIZED"));
         verify(repository, never()).updateProfile(any(), any(), any(), any(), any(), any(), any());
         verifyNoInteractions(audit);
     }

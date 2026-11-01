@@ -32,4 +32,10 @@ public interface AiConversationStore {
      * and drafts (FK cascade). Returns the number of conversations deleted.
      */
     int deleteOlderThan(Instant cutoff);
+
+    /**
+     * Deletes the conversations with a pseudonym of this entity: messages, pseudonyms and drafts (FK cascade) and the prompt and
+     * tool logs, which have no FK. For erasing personal data. Returns the number of conversations deleted.
+     */
+    int deleteNaming(AiPseudonymStore.Kind kind, UUID entityId);
 }

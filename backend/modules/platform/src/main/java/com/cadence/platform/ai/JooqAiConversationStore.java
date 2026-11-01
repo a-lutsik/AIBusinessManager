@@ -14,9 +14,13 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
+import java.util.List;
 import java.util.UUID;
 
 import static com.cadence.platform.jooq.Tables.AI_CONVERSATION;
+import static com.cadence.platform.jooq.Tables.AI_PROMPT_LOG;
+import static com.cadence.platform.jooq.Tables.AI_PSEUDONYM;
+import static com.cadence.platform.jooq.Tables.AI_TOOL_CALL;
 
 /** Each method runs in its own transaction or joins the caller's, so the RLS tenant setting is bound. */
 @Repository
@@ -83,6 +87,31 @@ public class JooqAiConversationStore implements AiConversationStore {
                 .where(TenantAwareDsl.tenantEquals(AI_CONVERSATION.TENANT_ID)
                         .and(AI_CONVERSATION.LAST_MESSAGE_AT.lt(Utc.toLocal(cutoff))))
                 .execute();
+    }
+
+    @Override
+    public int deleteNaming(AiPseudonymStore.Kind kind, UUID entityId) {
+        List<UUID> ids = dsl.selectDistinct(AI_PSEUDONYM.CONVERSATION_ID)
+                .from(AI_PSEUDONYM)
+                .where(TenantAwareDsl.tenantEquals(AI_PSEUDONYM.TENANT_ID)
+                        .and(AI_PSEUDONYM.KIND.eq(kind.name()))
+                        .and(AI_PSEUDONYM.ENTITY_ID.eq(entityId)))
+                .fetch(AI_PSEUDONYM.CONVERSATION_ID);
+        if (ids.isEmpty()) {
+            return 0;
+        }
+        // The dialogue first: its row lock makes a log insert of a running turn wait and then skip, and a log row committed
+        // before it is seen by the deletes below.
+        int deleted = dsl.deleteFrom(AI_CONVERSATION)
+                .where(TenantAwareDsl.tenantEquals(AI_CONVERSATION.TENANT_ID).and(AI_CONVERSATION.ID.in(ids)))
+                .execute();
+        dsl.deleteFrom(AI_PROMPT_LOG)
+                .where(TenantAwareDsl.tenantEquals(AI_PROMPT_LOG.TENANT_ID).and(AI_PROMPT_LOG.CONVERSATION_ID.in(ids)))
+                .execute();
+        dsl.deleteFrom(AI_TOOL_CALL)
+                .where(TenantAwareDsl.tenantEquals(AI_TOOL_CALL.TENANT_ID).and(AI_TOOL_CALL.CONVERSATION_ID.in(ids)))
+                .execute();
+        return deleted;
     }
 
     static DomainException notFound() {

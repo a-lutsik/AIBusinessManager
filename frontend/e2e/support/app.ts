@@ -31,3 +31,19 @@ export async function visitOf(request: APIRequestContext, appointmentId: string)
   const detail = await ownerJson<{ appointment: VisitFacts }>(request, 'get', `/appointments/${appointmentId}`);
   return detail.appointment;
 }
+
+/** Cancels a visit as the owner, over the API. */
+export async function cancelVisit(request: APIRequestContext, appointmentId: string): Promise<void> {
+  const response = await request.post(`${API_URL}/api/app/appointments/${appointmentId}/transition?to=CANCELLED_BY_BUSINESS`, { headers: OWNER_HEADERS });
+  if (!response.ok()) throw new Error(`Cancelling ${appointmentId} -> ${response.status()}: ${await response.text()}`);
+}
+
+export async function sellPackage(request: APIRequestContext, clientId: string, sessions: number): Promise<void> {
+  const response = await request.post(`${API_URL}/api/app/clients/${clientId}/packages?name=E2E%20Pack&sessions=${sessions}&valueMinor=1000`, { headers: OWNER_HEADERS });
+  if (!response.ok()) throw new Error(`Selling a package -> ${response.status()}: ${await response.text()}`);
+}
+
+export async function mergeClients(request: APIRequestContext, survivorId: string, absorbedId: string): Promise<void> {
+  const response = await request.post(`${API_URL}/api/app/clients/${survivorId}/merge?absorbedId=${absorbedId}`, { headers: OWNER_HEADERS });
+  if (!response.ok()) throw new Error(`Merging clients -> ${response.status()}: ${await response.text()}`);
+}

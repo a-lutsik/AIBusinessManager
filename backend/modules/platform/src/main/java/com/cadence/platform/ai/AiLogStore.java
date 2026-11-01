@@ -8,7 +8,9 @@ import java.util.UUID;
  * {@code ai_prompt_log} and {@code ai_tool_call} (ADR 0002 §6): only masked content, exactly what went to and came
  * from the provider. Every text longer than its column (prompt, response, tool calls, tool name, arguments, result,
  * error code, finish reason, provider, model) is cut with {@link AiText#TRUNCATION_MARKER}. Both tables are
- * hypertables with a 30-day retention policy.
+ * hypertables with a 30-day retention policy. They have no FK to the conversation, so a write first takes {@code FOR KEY SHARE} on
+ * its row and is skipped when the row is gone: a turn running while its conversation is erased leaves nothing behind. That lock
+ * conflicts only with the delete, so turns do not queue on each other or on {@code FOR NO KEY UPDATE} holders.
  */
 public interface AiLogStore {
 
@@ -64,8 +66,10 @@ public interface AiLogStore {
     record ToolCallRecord(UUID id, Instant createdAt, ToolCall call) {
     }
 
+    /** The id of the row; nothing is written when the conversation no longer exists. */
     UUID logLlmCall(LlmCall call);
 
+    /** The id of the row; nothing is written when the conversation no longer exists. */
     UUID logToolCall(ToolCall call);
 
     /** Oldest first, at most 500. */

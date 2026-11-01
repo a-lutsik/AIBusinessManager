@@ -752,7 +752,8 @@ class AiAssistantIT extends AbstractTimescaleIT {
         assertThat(column("select coalesce(after_state, '') from audit_log where entity_id = ?", draft))
                 .allSatisfy(row -> assertThat(row).doesNotContain("Given to"));
 
-        asOwner(() -> crm.anonymize(named.id()));
+        Person survivor = client();
+        asOwner(() -> merge.merge(survivor.id(), named.id()));
 
         JsonNode card = ok(call(get("/api/app/ai/drafts"))).get(0);
         assertThat(card.path("status").asText()).as("the draft of the other client stays open").isEqualTo("PENDING");
@@ -844,7 +845,14 @@ class AiAssistantIT extends AbstractTimescaleIT {
 
         asOwner(() -> crm.anonymize(client.id()));
 
-        assertRetired(client, fixture, true);
+        assertThat(callAs(studio.tenant(), get("/api/app/ai/conversations/" + fixture.conversation())).getResponse().getStatus()).isEqualTo(404);
+        for (String table : List.of("ai_conversation", "ai_message", "ai_pseudonym", "ai_draft", "ai_prompt_log", "ai_tool_call")) {
+            String column = "ai_conversation".equals(table) ? "id" : "conversation_id";
+            assertThat(one("select count(*) from " + table + " where " + column + " = ?", fixture.conversation())).as(table).isEqualTo("0");
+        }
+        assertThat(column("select coalesce(before_state, '') || coalesce(after_state, '') from audit_log "
+                        + "where tenant_id = ? and action like 'ai.draft.%'", studio.tenant()))
+                .allSatisfy(row -> assertThat(row).doesNotContain(client.name()));
     }
 
     /** M1, M2: a merged-away client is treated like an anonymized one; the survivor and their drafts are untouched. */

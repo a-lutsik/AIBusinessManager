@@ -31,4 +31,10 @@ public interface RetentionService {
      * aggregates. Returns the number of packages moved.
      */
     int reassignClient(UUID from, UUID to);
+
+    /**
+     * Erasure of a client: the trust state goes with the owner's override and reason (it is computed anew from the counters),
+     * package names lose whatever the owner typed; sessions, values and the ledger stay. Returns the packages of the client.
+     */
+    int eraseClient(UUID clientId);
 }

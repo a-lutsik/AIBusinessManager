@@ -3,6 +3,7 @@ package com.cadence.app.web;
 import com.cadence.ai.api.AiAssistantService;
 import com.cadence.app.ratelimit.ClientIpResolver;
 import com.cadence.app.ratelimit.PublicRateLimiter;
+import com.cadence.app.usecase.ClientAnonymizationService;
 import com.cadence.app.usecase.ClientMergeService;
 import com.cadence.booking.api.BookingService;
 import com.cadence.catalog.api.CatalogService;
@@ -39,6 +40,9 @@ abstract class CorsWebTestBase {
     OwnerTaskService ownerTaskService;
     @MockitoBean
     ClientMergeService clientMergeService;
+
+    @MockitoBean
+    ClientAnonymizationService clientAnonymizationService;
     @MockitoBean
     PublicRateLimiter publicRateLimiter;
     @MockitoBean

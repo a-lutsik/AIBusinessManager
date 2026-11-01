@@ -29,4 +29,7 @@ public interface OwnerTaskService {
      * Client merge: points the owner tasks of client {@code from} at client {@code to}. Returns how many moved.
      */
     int reassignClient(UUID from, UUID to);
+
+    /** Erasure of a client: deletes the owner tasks about the client, open or done; their text may name the person. Returns how many. */
+    int eraseForClient(UUID clientId);
 }

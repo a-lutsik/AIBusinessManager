@@ -3,6 +3,7 @@ package com.cadence.app.web;
 import com.cadence.ai.api.AiAssistantService;
 import com.cadence.app.ratelimit.ClientIpResolver;
 import com.cadence.app.ratelimit.PublicRateLimiter;
+import com.cadence.app.usecase.ClientAnonymizationService;
 import com.cadence.app.usecase.ClientMergeService;
 import com.cadence.app.web.dto.AppointmentDetailView;
 import com.cadence.app.web.dto.MasterTodayView;
@@ -11,6 +12,7 @@ import com.cadence.booking.api.AppointmentView;
 import com.cadence.booking.api.BookingService;
 import com.cadence.booking.api.PublicVisit;
 import com.cadence.catalog.api.CatalogService;
+import com.cadence.crm.api.ClientRetirement;
 import com.cadence.crm.api.CrmService;
 import com.cadence.growth.api.GrowthService;
 import com.cadence.notification.api.OwnerTaskService;
@@ -59,7 +61,7 @@ class HiddenClientResponsesTest {
     private final CrmService crm = mock(CrmService.class);
     private final AppApiController app = new AppApiController(mock(CatalogService.class), booking, crm,
             retention, mock(GrowthService.class), mock(AiAssistantService.class), mock(OwnerTaskService.class), tenants,
-            mock(ClientMergeService.class));
+            mock(ClientMergeService.class), mock(ClientAnonymizationService.class));
     private final PublicApiController publicApi = new PublicApiController(mock(CatalogService.class), booking, tenants,
             mock(PublicRateLimiter.class), mock(ClientIpResolver.class));
     private final JsonMapper mapper = JsonMapper.builder().build();
@@ -71,6 +73,7 @@ class HiddenClientResponsesTest {
         tenant.setId(TENANT);
         tenant.setTimezone("Asia/Tbilisi");
         when(tenants.requireById(TENANT)).thenReturn(tenant);
+        when(crm.retirementOf(any())).thenReturn(new ClientRetirement(null, null));
         when(retention.assess(any())).thenAnswer(inv -> new TrustView(inv.getArgument(0), "LOW",
                 List.of("2 no-shows recorded"), null, null, List.of("NO_SHOWS")));
         when(retention.packagesForClient(any())).thenAnswer(inv -> List.of(
@@ -85,7 +88,7 @@ class HiddenClientResponsesTest {
     }
 
     private static AppointmentView visit(UUID clientId, boolean hidden) {
-        Instant start = Instant.parse("2026-10-24T10:00:00Z");
+        Instant start = Instant.now();
         return new AppointmentView(UUID.randomUUID(), NINO, UUID.randomUUID(), clientId,
                 hidden ? AppointmentStatus.PENDING : AppointmentStatus.CONFIRMED, start, start.plusSeconds(3600), start,
                 start.plusSeconds(3600), "Haircut", 8000, 60, 0, 0, "GEL", 0, null, "Typed", null, "CONSOLE",

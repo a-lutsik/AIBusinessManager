@@ -4,6 +4,8 @@ import com.cadence.platform.persistence.TenantAwareDsl;
 import com.cadence.platform.tenancy.TenantContext;
 import com.cadence.platform.time.Utc;
 import org.jooq.DSLContext;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -12,12 +14,15 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
 
+import static com.cadence.platform.jooq.Tables.AI_CONVERSATION;
 import static com.cadence.platform.jooq.Tables.AI_PROMPT_LOG;
 import static com.cadence.platform.jooq.Tables.AI_TOOL_CALL;
 
 @Repository
 @Transactional
 public class JooqAiLogStore implements AiLogStore {
+
+    private static final Logger log = LoggerFactory.getLogger(JooqAiLogStore.class);
 
     private final DSLContext dsl;
     private final Clock clock;
@@ -30,6 +35,9 @@ public class JooqAiLogStore implements AiLogStore {
     @Override
     public UUID logLlmCall(LlmCall call) {
         UUID id = UUID.randomUUID();
+        if (!conversationStands(call.conversationId())) {
+            return id;
+        }
         dsl.insertInto(AI_PROMPT_LOG)
                 .set(AI_PROMPT_LOG.ID, id)
                 .set(AI_PROMPT_LOG.TENANT_ID, TenantContext.require())
@@ -52,6 +60,9 @@ public class JooqAiLogStore implements AiLogStore {
     @Override
     public UUID logToolCall(ToolCall call) {
         UUID id = UUID.randomUUID();
+        if (!conversationStands(call.conversationId())) {
+            return id;
+        }
         dsl.insertInto(AI_TOOL_CALL)
                 .set(AI_TOOL_CALL.ID, id)
                 .set(AI_TOOL_CALL.TENANT_ID, TenantContext.require())
@@ -66,6 +77,19 @@ public class JooqAiLogStore implements AiLogStore {
                 .set(AI_TOOL_CALL.CREATED_AT, Utc.toLocal(clock.instant().truncatedTo(ChronoUnit.MICROS)))
                 .execute();
         return id;
+    }
+
+    /** Waits for an erasure of the conversation and then reads what it left; held until this log row commits. */
+    private boolean conversationStands(UUID conversationId) {
+        boolean stands = dsl.selectOne().from(AI_CONVERSATION)
+                .where(TenantAwareDsl.tenantEquals(AI_CONVERSATION.TENANT_ID).and(AI_CONVERSATION.ID.eq(conversationId)))
+                .forKeyShare()
+                .fetchOptional()
+                .isPresent();
+        if (!stands) {
+            log.debug("AI log row skipped, the conversation is gone: conversation={}", conversationId);
+        }
+        return stands;
     }
 
     @Override

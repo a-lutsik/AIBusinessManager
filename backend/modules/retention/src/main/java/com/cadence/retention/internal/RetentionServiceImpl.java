@@ -11,6 +11,8 @@ import com.cadence.platform.time.Utc;
 import com.cadence.retention.api.RetentionService;
 import com.cadence.retention.api.TrustView;
 import org.jooq.DSLContext;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,6 +27,9 @@ import static com.cadence.platform.jooq.Tables.TRUST_STATE;
 
 @Service
 public class RetentionServiceImpl implements RetentionService {
+
+    private static final Logger log = LoggerFactory.getLogger(RetentionServiceImpl.class);
+    private static final String ANONYMIZED_PACKAGE = "anonymized";
 
     private final CrmService crmService;
     private final CatalogService catalogService;
@@ -58,6 +63,7 @@ public class RetentionServiceImpl implements RetentionService {
     @Override
     @Transactional
     public TrustView override(UUID clientId, String level, String reason) {
+        crmService.requireActive(clientId);
         TrustView computed = computeInternal(clientId);
         persist(computed);
         dsl.update(TRUST_STATE)
@@ -91,14 +97,16 @@ public class RetentionServiceImpl implements RetentionService {
         return TrustRules.assess(client, overrideLevel, overrideReason);
     }
 
+    /**
+     * Only the computed part: the override columns belong to {@link #override}. A read that raced an erasure must not write back
+     * the reason it read before the row was deleted.
+     */
     private void persist(TrustView trust) {
         dsl.insertInto(TRUST_STATE)
                 .set(TRUST_STATE.TENANT_ID, TenantContext.require())
                 .set(TRUST_STATE.CLIENT_ID, trust.clientId())
                 .set(TRUST_STATE.LEVEL, trust.level())
                 .set(TRUST_STATE.REASONS, String.join("; ", trust.reasons()))
-                .set(TRUST_STATE.OVERRIDE_LEVEL, trust.overrideLevel())
-                .set(TRUST_STATE.OVERRIDE_REASON, trust.overrideReason())
                 .set(TRUST_STATE.UPDATED_AT, Utc.toLocal(Instant.now()))
                 .onConflict(TRUST_STATE.TENANT_ID, TRUST_STATE.CLIENT_ID)
                 .doUpdate()
@@ -110,6 +118,7 @@ public class RetentionServiceImpl implements RetentionService {
     @Override
     @Transactional
     public PackageView sellPackage(UUID clientId, String name, int sessions, int valueMinor, String currencyCode) {
+        crmService.requireActive(clientId);
         UUID id = UUID.randomUUID();
         dsl.insertInto(SERVICE_PACKAGE)
                 .set(SERVICE_PACKAGE.ID, id)
@@ -174,6 +183,20 @@ public class RetentionServiceImpl implements RetentionService {
                 .set(PACKAGE_LEDGER.NOTE, "visit")
                 .set(PACKAGE_LEDGER.CREATED_AT, Utc.toLocal(Instant.now()))
                 .execute();
+    }
+
+    @Override
+    @Transactional
+    public int eraseClient(UUID clientId) {
+        dsl.deleteFrom(TRUST_STATE)
+                .where(TenantAwareDsl.tenantEquals(TRUST_STATE.TENANT_ID).and(TRUST_STATE.CLIENT_ID.eq(clientId)))
+                .execute();
+        int packages = dsl.update(SERVICE_PACKAGE)
+                .set(SERVICE_PACKAGE.NAME, ANONYMIZED_PACKAGE)
+                .where(TenantAwareDsl.tenantEquals(SERVICE_PACKAGE.TENANT_ID).and(SERVICE_PACKAGE.CLIENT_ID.eq(clientId)))
+                .execute();
+        log.info("Client erased from retention: client={}, packages={}", clientId, packages);
+        return packages;
     }
 
     @Override

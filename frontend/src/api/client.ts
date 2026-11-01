@@ -179,9 +179,9 @@ export type AppointmentView = {
   enteredName?: string | null;
   note?: string | null;
   source?: string;
-  /** Null for a master when the stored name is the client's phone. */
+  /** Null for a master when the stored name is the client's phone; see clientNameText for an anonymized client. */
   clientDisplayName?: string | null;
-  /** Null for a master: masters never receive client phones. */
+  /** Null for a master (masters never receive client phones) and for an anonymized client. */
   clientPhone?: string | null;
   trustLevel?: string | null;
   /**
@@ -189,6 +189,8 @@ export type AppointmentView = {
    * sees only the name they typed and no trust (decision A).
    */
   clientHiddenFromMaster?: boolean;
+  /** The stored name is the placeholder of an erased client. */
+  clientAnonymized?: boolean;
 };
 
 /** Public manage-link view: visit facts and the name the visitor typed only (no stored client name, phone or trust). */
@@ -440,6 +442,9 @@ export const api = {
     request<string[]>(
       `/api/public/tenants/${slug}/slots?serviceId=${serviceId}&specialistId=${specialistId}&from=${from}&to=${to}`
     ),
+  /** The console's slots: behind the sign-in, not counted against the public per-IP limit. A master asks for own slots only. */
+  consoleSlots: (tenantId: string, serviceId: string, specialistId: string, from: string, to: string) =>
+    request<string[]>(`/api/app/slots?serviceId=${serviceId}&specialistId=${specialistId}&from=${from}&to=${to}`, {}, tenantId),
   publicBook: (slug: string, body: unknown) =>
     request<Record<string, unknown>>(`/api/public/tenants/${slug}/bookings`, {
       method: 'POST',
@@ -496,6 +501,9 @@ export const api = {
   /** Owner only: withdraws a client's marketing consent on their request. */
   withdrawConsent: (tenantId: string, id: string) =>
     request<unknown>(`/api/app/clients/${id}/consent/withdraw`, { method: 'POST' }, tenantId),
+  /** Owner only, irreversible: erases the client's personal data (PRODUCT_PLAN §10). */
+  anonymizeClient: (tenantId: string, id: string) =>
+    request<unknown>(`/api/app/clients/${id}/anonymize`, { method: 'POST' }, tenantId),
   rules: (tenantId: string) => request<BookingRulesView>('/api/app/rules', {}, tenantId),
   saveRules: (tenantId: string, body: BookingRulesView) =>
     request<BookingRulesView>('/api/app/rules', { method: 'PUT', body: JSON.stringify(body) }, tenantId),

@@ -1,0 +1,8 @@
+# Included wherever a location sets headers of its own, because add_header does not inherit into such a location.
+# no-referrer: a manage link carries its token in the URL, and the pages load fonts from another origin (TD-67).
+add_header X-Content-Type-Options "nosniff" always;
+add_header X-Frame-Options "DENY" always;
+add_header Referrer-Policy "no-referrer" always;
+add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()" always;
+# 'unsafe-inline' in script-src: the static export inlines a hydration flag; TD-78 tracks replacing it with a hash.
+add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data:; connect-src 'self' __API_ORIGIN__ __ISSUER_ORIGIN__; base-uri 'self'; form-action 'self' __ISSUER_ORIGIN__; object-src 'none'; frame-ancestors 'none'" always;

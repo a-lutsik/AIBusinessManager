@@ -1,5 +1,6 @@
 # Cadence CI: backend (compile, ArchUnit, unit and Testcontainers ITs), frontend (lint, i18n, typecheck, web export),
-# Playwright E2E on an isolated stack, production compose validation, and a no-push build of the backend Docker image.
+# Playwright E2E on an isolated stack, production compose validation, no-push builds of the backend and web images, and the
+# route check of the web image on its real nginx.
 #
 # Actions are pinned to the major tag of the official/first-party release (checkout, setup-java, setup-node,
 # upload-artifact @v4; gradle/actions/setup-gradle @v4; docker/setup-buildx-action @v3; docker/build-push-action @v6).
@@ -68,7 +69,7 @@ jobs:
           -Porg.gradle.java.installations.paths="$JAVA_HOME_25_X64"
 
       # Second line of defence behind AbstractTimescaleIT: the job fails when any test was skipped, when fewer than
-      # 400 test cases ran (1075 at the time of writing; lower the number only when tests were removed on purpose), or
+      # 400 test cases ran (1115 at the time of writing; lower the number only when tests were removed on purpose), or
       # when not a single integration test (class name ending in IT) executed. Gradle alone would stay green.
       - name: Test summary and gate
         if: always()
@@ -249,6 +250,33 @@ jobs:
           docker compose --env-file "$ENV_FILE" -f docker-compose.prod.yml config --quiet
           echo "OK: compose config is valid with all required variables set"
 
+      # The web bundle has no default URLs: compose must refuse an env file without them, and the service must stay on loopback.
+      - name: Web service needs its URLs and stays on loopback
+        run: |
+          set -eu
+          umask 077
+          ENV_FILE="$RUNNER_TEMP/prod.env"
+          grep -v '^CADENCE_API_URL=' "$ENV_FILE" > "$RUNNER_TEMP/no-api.env"
+          if docker compose --env-file "$RUNNER_TEMP/no-api.env" -f docker-compose.prod.yml config >"$RUNNER_TEMP/no-api.out" 2>&1; then
+            echo "::error::compose accepted an env file without CADENCE_API_URL"; exit 1
+          fi
+          grep -q 'CADENCE_API_URL is required' "$RUNNER_TEMP/no-api.out" \
+            || { echo "::error::compose failed for a reason other than CADENCE_API_URL"; cat "$RUNNER_TEMP/no-api.out"; exit 1; }
+          docker compose --env-file "$ENV_FILE" -f docker-compose.prod.yml config --format json > "$RUNNER_TEMP/config.json"
+          python3 - "$RUNNER_TEMP/config.json" <<'PYTHON'
+          import json
+          import sys
+
+          web = json.load(open(sys.argv[1]))["services"]["web"]
+          ports = web["ports"]
+          assert len(ports) == 1 and ports[0]["host_ip"] == "127.0.0.1" and str(ports[0]["published"]) == "8082", ports
+          args = web["build"]["args"]
+          assert args["EXPO_PUBLIC_AUTH_MODE"] == "oidc", args
+          assert args["EXPO_PUBLIC_API_URL"].startswith("https://"), args
+          assert args["EXPO_PUBLIC_OIDC_ISSUER"].endswith("/realms/cadence"), args
+          print("OK: web is on 127.0.0.1:8082 with its URLs")
+          PYTHON
+
   docker:
     name: Backend image build (no push)
     runs-on: ubuntu-latest
@@ -269,3 +297,14 @@ jobs:
           push: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # The rules of docker/web/default.conf against the real nginx: dynamic routes, 404 page, leaving the web root, headers,
+  # non-root, no localhost in the bundle. Only docker and curl; the script removes what it creates.
+  web:
+    name: Web image build and route check
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - run: scripts/web-host-check.sh

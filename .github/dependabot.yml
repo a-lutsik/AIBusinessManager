@@ -58,3 +58,12 @@ updates:
     ignore:
       - dependency-name: "eclipse-temurin"
         update-types: ["version-update:semver-major"]
+
+  # docker/web/Dockerfile base images. Node follows the frontend job of .github/workflows/ci.yml, so its major is manual.
+  - package-ecosystem: docker
+    directory: /docker/web
+    schedule:
+      interval: weekly
+    ignore:
+      - dependency-name: "node"
+        update-types: ["version-update:semver-major"]
