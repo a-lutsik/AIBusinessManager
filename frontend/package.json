@@ -20,7 +20,7 @@
     "expo-symbols": "~57.0.3",
     "expo-web-browser": "~57.0.3",
     "i18n-js": "^4.5.3",
-    "intl-messageformat": "^12.0.0",
+    "intl-messageformat": "^12.1.4",
     "nativewind": "^4.2.7",
     "react": "19.2.3",
     "react-dom": "19.2.3",
