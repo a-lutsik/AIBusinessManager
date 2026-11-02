@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "dependencies": {
     "@formatjs/intl-pluralrules": "^6.3.16",
-    "expo": "~57.0.23",
+    "expo": "~57.0.31",
     "expo-asset": "~57.0.17",
     "expo-auth-session": "~57.0.16",
     "expo-clipboard": "~57.0.2",
