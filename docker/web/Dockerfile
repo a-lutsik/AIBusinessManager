@@ -6,7 +6,7 @@
 # EXPO_PUBLIC_* are compiled into the bundle, so they are build arguments and a changed value needs a rebuild. None of
 # them has a default: the source falls back to localhost when one is missing, which a production bundle must never do.
 
-FROM node:22.16.0-bookworm-slim AS build
+FROM node:22.23.4-bookworm-slim AS build
 ARG EXPO_PUBLIC_API_URL
 ARG EXPO_PUBLIC_OIDC_ISSUER
 ARG EXPO_PUBLIC_AUTH_MODE
