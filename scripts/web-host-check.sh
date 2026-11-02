@@ -7,6 +7,7 @@
 # Everything it creates is named cadence-web-check; the container always goes, the image unless --keep-image.
 # Needs docker and curl.
 set -euo pipefail
+# No grep -q at the end of a pipe: it closes the pipe on the first match, and under pipefail that SIGPIPE reads as no match.
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 IMAGE=cadence-web-check:local
@@ -100,7 +101,7 @@ outside() {
 
 # header <url> <header line regex>
 header() {
-    if curl -sS --path-as-is -o /dev/null -D - "$BASE$1" | tr -d '\r' | grep -Eiq "$2"; then
+    if curl -sS --path-as-is -o /dev/null -D - "$BASE$1" | tr -d '\r' | grep -Ei "$2" >/dev/null; then
         pass "$1 has $2"
     else
         fail "$1 has no $2"
@@ -151,21 +152,20 @@ done
 header /book/x '^cache-control: no-cache'
 header /no-such-page '^cache-control: no-cache'
 header "/_expo/static/js/web/$bundle" '^cache-control: public, max-age=31536000, immutable'
-if curl -sS -o /dev/null -D - "$BASE/" | tr -d '\r' | grep -Eiq '^server: .*[0-9]'; then fail "the Server header names a version"; else pass "the Server header names no version"; fi
+if curl -sS -o /dev/null -D - "$BASE/" | tr -d '\r' | grep -Ei '^server: .*[0-9]' >/dev/null; then fail "the Server header names a version"; else pass "the Server header names no version"; fi
 
 uid="$(docker exec "$CONTAINER" id -u)"
 if [ "$uid" = 0 ]; then fail "the container runs as root"; else pass "the container runs as uid $uid"; fi
-if docker exec "$CONTAINER" sh -c "grep -rlE 'localhost:(8080|8081)' $html_root/_expo/static/js" | grep -q .; then
+if docker exec "$CONTAINER" sh -c "grep -rlE 'localhost:(8080|8081)' $html_root/_expo/static/js" | grep . >/dev/null; then
     fail "the bundle names localhost"
 else
     pass "the bundle does not name localhost"
 fi
-if docker exec "$CONTAINER" sh -c "grep -rl 'api.example.test' $html_root/_expo/static/js" | grep -q .; then
+if docker exec "$CONTAINER" sh -c "grep -rl 'api.example.test' $html_root/_expo/static/js" | grep . >/dev/null; then
     pass "the bundle names the API of the build"
 else
     fail "the bundle does not name the API of the build"
 fi
-# Into a variable first: grep -q closes the pipe on the first match, and under pipefail that SIGPIPE would read as no match.
 access_log="$(docker logs "$CONTAINER" 2>&1)"
 if grep -q '/b/x' <<<"$access_log"; then pass "the access log holds the request for /b/x"; else fail "the access log holds no request for /b/x"; fi
 if grep -q 'token=' <<<"$access_log"; then fail "the access log holds a token"; else pass "the access log holds no token"; fi
