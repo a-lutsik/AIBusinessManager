@@ -32,7 +32,7 @@ RUN set -eu; \
         /tmp/security-headers.conf.template > /out/security-headers.conf
 
 # Runs as uid 101 and keeps its pid and temp files in /tmp, so the container works with a read-only root file system.
-FROM nginxinc/nginx-unprivileged:1.28.0-alpine AS runtime
+FROM nginxinc/nginx-unprivileged:1.31.7-alpine AS runtime
 COPY docker/web/default.conf /etc/nginx/conf.d/default.conf
 COPY docker/web/html-headers.conf docker/web/hashed-headers.conf /etc/nginx/cadence/
 COPY --from=build /out/security-headers.conf /etc/nginx/cadence/security-headers.conf
