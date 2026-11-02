@@ -79,7 +79,7 @@ jobs:
 
       - name: Upload test reports
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: backend-test-reports
           path: |
@@ -182,7 +182,7 @@ jobs:
 
       - name: Upload E2E results (dev-headers)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-results
           path: |
@@ -201,7 +201,7 @@ jobs:
 
       - name: Upload E2E results (Keycloak login)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-results-oidc
           path: |
