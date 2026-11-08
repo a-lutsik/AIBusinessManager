@@ -81,7 +81,7 @@ class TelegramWebhookService implements TelegramWebhook {
     @Override
     public boolean handle(String secretTokenHeader, String updateJson) {
         if (!props.enabled() || !secretMatches(secretTokenHeader)) {
-            log.warn("Telegram webhook refused: secret token missing or wrong, or the channel is off");
+            log.debug("Telegram webhook refused: secret token missing or wrong, or the channel is off");
             return false;
         }
         try {

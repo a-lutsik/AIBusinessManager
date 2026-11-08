@@ -27,9 +27,23 @@
 - [x] T2 Bot API клиент и `TelegramNotificationChannel` (отправка, ошибки, 403, таймауты, retry с ограничением) — complex_coder
 - [x] T3 deep-link и webhook привязки, эндпоинт выдачи ссылки владельцем и на экране успешной записи — complex_coder
 - [x] T4 подтверждение записи и напоминания (планировщик, идемпотентность, отмена/перенос, TZ) — complex_coder
-- [ ] T5 каталог сообщений на 5 локалей, OpenAPI, README (настройка бота и webhook), конфиг `prod`-проверок — worker
-- [ ] T6 тесты: IT на каждый статус доставки, идемпотентность, webhook secret, RLS; E2E привязки на stub — test_writer
-- [ ] T7 независимое ревью HIGH — reviewer; приёмка этапа — architect
+- [x] T5 каталог сообщений на 5 локалей, OpenAPI, README (настройка бота и webhook), конфиг `prod`-проверок — worker
+- [x] T6 тесты: IT на каждый статус доставки, идемпотентность, webhook secret, RLS; E2E привязки на stub — test_writer
+- [x] T7 независимое ревью HIGH — reviewer; приёмка этапа — architect
+
+## Проверка этапа
+- [x] Все задачи ✔ (T1–T7)
+- [x] Регрессия: backend 1159 тестов (0 failed, 0 skipped), `npm run e2e` 87 passed, `npm run e2e:oidc` 11 passed, typecheck, lint и `i18n:check` чистые; подробности в `docs/TEST_REPORT.md`, раздел 6.6
+- [x] Независимое ревью HIGH (reviewer): три круга, находки закрыты (журнал)
+- [x] Приёмка архитектором: ☑ код принят по `7814d6d`; два замечания (тест `BookingCreatedNotifyHandler`, документы) закрыты 2026-11-08
+- Не проверено: живой бот и реальный `request_contact` в клиенте Telegram, `setWebhook` на настоящий адрес за TLS, реальный `docker stop` с ожиданием воркера; всё это шаги оператора (`docs/ACCEPTANCE.md`)
+
+## Журнал
+- 2026-11-08: приёмка архитектора по `7814d6d`: код принят, возвращено две задачи. Закрыты: unit-тест `BookingCreatedNotifyHandlerTest` (6 тестов, каждая ветка проверена мутацией), документы, мелочи из ревью: убраны мёртвый `@EnableIntegration`, бин `notificationChannelIds` и зависимость `spring-boot-starter-integration`; `app.delivery.*` и `app.telegram.token-purge-cron` объявлены в `application.yml`; отказ webhook без секрета пишется на DEBUG. Остальные замечания записаны в техдолг TD-83–TD-89.
+- 2026-11-08: ревью 3 (`9aae014`): backoff и FAILED при ошибке подготовки сообщения (очередь не встаёт на одной строке), `sawNoAnswer` в клиенте Bot API (прерывание после безответной попытки = исход неизвестен), флаг остановки по `ContextClosedEvent`, тесты `visit_message_purge`, прошедшего визита и невалидной timezone. Коммит `7814d6d`.
+- 2026-11-08: ревью 2 (`2b0b6b0`): прерывание внутри вызова Telegram оставляет строку в SENDING; `spring.task.scheduling.shutdown` и `stop_grace_period`; SENDING по одной строке; guard `serviceStart.isAfter(now)`; повторный `/start` перепросит контакт; очистка DONE через 90 дней. Коммит `9aae014`.
+- 2026-11-08: ревью 1 (`5225726`): HIGH перехват канала по номеру телефона закрыт доказательством владения (контакт, `contact.user_id`, нормализованный номер), публичная ссылка без оракула; вызов Telegram вынесен из транзакций (очередь `visit_message_dispatch`); визит перечитывается `FOR SHARE`; напоминания не создают ручных задач; `unlinkTelegram` по `expectedChatId`; без `window.open` в `.then()`; Undo V17, `RlsNotes`, prod-пин `api.telegram.org`, чистка токенов. Коммит `2b0b6b0`.
+- 2026-11-08: T1–T4 выполнены (`5225726`): миграция V17, Bot API клиент и канал, deep-link и webhook, подтверждение и напоминания. Этап открыт после приёмки этапа 08.
 
 ## Этап 10 (после 09)
 Instagram Direct как второй адаптер того же порта: webhook Meta (проверка подписи `X-Hub-Signature-256`), привязка через `ig.me/m/<аккаунт>?ref=<токен>`, отправка только в окне 24 часа от последнего сообщения клиента; вне окна — ручная задача владельцу. Нужны Meta-приложение, бизнес-аккаунт и app review — шаг оператора, на нём могут быть недели ожидания, поэтому начать заявку стоит сейчас.

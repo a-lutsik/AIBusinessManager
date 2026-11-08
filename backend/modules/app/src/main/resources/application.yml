@@ -97,6 +97,12 @@ app:
     reminder-poll-ms: 60000
     # Handled delivery-queue rows older than this are removed by the nightly job.
     dispatch-retention: 90d
+    # Nightly purge of expired link tokens and handled queue rows (Spring cron, server time zone).
+    token-purge-cron: "0 20 3 * * *"
+  delivery:
+    # The worker that sends queued client messages; the pause between its runs. Off only in tests.
+    enabled: true
+    poll-ms: 2000
   seed:
     enabled: true
   outbox:

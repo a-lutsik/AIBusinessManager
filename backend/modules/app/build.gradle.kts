@@ -25,7 +25,6 @@ dependencies {
     implementation(project(":modules:notification"))
 
     implementation(libs.spring.boot.starter.batch)
-    implementation(libs.spring.boot.starter.integration)
     implementation(libs.jackson.databind)
 
     testImplementation(platform(libs.spring.boot.dependencies))

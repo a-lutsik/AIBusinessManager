@@ -249,6 +249,25 @@
 
 Расхождения с журналом этапа (`docs/stages/08-pilot-code-conditions.md`, запись 2026-11-01): журнал пишет `web-host-check 55, 0 failed`; в этом прогоне `FAILED`. Журнал не менялся.
 
+### 6.6 Этап 09 (канал Telegram и напоминания)
+
+Дата: 2026-11-08. Основа: ветка `claude/affectionate-meitner-336a67`, коммиты `5225726`, `2b0b6b0`, `9aae014`, `7814d6d` и коммит с закрытием замечаний архитектора. Окружение: macOS, Docker Desktop, JDK 21 (Corretto 21.0.7), Node.js 22.x. Исполнитель: сессия-автор этапа; независимая регрессия `tester` не проводилась. Telegram в тестах заменён stub HTTP-сервером, реальный Bot API не вызывался.
+
+| # | Шаг | Команда | Результат |
+|---|---|---|---|
+| 1 | Backend | `./gradlew test --rerun-tasks` (15 мин 12 с) + `junit_summary.py backend --fail-on-skipped --min-tests 400 --require-class 'IT$'` | `Total 1159 \| Failed 0 \| Skipped 0`, `BUILD SUCCESSFUL` |
+| 2 | Typecheck, lint, i18n | `npm run typecheck`, `npm run lint`, `npm run i18n:check` | exit 0 во всех; `i18n catalogs OK` (uk, cs: 68 из 326 ключей) |
+| 3 | E2E основной | `CI=1 npm run e2e` | `87 passed (4.9m)`, failed 0, skipped 0, teardown: `no containers, volumes or networks of cadence-e2e left` |
+| 4 | E2E OIDC | `CI=1 npm run e2e:oidc` | `11 passed (1.5m)`, failed 0, skipped 0, teardown: `no containers, volumes or networks of cadence-e2e left`. Первый запуск отказал: порт 18080 держал оставшийся от `npm run e2e` процесс бэкенда (раннер записал код 143, процесс жил); после его остановки прогон зелёный |
+
+Новое в этапе: `TelegramChannelIT` (привязка по контакту, перехват номера, статусы доставки, повторы, 403, напоминания, идемпотентность, перенос и отмена, RLS), `TelegramDisabledIT`, `TelegramBotClientTest`, `TelegramPropertiesTest`, `MessageDeliveryWorkerTest`, `BookingCreatedNotifyHandlerTest` (6 тестов; поломка каждой из пяти веток обработчика роняет тест, проверено подменой), расширенный `RlsIsolationIT`, E12 (`e12-telegram-link.spec.ts`) на stub.
+
+Наблюдение: в полном прогоне backend семь раз `Timed out while waiting for executor 'taskScheduler' to terminate` при закрытии тестовых контекстов (`await-termination-period: 30s`). Тесты зелёные, но закрытие каждого такого контекста ждёт до 30 секунд. Причина не разбиралась.
+
+Не проверено: живой бот и реальный `request_contact` в клиенте Telegram; `setWebhook` на настоящий адрес за TLS; реальный `docker stop` с ожиданием воркера; независимое ревью последнего коммита с документами; тестовые пробелы TD-89.
+
+Docker: `cadence-e2e` раннер удалил сам (teardown done); других контейнеров, томов и сетей эта сессия не создавала, `prune` не запускался.
+
 ## 7. Что не проверено
 
 - Вход через Keycloak под CSP на настоящем nginx (сервис `web`): не подтверждено. В OIDC-прогонах этапа 08 фронтенд работает на локальном `e2e-serve`, а не на образе `web`; TD-78.
