@@ -1,7 +1,7 @@
 [versions]
 spring-boot = "4.1.0"
 java = "25"
-archunit = "1.4.1"
+archunit = "1.5.1"
 jooq-codegen-plugin = "3.21.5"
 libphonenumber = "9.0.16"
 testcontainers = "1.21.3"
