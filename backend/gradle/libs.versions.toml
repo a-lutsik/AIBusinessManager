@@ -1,5 +1,5 @@
 [versions]
-spring-boot = "4.1.0"
+spring-boot = "4.1.2"
 java = "25"
 archunit = "1.4.1"
 jooq-codegen-plugin = "3.21.5"
