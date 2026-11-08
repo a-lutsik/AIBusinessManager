@@ -319,10 +319,10 @@
   "ai.conversationGone": "Этого диалога больше нет, поэтому сообщение не отправлено. Оно осталось в поле: нажмите «Отправить», чтобы начать с ним новый диалог.",
   "book.telegram.action": "Получать напоминания в Telegram",
   "book.telegram.error": "Telegram сейчас недоступен. Управляйте визитом по ссылке выше.",
-  "book.telegram.linked": "Telegram для этого номера уже подключён.",
   "client.telegram.action": "Ссылка для Telegram",
   "client.telegram.hint": "Отправьте ссылку клиенту. Он нажмёт Start в боте, и подтверждения и напоминания будут приходить в Telegram. Ссылка работает один раз.",
   "client.telegram.connected": "Telegram подключён",
   "client.telegram.disabled": "Канал Telegram не включён на сервере.",
-  "client.telegram.error": "Не удалось создать ссылку. Повторите попытку."
+  "client.telegram.error": "Не удалось создать ссылку. Повторите попытку.",
+  "book.telegram.open": "Открыть Telegram"
 }

@@ -5,8 +5,10 @@ import com.cadence.crm.api.CrmService;
 import com.cadence.notification.api.TelegramWebhook;
 import com.cadence.platform.error.DomainException;
 import com.cadence.platform.i18n.MessageCatalog;
+import com.cadence.platform.phone.PhoneNormalizer;
 import com.cadence.platform.tenancy.TenantContext;
 import com.cadence.platform.tenant.TenantDirectory;
+import com.cadence.platform.jooq.tables.records.TenantRecord;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -17,15 +19,23 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Receives Telegram updates. Only a private-chat message {@code /start <token>} does anything: a live token binds the chat to
- * its client (consent to service messages) and the bot answers in the client's language; a dead token gets a short "link
- * expired" answer in the sender's Telegram language. Any other update is acknowledged and ignored. Chat ids and tokens are
- * never logged.
+ * Receives Telegram updates. Binding a chat to a client takes two steps, because a link only proves that someone holds it,
+ * not that they own the client's phone number (anyone can book with any number and get a link):
+ * <ol>
+ *   <li>{@code /start <token>} in a private chat: the token is tied to that chat and the bot asks the person to share their
+ *       contact with the Telegram button;</li>
+ *   <li>the shared contact: it must be the sender's own contact ({@code contact.user_id} equals the sender) and its phone,
+ *       normalized, must equal the client's phone. Only then the chat is stored. The token is spent by the contact either
+ *       way, so a wrong contact needs a new link.</li>
+ * </ol>
+ * Any other update is acknowledged and ignored. Chat ids, phones and tokens are never logged.
  */
 @Service
 class TelegramWebhookService implements TelegramWebhook {
@@ -33,7 +43,9 @@ class TelegramWebhookService implements TelegramWebhook {
     private static final Logger log = LoggerFactory.getLogger(TelegramWebhookService.class);
     private static final Pattern START = Pattern.compile("^/start(?:@\\w+)?\\s+([A-Za-z0-9_-]{1,64})\\s*$");
 
-    private record Bound(String locale, String tenantName) {
+    private enum Result { LINKED, MISMATCH, NONE }
+
+    private record Linked(Result result, String locale, String tenantName) {
     }
 
     private final TelegramProperties props;
@@ -41,6 +53,7 @@ class TelegramWebhookService implements TelegramWebhook {
     private final LinkTokenStore tokens;
     private final CrmService crm;
     private final TenantDirectory tenants;
+    private final PhoneNormalizer phones;
     private final MessageCatalog messages;
     private final TransactionTemplate tx;
     private final ObjectMapper json = new ObjectMapper();
@@ -51,6 +64,7 @@ class TelegramWebhookService implements TelegramWebhook {
             LinkTokenStore tokens,
             CrmService crm,
             TenantDirectory tenants,
+            PhoneNormalizer phones,
             MessageCatalog messages,
             PlatformTransactionManager transactionManager
     ) {
@@ -59,6 +73,7 @@ class TelegramWebhookService implements TelegramWebhook {
         this.tokens = tokens;
         this.crm = crm;
         this.tenants = tenants;
+        this.phones = phones;
         this.messages = messages;
         this.tx = new TransactionTemplate(transactionManager);
     }
@@ -84,48 +99,100 @@ class TelegramWebhookService implements TelegramWebhook {
             log.debug("Telegram update ignored: not a private-chat message");
             return;
         }
-        Matcher start = START.matcher(message.path("text").asText(""));
-        if (!start.matches()) {
-            log.debug("Telegram update ignored: not a /start with a token");
-            return;
-        }
         String chatId = String.valueOf(chat.path("id").asLong());
-        Bound bound = bind(LinkTokenStore.hash(start.group(1)), chatId);
-        if (bound == null) {
-            String language = message.path("from").path("language_code").asText(null);
-            reply(chatId, messages.forClient(language, "client.telegram.linkInvalid"));
+        String language = message.path("from").path("language_code").asText(null);
+        if (message.hasNonNull("contact")) {
+            onContact(chatId, message, language);
             return;
         }
-        reply(chatId, messages.forClient(bound.locale(), "client.telegram.linked", bound.tenantName()));
+        Matcher start = START.matcher(message.path("text").asText(""));
+        if (start.matches()) {
+            onStart(LinkTokenStore.hash(start.group(1)), chatId, language);
+        } else {
+            log.debug("Telegram update ignored: neither /start with a token nor a contact");
+        }
     }
 
-    /** Resolves the token, spends it and stores the chat, all or nothing; null when the token is dead. */
-    private Bound bind(String tokenHash, String chatId) {
-        return tx.execute(status -> {
+    private void onStart(String tokenHash, String chatId, String language) {
+        Boolean started = tx.execute(status -> {
             Optional<LinkTokenStore.Target> target = tokens.lookup(tokenHash);
             if (target.isEmpty()) {
-                log.info("Telegram link refused: token unknown, used or expired");
-                return null;
+                return false;
             }
             try (TenantContext.Scope ignored = TenantContext.open(target.get().tenantId())) {
-                if (!tokens.consume(tokenHash)) {
-                    log.info("Telegram link refused: token was spent by a concurrent request");
-                    status.setRollbackOnly();
-                    return null;
-                }
-                ClientView client = crm.linkTelegram(target.get().clientId(), chatId, "telegram-link");
-                log.info("Telegram chat bound: tenant={}, client={}", target.get().tenantId(), client.id());
-                return new Bound(client.preferredLocale(), tenants.requireById(target.get().tenantId()).getDisplayName());
-            } catch (DomainException ex) {
-                log.info("Telegram link refused: client {} cannot be linked ({})", target.get().clientId(), ex.getMessage());
-                status.setRollbackOnly();
-                return null;
+                return tokens.attachChat(tokenHash, chatId);
             }
         });
+        if (!Boolean.TRUE.equals(started)) {
+            log.info("Telegram link refused: token unknown, used, expired or already started");
+            reply(chatId, messages.forClient(language, "client.telegram.linkInvalid"), null);
+            return;
+        }
+        log.info("Telegram link started, waiting for the contact");
+        reply(chatId, messages.forClient(language, "client.telegram.shareContact"), Map.of(
+                "keyboard", List.of(List.of(Map.of("text", messages.forClient(language, "client.telegram.shareContactButton"), "request_contact", true))),
+                "resize_keyboard", true,
+                "one_time_keyboard", true));
     }
 
-    private void reply(String chatId, String text) {
-        TelegramBotClient.Result result = bot.sendMessage(chatId, text);
+    private void onContact(String chatId, JsonNode message, String language) {
+        JsonNode contact = message.path("contact");
+        boolean own = contact.path("user_id").canConvertToLong()
+                && String.valueOf(contact.path("user_id").asLong()).equals(String.valueOf(message.path("from").path("id").asLong(-1)))
+                && chatId.equals(String.valueOf(contact.path("user_id").asLong()));
+        String phone = contact.path("phone_number").asText("");
+        Linked linked = tx.execute(status -> {
+            Optional<LinkTokenStore.Pending> pending = tokens.pendingOf(chatId);
+            if (pending.isEmpty()) {
+                return new Linked(Result.NONE, null, null);
+            }
+            try (TenantContext.Scope ignored = TenantContext.open(pending.get().tenantId())) {
+                // Spent by the contact whatever it says: a wrong contact needs a new link.
+                if (!tokens.consume(pending.get().tokenHash())) {
+                    return new Linked(Result.NONE, null, null);
+                }
+                Optional<ClientView> client = crm.findActiveById(pending.get().clientId());
+                TenantRecord tenant = tenants.requireById(pending.get().tenantId());
+                if (client.isEmpty()) {
+                    return new Linked(Result.MISMATCH, null, tenant.getDisplayName());
+                }
+                String locale = client.get().preferredLocale();
+                if (!own || !samePhone(phone, client.get().normalizedPhone(), tenant.getCountryCode())) {
+                    log.info("Telegram link refused: the shared contact is not the client's own number (own={})", own);
+                    return new Linked(Result.MISMATCH, locale, tenant.getDisplayName());
+                }
+                try {
+                    crm.linkTelegram(client.get().id(), chatId, "telegram-link");
+                } catch (DomainException ex) {
+                    status.setRollbackOnly();
+                    return new Linked(Result.MISMATCH, locale, tenant.getDisplayName());
+                }
+                log.info("Telegram chat bound after contact proof: tenant={}, client={}", tenant.getId(), client.get().id());
+                return new Linked(Result.LINKED, locale, tenant.getDisplayName());
+            }
+        });
+        Map<String, Object> removeKeyboard = Map.of("remove_keyboard", true);
+        switch (linked.result()) {
+            case LINKED -> reply(chatId, messages.forClient(linked.locale(), "client.telegram.linked", linked.tenantName()), removeKeyboard);
+            case MISMATCH -> reply(chatId, messages.forClient(linked.locale() != null ? linked.locale() : language, "client.telegram.contactMismatch"), removeKeyboard);
+            case NONE -> log.debug("Telegram contact ignored: no started link for this chat");
+        }
+    }
+
+    /** Telegram sends the number without a plus sign. */
+    private boolean samePhone(String telegramPhone, String clientPhone, String region) {
+        if (clientPhone == null || telegramPhone.isBlank()) {
+            return false;
+        }
+        try {
+            return clientPhone.equals(phones.toE164(telegramPhone.startsWith("+") ? telegramPhone : "+" + telegramPhone, region));
+        } catch (DomainException ex) {
+            return false;
+        }
+    }
+
+    private void reply(String chatId, String text, Map<String, Object> replyMarkup) {
+        TelegramBotClient.Result result = bot.sendMessage(chatId, text, replyMarkup);
         if (!result.ok()) {
             log.warn("Telegram reply not delivered: {}", result.reason());
         }

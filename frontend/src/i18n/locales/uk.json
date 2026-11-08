@@ -66,5 +66,5 @@
   "service.buffer": "+{before}/{after} буфер",
   "book.telegram.action": "Отримувати нагадування в Telegram",
   "book.telegram.error": "Telegram зараз недоступний. Керуйте візитом за посиланням вище.",
-  "book.telegram.linked": "Telegram для цього номера вже підключено."
+  "book.telegram.open": "Відкрити Telegram"
 }

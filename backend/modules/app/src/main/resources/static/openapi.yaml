@@ -243,8 +243,9 @@ paths:
         Mints a deep link https://t.me/<bot>?start=<token> for the booking-success page. The client opens it, presses Start
         in the bot and from then on gets confirmations and reminders there (this is the consent to service messages). The
         token is valid for app.telegram.link-ttl (default 72 h), works once and is stored only as a SHA-256 hash. Limited
-        per client IP per hour (429 RATE_LIMITED). A client who already linked Telegram gets 409 so a public link cannot take
-        over an existing chat; the owner re-links from the console.
+        per client IP per hour (429 RATE_LIMITED). The answer is the same whether or not the client already has a chat. The link
+        alone binds nothing: after Start the bot asks the person to share their own Telegram contact and the chat is stored
+        only when that phone number equals the client's.
       parameters:
         - in: path
           name: id
@@ -258,7 +259,7 @@ paths:
         "200": { description: "{ url, expiresAt }" }
         "403": { description: "TOKEN_INVALID - the token belongs to another visit" }
         "404": { description: "TOKEN_INVALID - unknown, revoked or expired token" }
-        "409": { description: "TELEGRAM_DISABLED - the channel is off; TELEGRAM_ALREADY_LINKED; CLIENT_ANONYMIZED" }
+        "409": { description: "TELEGRAM_DISABLED - the channel is off; CLIENT_ANONYMIZED" }
         "429": { description: "RATE_LIMITED" }
   /api/public/telegram/webhook:
     post:
@@ -266,7 +267,7 @@ paths:
       description: >
         Called by Telegram only (setWebhook with secret_token). Without the exact X-Telegram-Bot-Api-Secret-Token header
         the answer is 401 and nothing is read. Every other update, unknown or malformed ones included, is answered 200 and
-        ignored; only a private-chat message "/start <token>" binds the chat to the client behind a live one-time token.
+        ignored. A private-chat "/start <token>" with a live one-time token makes the bot ask for the sender's contact; the shared contact (the sender's own, with the same phone number as the client) binds the chat. The token is spent by the contact either way.
         Limited per client IP per minute (429 RATE_LIMITED).
       parameters:
         - in: header

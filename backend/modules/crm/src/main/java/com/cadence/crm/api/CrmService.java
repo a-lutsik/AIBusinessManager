@@ -80,8 +80,11 @@ public interface CrmService {
      */
     ClientView linkTelegram(UUID clientId, String chatId, String source);
 
-    /** Forgets the Telegram chat (the client blocked the bot); audited as {@code client.telegram.unlink}. Idempotent, silent for a retired client. */
-    void unlinkTelegram(UUID clientId, String source);
+    /**
+     * Forgets the Telegram chat {@code expectedChatId} (the client blocked the bot); audited as {@code client.telegram.unlink}.
+     * Only that chat is dropped: if the client linked another one meanwhile nothing changes. Idempotent, silent for a retired client.
+     */
+    void unlinkTelegram(UUID clientId, String expectedChatId, String source);
 
     void recordCompletedVisit(UUID clientId, Instant when, int valueMinor);
 

@@ -13,6 +13,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 
@@ -30,7 +31,11 @@ class TelegramBotClient {
     private static final int MAX_ERROR_CHARS = 300;
 
     /** {@code httpStatus} 0 means no answer (network error or timeout). */
-    record Result(boolean ok, int httpStatus, String description) {
+    record Result(boolean ok, int httpStatus, String description, boolean interrupted) {
+
+        Result(boolean ok, int httpStatus, String description) {
+            this(ok, httpStatus, description, false);
+        }
 
         boolean forbidden() {
             return httpStatus == 403;
@@ -51,14 +56,15 @@ class TelegramBotClient {
         this.http = HttpClient.newBuilder().connectTimeout(props.connectTimeout()).build();
     }
 
-    Result sendMessage(String chatId, String text) {
+    /** {@code replyMarkup} (reply keyboard or removal of it) is optional. */
+    Result sendMessage(String chatId, String text, Map<String, Object> replyMarkup) {
         HttpRequest request;
         try {
             request = HttpRequest.newBuilder(URI.create(props.apiBaseUrl() + "/bot" + props.botToken() + "/sendMessage"))
                     .timeout(props.readTimeout())
                     .header("Content-Type", "application/json; charset=utf-8")
                     .POST(HttpRequest.BodyPublishers.ofString(
-                            json.writeValueAsString(Map.of("chat_id", chatId, "text", text, "disable_web_page_preview", true)),
+                            json.writeValueAsString(payload(chatId, text, replyMarkup)),
                             StandardCharsets.UTF_8))
                     .build();
         } catch (IOException | IllegalArgumentException ex) {
@@ -78,16 +84,27 @@ class TelegramBotClient {
                 result = new Result(false, 0, ex.getClass().getSimpleName());
             } catch (InterruptedException ex) {
                 Thread.currentThread().interrupt();
-                return new Result(false, 0, "interrupted");
+                return new Result(false, 0, "interrupted", true);
             }
             if (attempt < props.maxAttempts()) {
                 log.debug("Telegram sendMessage attempt {} of {} failed ({}), retrying", attempt, props.maxAttempts(), result.reason());
                 if (!sleep(pause.compareTo(MAX_WAIT) > 0 ? MAX_WAIT : pause)) {
-                    return result;
+                    return new Result(false, 0, "interrupted", true);
                 }
             }
         }
         return result;
+    }
+
+    private static Map<String, Object> payload(String chatId, String text, Map<String, Object> replyMarkup) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("chat_id", chatId);
+        body.put("text", text);
+        body.put("disable_web_page_preview", true);
+        if (replyMarkup != null) {
+            body.put("reply_markup", replyMarkup);
+        }
+        return body;
     }
 
     private Result parse(HttpResponse<String> response) {

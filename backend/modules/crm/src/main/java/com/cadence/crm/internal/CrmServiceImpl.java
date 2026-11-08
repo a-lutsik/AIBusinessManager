@@ -273,9 +273,9 @@ public class CrmServiceImpl implements CrmService {
 
     @Override
     @Transactional
-    public void unlinkTelegram(UUID clientId, String source) {
-        Optional<ClientView> existing = repository.findById(clientId).filter(c -> c.telegramChatId() != null);
-        if (existing.isEmpty() || repository.setTelegramChat(clientId, null) == 0) {
+    public void unlinkTelegram(UUID clientId, String expectedChatId, String source) {
+        if (repository.clearTelegramChat(clientId, expectedChatId) == 0) {
+            log.debug("Telegram unlink skipped, the client has no such chat any more: client={}", clientId);
             return;
         }
         auditTelegram("client.telegram.unlink", clientId, true, false, source);

@@ -29,6 +29,9 @@ import java.util.List;
  *   <li>a visit booked inside the reminder's own window gets none: the confirmation just told the client;</li>
  *   <li>cancelled and unconfirmed visits are not selected; a moved visit has a new start, which is part of the idempotency
  *       key of {@link ClientMessageService}, so it is reminded again for the new time and never twice for the same one;</li>
+ *   <li>a reminder never becomes a manual owner task: a client without a Telegram chat is not reminded and the owner is not
+ *       bothered (only the booking confirmation falls back to a task); the message is delivered by the delivery worker, which
+ *       re-checks the visit just before sending;</li>
  *   <li>texts use the tenant's time zone and the client's locale.</li>
  * </ul>
  */
@@ -78,7 +81,7 @@ public class VisitReminderJob {
                     continue;
                 }
                 try {
-                    if (clientMessages.send(new VisitMessage(visit.id(), visit.clientId(), kind, visit.serviceName(), visit.serviceStart(), true))) {
+                    if (clientMessages.enqueue(new VisitMessage(visit.id(), visit.clientId(), kind, visit.serviceName(), visit.serviceStart(), false))) {
                         sent++;
                     }
                 } catch (RuntimeException ex) {

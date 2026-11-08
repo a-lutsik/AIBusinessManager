@@ -319,10 +319,10 @@
   "ai.conversationGone": "This conversation no longer exists, so your message was not sent. It is still in the field: press Send to start a new conversation with it.",
   "book.telegram.action": "Get reminders in Telegram",
   "book.telegram.error": "Telegram is not available right now. Use the link above to manage your visit.",
-  "book.telegram.linked": "Telegram is already connected for this number.",
   "client.telegram.action": "Telegram link",
   "client.telegram.hint": "Send this link to the client. They press Start in the bot, and confirmations and reminders arrive in Telegram. The link works once.",
   "client.telegram.connected": "Telegram connected",
   "client.telegram.disabled": "The Telegram channel is not switched on on the server.",
-  "client.telegram.error": "Could not create the link. Please try again."
+  "client.telegram.error": "Could not create the link. Please try again.",
+  "book.telegram.open": "Open Telegram"
 }

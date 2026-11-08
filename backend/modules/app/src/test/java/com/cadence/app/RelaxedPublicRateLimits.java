@@ -20,7 +20,9 @@ import java.lang.annotation.Target;
         "app.rate-limit.slots-per-minute-per-ip=1000000",
         "app.rate-limit.bookings-per-day-per-phone=1000000",
         "app.rate-limit.bookings-per-hour-per-tenant=1000000",
-        "app.rate-limit.bookings-per-hour-per-ip=1000000"
+        "app.rate-limit.bookings-per-hour-per-ip=1000000",
+        "app.rate-limit.telegram-links-per-hour-per-ip=1000000",
+        "app.rate-limit.telegram-webhook-per-minute-per-ip=1000000"
 })
 @interface RelaxedPublicRateLimits {
 }

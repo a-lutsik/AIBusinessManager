@@ -11,6 +11,8 @@ public record DeliveryOutcome(Status status, String error) {
         REJECTED_BY_CLIENT,
         SKIPPED_NO_CHAT,
         SKIPPED_DISABLED,
+        /** The process is stopping: nothing is known to have been sent, the message stays queued. */
+        INTERRUPTED,
         /** Written to the owner as a task with the ready text (the manual channel). */
         QUEUED_MANUAL
     }

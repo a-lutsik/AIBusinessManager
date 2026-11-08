@@ -308,6 +308,16 @@ class ClientRepository {
                 .execute();
     }
 
+    /** Returns the rows written: 0 when the client no longer has exactly this chat. */
+    int clearTelegramChat(UUID id, String expectedChatId) {
+        return dsl.update(CLIENT)
+                .set(CLIENT.TELEGRAM_CHAT_ID, (String) null)
+                .where(TenantAwareDsl.tenantEquals(CLIENT.TENANT_ID)
+                        .and(CLIENT.ID.eq(id))
+                        .and(CLIENT.TELEGRAM_CHAT_ID.eq(expectedChatId)))
+                .execute();
+    }
+
     void anonymize(UUID id) {
         dsl.update(CLIENT)
                 .set(CLIENT.DISPLAY_NAME, "anonymized")

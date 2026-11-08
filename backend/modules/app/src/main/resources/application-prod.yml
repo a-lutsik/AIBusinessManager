@@ -35,7 +35,8 @@ app:
     # Same variables as application.yml. With APP_TELEGRAM_ENABLED=true the bot token (APP_TELEGRAM_BOT_TOKEN), the bot
     # username and the webhook secret are required and a missing one stops the startup; a placeholder is not accepted.
     enabled: ${APP_TELEGRAM_ENABLED:false}
-    # Fixed: the bot token is part of the request URL, so no environment variable may redirect it.
+    # Fixed here and enforced in code (TelegramConfiguration): the bot token is part of the request URL, so under prod the
+    # Bot API can only be the official one and no environment variable may redirect it.
     api-base-url: https://api.telegram.org
   rate-limit:
     # CIDRs of the reverse proxy whose X-Forwarded-For is trusted. Empty: the header is ignored and all clients behind

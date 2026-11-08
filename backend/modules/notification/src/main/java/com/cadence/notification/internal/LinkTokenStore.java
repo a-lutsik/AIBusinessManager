@@ -79,6 +79,34 @@ class LinkTokenStore {
                 .fetchOptional(r -> new Target(r.get(0, UUID.class), r.get(1, UUID.class)));
     }
 
+    /** A token whose /start was seen and that waits for the contact; found by the chat it came from. */
+    record Pending(UUID tenantId, UUID clientId, String tokenHash) {
+    }
+
+    /**
+     * Records the chat that pressed Start on a live token, in the tenant scope of the token; false when the token is gone or
+     * already started (one chat per token, first one wins).
+     */
+    @Transactional
+    boolean attachChat(String tokenHash, String chatId) {
+        return dsl.update(CLIENT_CHANNEL_LINK_TOKEN)
+                .set(CLIENT_CHANNEL_LINK_TOKEN.CHAT_ID, chatId)
+                .where(TenantAwareDsl.tenantEquals(CLIENT_CHANNEL_LINK_TOKEN.TENANT_ID)
+                        .and(CLIENT_CHANNEL_LINK_TOKEN.TOKEN_HASH.eq(tokenHash))
+                        .and(CLIENT_CHANNEL_LINK_TOKEN.USED_AT.isNull())
+                        .and(CLIENT_CHANNEL_LINK_TOKEN.CHAT_ID.isNull())
+                        .and(CLIENT_CHANNEL_LINK_TOKEN.EXPIRES_AT.gt(Utc.toLocal(Instant.now()))))
+                .execute() == 1;
+    }
+
+    /** Cross-tenant, like {@link #lookup}: the started, unspent, unexpired token of this chat. */
+    @Transactional(readOnly = true)
+    Optional<Pending> pendingOf(String chatId) {
+        return dsl.resultQuery("select tenant_id, client_id, token_hash from channel_link_pending_lookup({0}, {1})",
+                        DSL.val(chatId), DSL.val(TELEGRAM))
+                .fetchOptional(r -> new Pending(r.get(0, UUID.class), r.get(1, UUID.class), r.get(2, String.class)));
+    }
+
     /** Marks the token used in the current tenant scope; false when it is already used, expired or unknown. One winner per token. */
     @Transactional
     boolean consume(String tokenHash) {

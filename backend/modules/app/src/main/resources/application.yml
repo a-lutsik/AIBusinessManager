@@ -1,6 +1,11 @@
 spring:
   application:
     name: cadence
+  task:
+    scheduling:
+      # More than one thread: the delivery worker waits on Telegram and must not hold up the outbox poller or the reminders.
+      pool:
+        size: 4
   datasource:
     url: jdbc:postgresql://localhost:5433/cadence
     # Runtime role: not the table owner, NOBYPASSRLS, so Postgres RLS applies (created by V7 migration).

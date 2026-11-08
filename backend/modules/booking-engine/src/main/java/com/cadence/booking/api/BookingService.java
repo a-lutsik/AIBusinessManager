@@ -89,8 +89,9 @@ public interface BookingService {
     AppointmentView withdrawConsentByAccessToken(UUID appointmentId, String rawToken);
 
     /**
-     * The facts a client message about a visit needs, with no actor check (system callers: outbox handler, reminder job);
-     * empty when the visit does not exist in the current tenant.
+     * The facts a client message about a visit needs, read under a share lock so the visit cannot change until the caller's
+     * transaction ends, with no actor check (system callers: outbox handler, delivery guard); empty when the visit does not
+     * exist in the current tenant. Needs a read-write transaction.
      */
     Optional<VisitNotice> visitNotice(UUID appointmentId);
 
@@ -99,10 +100,9 @@ public interface BookingService {
 
     /**
      * One-time Telegram deep link for the client behind a manage link, for the booking-success page. The token must belong to
-     * {@code appointmentId} ({@code TOKEN_INVALID}, 403); an unknown or expired token is 404. A client who already linked
-     * Telegram is not offered a second link here ({@code TELEGRAM_ALREADY_LINKED}, 409): whoever knows a phone number can
-     * book with it, so a public link must not be able to take over an existing chat; the owner re-links from the console.
-     * {@code TELEGRAM_DISABLED}, 409, when the channel is off.
+     * {@code appointmentId} ({@code TOKEN_INVALID}, 403); an unknown or expired token is 404. The answer is the same whether
+     * or not the client already has a chat (no oracle). A link alone binds nothing: the bot makes the person prove they own
+     * the client's phone number by sharing their contact. {@code TELEGRAM_DISABLED}, 409, when the channel is off.
      */
     TelegramLink telegramLinkByAccessToken(UUID appointmentId, String rawToken);
 

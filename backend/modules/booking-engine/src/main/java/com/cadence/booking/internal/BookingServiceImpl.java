@@ -582,7 +582,7 @@ public class BookingServiceImpl implements BookingService {
     }
 
     @Override
-    @Transactional(readOnly = true)
+    @Transactional
     public Optional<VisitNotice> visitNotice(UUID appointmentId) {
         return appointments.notice(appointmentId);
     }
@@ -601,10 +601,6 @@ public class BookingServiceImpl implements BookingService {
             AppointmentView view = appointments.find(target.appointmentId()).orElseThrow(BookingServiceImpl::tokenInvalid);
             ClientView client = crmService.findActiveById(view.clientId())
                     .orElseThrow(() -> DomainException.conflict("CLIENT_ANONYMIZED", "This client was anonymized"));
-            if (client.telegramChatId() != null) {
-                log.info("Telegram link refused, already linked: appointment={}, client={}", appointmentId, client.id());
-                throw DomainException.conflict("TELEGRAM_ALREADY_LINKED", "Telegram is already linked for this client");
-            }
             return telegramLinks.issue(client.id());
         }
     }

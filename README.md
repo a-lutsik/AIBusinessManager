@@ -226,14 +226,18 @@ a stub HTTP server).
    Telegram then sends the secret in `X-Telegram-Bot-Api-Secret-Token`; any other caller gets 401. The webhook sits inside
    the per-IP limit of the public API (`app.rate-limit.telegram-webhook-per-minute-per-ip`).
 4. Linking: the booking-success page offers "Get reminders in Telegram" (a one-time `https://t.me/<bot>?start=<token>` link,
-   valid 72 h, stored as a hash), and the owner can create one on the client card. Pressing Start in the bot is the client's
-   consent to service messages (marketing consent is separate and unchanged). A client who blocks the bot (HTTP 403) is
-   unlinked automatically.
+   valid 72 h, stored as a hash), and the owner can create one on the client card. A link alone proves nothing (anyone can book
+   with any phone number), so after Start the bot asks the person to share their own Telegram contact; the chat is stored only
+   when that contact's phone number equals the client's. The link is spent by the contact either way (a wrong contact needs a
+   new link). Completing this is the client's consent to service messages (marketing consent is separate and unchanged). A
+   client who blocks the bot (HTTP 403) is unlinked automatically.
 
 The delivery journal is `notification_delivery` (`SENT`, `FAILED` with the reason, `SKIPPED_NO_CHAT`, `SKIPPED_DISABLED`,
 `QUEUED_MANUAL`). Message texts live in `messages_<locale>.properties` (`client.telegram.*`) and use the client's
-`preferred_locale` and the tenant's time zone. Reminders run in the backend (`app.telegram.reminder-poll-ms`), once per visit
-start and kind, and only while the channel is enabled. A live check with a real bot is an operator step.
+`preferred_locale` and the tenant's time zone. Messages are queued and sent by a delivery worker with no database transaction open during the
+Telegram call; just before sending it re-checks that the visit is still confirmed and starts at the same time. Reminders run in
+the backend (`app.telegram.reminder-poll-ms`), once per visit start and kind, only while the channel is enabled and only for
+clients who linked Telegram; unlike the booking confirmation they never become owner tasks. A live check with a real bot is an operator step.
 
 ### Tests and code generation
 

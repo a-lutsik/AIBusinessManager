@@ -11,27 +11,28 @@ async function sentTo(chatId: string): Promise<string[]> {
   return sent.filter((m) => m.chat_id === chatId).map((m) => m.text);
 }
 
-test('a client links Telegram from the booking-success page and the bot confirms (stub Bot API)', async ({ page, context, request }) => {
-  await context.route('https://t.me/**', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: 'bot' }));
+test('a client links Telegram from the booking-success page and the bot confirms (stub Bot API)', async ({ page, request }) => {
   const phone = uniquePhone();
   await bookThroughUi(page, { service: 'Haircut', specialist: 'Nino Beridze', name: uniqueName('Tg'), localPhone: phone.slice('+995'.length) });
 
-  const popup = context.waitForEvent('page');
   await page.getByRole('button', { name: 'Get reminders in Telegram' }).click();
-  const url = (await popup).url();
+  const url = (await page.getByRole('link', { name: 'Open Telegram' }).getAttribute('href')) ?? '';
   expect(url).toMatch(/^https:\/\/t\.me\/cadence_e2e_bot\?start=[A-Za-z0-9_-]+$/);
   const token = new URL(url).searchParams.get('start');
 
-  // What Telegram does when the client presses Start; a wrong secret is refused.
+  // What Telegram does: Start, then the contact the person shares. A wrong secret is refused.
   const chatId = String(900_000_000 + Math.floor(Math.random() * 90_000_000));
-  const update = { update_id: 1, message: { chat: { id: Number(chatId), type: 'private' }, from: { language_code: 'en' }, text: `/start ${token}` } };
-  const refused = await request.post(`${API_URL}/api/public/telegram/webhook`, { data: update, headers: { 'X-Telegram-Bot-Api-Secret-Token': 'wrong' } });
-  expect(refused.status()).toBe(401);
-  const accepted = await request.post(`${API_URL}/api/public/telegram/webhook`, { data: update, headers: { 'X-Telegram-Bot-Api-Secret-Token': SECRET } });
-  expect(accepted.status()).toBe(200);
+  const hook = (data: unknown, secret = SECRET) =>
+    request.post(`${API_URL}/api/public/telegram/webhook`, { data, headers: { 'X-Telegram-Bot-Api-Secret-Token': secret } });
+  const start = { update_id: 1, message: { chat: { id: Number(chatId), type: 'private' }, from: { id: Number(chatId), language_code: 'en' }, text: `/start ${token}` } };
+  expect((await hook(start, 'wrong')).status()).toBe(401);
+  expect((await hook(start)).status()).toBe(200);
+  await expect.poll(async () => (await sentTo(chatId)).join('\n')).toContain('share your contact');
+  const contact = { update_id: 2, message: { chat: { id: Number(chatId), type: 'private' }, from: { id: Number(chatId), language_code: 'en' }, contact: { phone_number: phone.slice(1), user_id: Number(chatId) } } };
+  expect((await hook(contact)).status()).toBe(200);
   await expect.poll(async () => (await sentTo(chatId)).join('\n')).toContain('Done!');
 
-  // The token is one-time: the same link again binds nothing and is answered as expired.
-  await request.post(`${API_URL}/api/public/telegram/webhook`, { data: update, headers: { 'X-Telegram-Bot-Api-Secret-Token': SECRET } });
+  // The token is spent: the same link again is answered as expired.
+  expect((await hook(start)).status()).toBe(200);
   await expect.poll(async () => (await sentTo(chatId)).join('\n')).toContain('expired');
 });

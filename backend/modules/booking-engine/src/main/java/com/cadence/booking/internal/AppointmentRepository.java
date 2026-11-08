@@ -278,6 +278,7 @@ class AppointmentRepository {
     Optional<VisitNotice> notice(UUID id) {
         return dsl.selectFrom(APPOINTMENT)
                 .where(TenantAwareDsl.tenantEquals(APPOINTMENT.TENANT_ID).and(APPOINTMENT.ID.eq(id)))
+                .forShare()
                 .fetchOptional(AppointmentRepository::toNotice);
     }
 

@@ -17,7 +17,9 @@ package com.cadence.platform.tenancy;
  * No transaction: nothing is bound, RLS fails closed (no rows, inserts rejected). Logged once per call site, or an
  *                 IllegalStateException with app.persistence.require-transaction=true.
  * Cross-tenant:   only via SECURITY DEFINER functions executable by cadence_app:
- *                 booking_token_lookup(hash) for public booking links, outbox_claim(limit, max) for the poller.
+ *                 booking_token_lookup(hash) for public booking links, outbox_claim(limit, max) for the poller,
+ *                 channel_link_token_lookup / channel_link_pending_lookup / channel_link_token_purge for the Telegram
+ *                 binding (the webhook has no tenant), visit_message_claim(limit, stale) for the delivery worker.
  * </pre>
  */
 public final class RlsNotes {

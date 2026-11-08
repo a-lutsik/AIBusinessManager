@@ -66,5 +66,5 @@
   "service.buffer": "+{before}/{after} ბუფერი",
   "book.telegram.action": "შეხსენებები Telegram-ში",
   "book.telegram.error": "Telegram ახლა მიუწვდომელია. ვიზიტს მართეთ ზემოთ მოცემული ბმულით.",
-  "book.telegram.linked": "Telegram ამ ნომრისთვის უკვე დაკავშირებულია."
+  "book.telegram.open": "Telegram-ის გახსნა"
 }

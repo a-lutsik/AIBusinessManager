@@ -66,5 +66,5 @@
   "service.buffer": "+{before}/{after} rezerva",
   "book.telegram.action": "Dostávat připomínky v Telegramu",
   "book.telegram.error": "Telegram teď není dostupný. Návštěvu spravujte pomocí odkazu výše.",
-  "book.telegram.linked": "Telegram je pro toto číslo již připojen."
+  "book.telegram.open": "Otevřít Telegram"
 }

@@ -73,6 +73,8 @@ public abstract class AbstractTimescaleIT {
         registry.add("app.persistence.require-transaction", () -> "true");
         registry.add("app.seed.enabled", () -> "true");
         registry.add("app.outbox.enabled", () -> "false");
+        // The delivery worker runs only when a test calls DeliveryRunner.runOnce().
+        registry.add("app.delivery.enabled", () -> "false");
         registry.add("spring.batch.job.enabled", () -> "false");
         registry.add("app.ai.provider", () -> "stub");
         // ADR 0001 / review M3: recalculations fold the journal as of now minus this lag. Short in ITs, so a test only

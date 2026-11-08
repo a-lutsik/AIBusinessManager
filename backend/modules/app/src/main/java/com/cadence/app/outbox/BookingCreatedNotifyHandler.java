@@ -18,7 +18,7 @@ import java.util.UUID;
 import static com.cadence.platform.jooq.Tables.OUTBOX_EVENT;
 
 /**
- * Confirms a new visit to the client: Telegram when linked, otherwise a manual owner task. A public booking already
+ * Queues the confirmation of a new visit to the client: delivered to Telegram when linked, otherwise as a manual owner task. A public booking already
  * gave the owner a NEW_BOOKING task with the same text (and the manage link), so it gets no second task here.
  */
 @Component
@@ -51,7 +51,7 @@ public class BookingCreatedNotifyHandler implements OutboxHandler {
         }
         VisitNotice visit = found.get();
         MessageKind kind = visit.status() == AppointmentStatus.PENDING ? MessageKind.CONFIRMATION_PENDING : MessageKind.CONFIRMATION;
-        clientMessages.send(new VisitMessage(
+        clientMessages.enqueue(new VisitMessage(
                 visit.id(), visit.clientId(), kind, visit.serviceName(), visit.serviceStart(), !PUBLIC_SOURCE.equals(visit.source())));
     }
 }

@@ -12,6 +12,7 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -301,6 +302,21 @@ class RlsIsolationIT extends AbstractTimescaleIT {
     void tokenLookupFunctionIsCallableWithoutTenantContext() throws Exception {
         try (Connection c = appConnection()) {
             assertThat(count(c, "select count(*) from booking_token_lookup(?)", "no-such-hash")).isZero();
+        }
+    }
+
+    @Test
+    void telegramTablesAreRowLevelSecuredAndTheirFunctionsWorkWithoutTenantContext() throws Exception {
+        try (Connection c = appConnection()) {
+            for (String table : List.of("client_channel_link_token", "visit_message_dispatch")) {
+                assertThat(count(c, "select count(*) from pg_class where relname = ? and relrowsecurity", table)).as(table + " RLS").isEqualTo(1);
+                assertThat(count(c, "select count(*) from pg_policies where tablename = ? and policyname = 'tenant_isolation'", table)).as(table + " policy").isEqualTo(1);
+                assertThat(count(c, "select count(*) from " + table)).as(table + " without a tenant scope").isZero();
+            }
+            assertThat(count(c, "select count(*) from channel_link_token_lookup(?, 'telegram')", "no-such-hash")).isZero();
+            assertThat(count(c, "select count(*) from channel_link_pending_lookup(?, 'telegram')", "no-such-chat")).isZero();
+            assertThat(count(c, "select channel_link_token_purge(localtimestamp - interval '100 years')")).isZero();
+            assertThat(count(c, "select count(*) from visit_message_claim(0, localtimestamp)")).isZero();
         }
     }
 

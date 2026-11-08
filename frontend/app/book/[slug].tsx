@@ -40,6 +40,7 @@ export default function PublicBookScreen() {
   const [slotTaken, setSlotTaken] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
   const [telegramBusy, setTelegramBusy] = useState(false);
+  const [telegramUrl, setTelegramUrl] = useState<string | null>(null);
   const activeLocale = useLocale();
   const timeZone: string | undefined = tenant?.timezone;
 
@@ -186,7 +187,10 @@ export default function PublicBookScreen() {
               }
             />
           ) : null}
-          {tenant?.telegramEnabled ? (
+          {/* No window.open after an async call: iOS Safari blocks it. The link comes back and is shown as a link. */}
+          {tenant?.telegramEnabled && telegramUrl ? (
+            <Button label={t('book.telegram.open')} href={telegramUrl as Href} />
+          ) : tenant?.telegramEnabled ? (
             <Button
               label={t('book.telegram.action')}
               variant="ghost"
@@ -196,14 +200,8 @@ export default function PublicBookScreen() {
                 setError(null);
                 api
                   .publicTelegramLink(result.id, result.accessToken)
-                  .then((link) => {
-                    if (typeof window !== 'undefined') {
-                      window.open(link.url, '_blank');
-                    }
-                  })
-                  .catch((e: unknown) =>
-                    setError(t(e instanceof ApiError && e.code === 'TELEGRAM_ALREADY_LINKED' ? 'book.telegram.linked' : 'book.telegram.error'))
-                  )
+                  .then((link) => setTelegramUrl(link.url))
+                  .catch(() => setError(t('book.telegram.error')))
                   .finally(() => setTelegramBusy(false));
               }}
             />

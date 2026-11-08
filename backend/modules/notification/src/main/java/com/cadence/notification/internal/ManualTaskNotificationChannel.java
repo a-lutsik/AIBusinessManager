@@ -7,19 +7,16 @@ import com.cadence.notification.api.OutboundMessage;
 import com.cadence.notification.api.OwnerTaskService;
 import com.cadence.platform.i18n.MessageCatalog;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
 
-/** Manual-fallback channel: creates an owner task with the ready-made text, so the owner can send it by hand. */
+/** Manual-fallback channel: an owner task with the ready-made text, so the owner can send it by hand. Runs in the caller's transaction. */
 @Component
 public class ManualTaskNotificationChannel implements NotificationChannel {
 
     private final OwnerTaskService ownerTaskService;
-    private final DeliveryJournal journal;
     private final MessageCatalog messages;
 
-    ManualTaskNotificationChannel(OwnerTaskService ownerTaskService, DeliveryJournal journal, MessageCatalog messages) {
+    ManualTaskNotificationChannel(OwnerTaskService ownerTaskService, MessageCatalog messages) {
         this.ownerTaskService = ownerTaskService;
-        this.journal = journal;
         this.messages = messages;
     }
 
@@ -29,7 +26,6 @@ public class ManualTaskNotificationChannel implements NotificationChannel {
     }
 
     @Override
-    @Transactional
     public DeliveryOutcome send(OutboundMessage message) {
         ownerTaskService.create(
                 "MANUAL_MESSAGE",
@@ -40,7 +36,6 @@ public class ManualTaskNotificationChannel implements NotificationChannel {
                 message.appointmentId(),
                 message.clientId()
         );
-        journal.record(channelId(), message, "QUEUED_MANUAL", null);
         return new DeliveryOutcome(Status.QUEUED_MANUAL, null);
     }
 }
