@@ -36,7 +36,9 @@ import java.util.Optional;
  *
  * <p>Restarts: a message in flight when the process died is claimed again after {@code STALE_AFTER}, flagged stale, and is
  * never sent a second time (whether Telegram got it is unknown): it is journaled FAILED and falls back like any failure. A
- * shutdown during the call puts the message back in the queue untouched. Runs on its own scheduler thread
+ * shutdown before the call, or while waiting after an explicit refusal, puts the message back in the queue; a shutdown inside the call
+ * leaves it SENDING (outcome unknown, so it is settled as stale and never sent twice). A row is marked SENDING one at a time, right
+ * before its own call, so a crash puts at most one message in doubt. Runs on its own scheduler thread
  * ({@code spring.task.scheduling.pool.size} is above one), so a slow provider never delays the outbox or the reminders.
  */
 @Component
@@ -91,29 +93,39 @@ class MessageDeliveryWorker implements DeliveryRunner {
 
     @Override
     public int runOnce() {
-        List<DispatchQueue.Claimed> batch = tx.execute(status -> queue.claim(BATCH_SIZE, Instant.now().minus(STALE_AFTER)));
-        if (batch == null || batch.isEmpty()) {
-            return 0;
-        }
-        log.debug("Delivery batch claimed: size={}", batch.size());
-        for (DispatchQueue.Claimed claimed : batch) {
-            try (TenantContext.Scope ignored = TenantContext.open(claimed.tenantId())) {
+        int handled = 0;
+        while (handled < BATCH_SIZE) {
+            // One row at a time: a row is marked SENDING only when its own turn comes, so a crash leaves at most one in doubt.
+            List<DispatchQueue.Claimed> claimed = tx.execute(status -> queue.claim(1, Instant.now().minus(STALE_AFTER)));
+            if (claimed == null || claimed.isEmpty()) {
+                break;
+            }
+            handled++;
+            boolean goOn = false;
+            try (TenantContext.Scope ignored = TenantContext.open(claimed.get(0).tenantId())) {
                 ActorContext.set(ActorContext.system());
-                deliver(claimed);
+                goOn = deliver(claimed.get(0));
             } catch (RuntimeException ex) {
                 log.error("Delivery failed, the message is retried or settled as stale: tenant={}, visit={}, kind={}",
-                        claimed.tenantId(), claimed.appointmentId(), claimed.kind(), ex);
+                        claimed.get(0).tenantId(), claimed.get(0).appointmentId(), claimed.get(0).kind(), ex);
             } finally {
                 ActorContext.clear();
             }
+            if (!goOn) {
+                break;
+            }
         }
-        return batch.size();
+        if (handled > 0) {
+            log.debug("Delivery pass finished: handled={}", handled);
+        }
+        return handled;
     }
 
     private record Plan(OutboundMessage message) {
     }
 
-    private void deliver(DispatchQueue.Claimed claimed) {
+    /** Returns false when the pass must stop (interrupted, or the message went back to the queue). */
+    private boolean deliver(DispatchQueue.Claimed claimed) {
         Plan plan;
         try {
             plan = tx.execute(status -> prepare(claimed));
@@ -123,17 +135,23 @@ class MessageDeliveryWorker implements DeliveryRunner {
         }
         if (plan == null) {
             tx.executeWithoutResult(status -> queue.done(claimed));
-            return;
+            return true;
         }
         DeliveryOutcome outcome = claimed.stale()
                 ? new DeliveryOutcome(Status.FAILED, "Delivery state unknown after a restart; not sent again")
                 : telegram.send(plan.message());
         if (outcome.status() == Status.INTERRUPTED) {
             tx.executeWithoutResult(status -> queue.release(claimed));
-            log.info("Delivery interrupted, message stays queued: visit={}, kind={}", claimed.appointmentId(), claimed.kind());
-            return;
+            log.info("Delivery interrupted before anything was sent, message back in the queue: visit={}, kind={}", claimed.appointmentId(), claimed.kind());
+            return false;
+        }
+        if (outcome.status() == Status.UNKNOWN) {
+            // Left SENDING on purpose: whether Telegram got it is unknown, so it is settled as stale (never resent).
+            log.warn("Delivery interrupted inside the call, outcome unknown, not resent: visit={}, kind={}", claimed.appointmentId(), claimed.kind());
+            return false;
         }
         tx.executeWithoutResult(status -> finish(claimed, plan.message(), outcome));
+        return true;
     }
 
     /** Null: the message is no longer wanted (visit cancelled or moved, client retired). */

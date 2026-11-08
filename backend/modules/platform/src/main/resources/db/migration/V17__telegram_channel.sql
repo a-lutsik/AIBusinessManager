@@ -13,15 +13,17 @@
 --    row and sends nothing; a rescheduled visit has a new start and so gets its reminders again. Plain table for the
 --    same reason as 1 (a unique key without the partition column).
 -- 5. Delivery queue: visit_message_dispatch doubles as the queue of messages to send (status PENDING -> SENDING -> DONE),
---    so the Telegram call runs outside any database transaction. visit_message_claim hands a batch to the delivery
+--    so the Telegram call runs outside any database transaction. visit_message_claim hands rows (the worker asks for one at a time) to the delivery
 --    worker across tenants (SECURITY DEFINER, FOR UPDATE SKIP LOCKED, like outbox_claim); a SENDING row older than the
 --    cutoff (the process died mid-send) comes back flagged stale and is never sent again, because the answer of
 --    Telegram is unknown: it is journaled as FAILED and falls back to the manual task.
 -- 6. Binding needs proof of the phone: /start <token> only records the chat on the token (chat_id), the chat is stored on
 --    the client once the contact the person shares matches the client's phone. channel_link_pending_lookup finds that
 --    token by chat, channel_link_token_purge removes used and long expired tokens.
+-- 7. visit_message_purge removes handled (DONE) queue rows after the retention period.
 -- Undo: DROP TABLE visit_message_dispatch, client_channel_link_token; DROP FUNCTION channel_link_token_lookup(text, text),
--- channel_link_pending_lookup(text, text), channel_link_token_purge(timestamp), visit_message_claim(int, timestamp);
+-- channel_link_pending_lookup(text, text), channel_link_token_purge(timestamp), visit_message_claim(int, timestamp),
+-- visit_message_purge(timestamp);
 -- ALTER TABLE notification_delivery DROP CONSTRAINT notification_delivery_status_chk, DROP COLUMN client_id,
 -- DROP COLUMN appointment_id.
 
@@ -159,3 +161,21 @@ $$;
 
 REVOKE ALL ON FUNCTION visit_message_claim(int, timestamp) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION visit_message_claim(int, timestamp) TO cadence_app;
+
+CREATE OR REPLACE FUNCTION visit_message_purge(p_before timestamp)
+    RETURNS int
+    LANGUAGE sql
+    VOLATILE
+    SECURITY DEFINER
+    SET search_path = public, pg_temp
+AS $$
+    WITH gone AS (
+        DELETE FROM visit_message_dispatch d
+        WHERE d.status = 'DONE' AND d.created_at < p_before
+        RETURNING 1
+    )
+    SELECT count(*)::int FROM gone
+$$;
+
+REVOKE ALL ON FUNCTION visit_message_purge(timestamp) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION visit_message_purge(timestamp) TO cadence_app;

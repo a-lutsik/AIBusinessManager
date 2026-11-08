@@ -54,7 +54,7 @@ class TelegramDisabledIT extends AbstractTimescaleIT {
              PreparedStatement ps = c.prepareStatement("update visit_message_dispatch set status = 'DONE' where status <> 'DONE'")) {
             ps.executeUpdate();
         }
-        UUID appointmentId = UUID.fromString(scalar("select id from appointment where tenant_id = ? and status = 'CONFIRMED'"
+        UUID appointmentId = UUID.fromString(scalar("select id from appointment where tenant_id = ? and status = 'CONFIRMED' and service_start > (now() at time zone 'utc')"
                 + " and not exists (select 1 from visit_message_dispatch d where d.appointment_id = appointment.id) order by created_at limit 1", DemoIds.LUMEN));
         UUID clientId = UUID.fromString(scalar("select client_id from appointment where id = ?", appointmentId));
         Instant start = Instant.parse(scalar("select to_char(service_start, 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') from appointment where id = ?", appointmentId));

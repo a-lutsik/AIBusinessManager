@@ -11,8 +11,10 @@ public record DeliveryOutcome(Status status, String error) {
         REJECTED_BY_CLIENT,
         SKIPPED_NO_CHAT,
         SKIPPED_DISABLED,
-        /** The process is stopping: nothing is known to have been sent, the message stays queued. */
+        /** Interrupted where nothing can have reached the provider (before the call, or while waiting after a refusal): the message goes back in the queue. */
         INTERRUPTED,
+        /** Interrupted inside a call, or while waiting after a call without an answer: it may have been delivered, so it is never sent again. */
+        UNKNOWN,
         /** Written to the owner as a task with the ready text (the manual channel). */
         QUEUED_MANUAL
     }

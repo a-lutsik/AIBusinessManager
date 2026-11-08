@@ -30,11 +30,15 @@ class TelegramBotClient {
     private static final Duration MAX_WAIT = Duration.ofSeconds(2);
     private static final int MAX_ERROR_CHARS = 300;
 
-    /** {@code httpStatus} 0 means no answer (network error or timeout). */
-    record Result(boolean ok, int httpStatus, String description, boolean interrupted) {
+    /**
+     * {@code httpStatus} 0 means no answer (network error or timeout). {@code interrupted}: the thread was interrupted where
+     * nothing can have reached Telegram (before the first call, or while waiting after an explicit refusal). {@code outcomeUnknown}:
+     * it was interrupted inside a call or while waiting after a call that got no answer, so the message may have been delivered.
+     */
+    record Result(boolean ok, int httpStatus, String description, boolean interrupted, boolean outcomeUnknown) {
 
         Result(boolean ok, int httpStatus, String description) {
-            this(ok, httpStatus, description, false);
+            this(ok, httpStatus, description, false, false);
         }
 
         boolean forbidden() {
@@ -70,6 +74,9 @@ class TelegramBotClient {
         } catch (IOException | IllegalArgumentException ex) {
             return new Result(false, 0, "request could not be built: " + ex.getClass().getSimpleName());
         }
+        if (Thread.currentThread().isInterrupted()) {
+            return new Result(false, 0, "interrupted before the call", true, false);
+        }
         Result result = null;
         for (int attempt = 1; attempt <= props.maxAttempts(); attempt++) {
             Duration pause = Duration.ofMillis(250L * attempt);
@@ -84,12 +91,13 @@ class TelegramBotClient {
                 result = new Result(false, 0, ex.getClass().getSimpleName());
             } catch (InterruptedException ex) {
                 Thread.currentThread().interrupt();
-                return new Result(false, 0, "interrupted", true);
+                return new Result(false, 0, "interrupted during the call", false, true);
             }
             if (attempt < props.maxAttempts()) {
                 log.debug("Telegram sendMessage attempt {} of {} failed ({}), retrying", attempt, props.maxAttempts(), result.reason());
                 if (!sleep(pause.compareTo(MAX_WAIT) > 0 ? MAX_WAIT : pause)) {
-                    return new Result(false, 0, "interrupted", true);
+                    boolean refused = result.httpStatus() > 0;
+                    return new Result(false, 0, "interrupted while waiting to retry", refused, !refused);
                 }
             }
         }

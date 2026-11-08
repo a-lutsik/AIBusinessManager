@@ -11,7 +11,7 @@ import org.springframework.stereotype.Component;
 /**
  * Telegram transport, no database access (it is called outside any transaction). Outcomes: SENT; FAILED (provider error,
  * with the reason); REJECTED_BY_CLIENT (HTTP 403: the client blocked the bot, the caller drops the link);
- * SKIPPED_NO_CHAT (the client has not linked Telegram); SKIPPED_DISABLED (channel off); INTERRUPTED (shutdown, nothing sent).
+ * SKIPPED_NO_CHAT (the client has not linked Telegram); SKIPPED_DISABLED (channel off); INTERRUPTED (shutdown before anything could be sent); UNKNOWN (shutdown inside the call).
  */
 @Component
 public class TelegramNotificationChannel implements NotificationChannel {
@@ -43,7 +43,9 @@ public class TelegramNotificationChannel implements NotificationChannel {
         if (result.ok()) {
             return DeliveryOutcome.sent();
         }
-        Status status = result.interrupted() ? Status.INTERRUPTED : result.forbidden() ? Status.REJECTED_BY_CLIENT : Status.FAILED;
+        Status status = result.outcomeUnknown() ? Status.UNKNOWN
+                : result.interrupted() ? Status.INTERRUPTED
+                : result.forbidden() ? Status.REJECTED_BY_CLIENT : Status.FAILED;
         log.warn("Telegram message not delivered: client={}, visit={}, template={}, outcome={}, reason={}",
                 message.clientId(), message.appointmentId(), message.templateKey(), status, result.reason());
         return new DeliveryOutcome(status, result.reason());

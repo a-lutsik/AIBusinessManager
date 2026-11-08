@@ -316,7 +316,93 @@ class RlsIsolationIT extends AbstractTimescaleIT {
             assertThat(count(c, "select count(*) from channel_link_token_lookup(?, 'telegram')", "no-such-hash")).isZero();
             assertThat(count(c, "select count(*) from channel_link_pending_lookup(?, 'telegram')", "no-such-chat")).isZero();
             assertThat(count(c, "select channel_link_token_purge(localtimestamp - interval '100 years')")).isZero();
+            assertThat(count(c, "select visit_message_purge(localtimestamp - interval '100 years')")).isZero();
             assertThat(count(c, "select count(*) from visit_message_claim(0, localtimestamp)")).isZero();
+        }
+    }
+
+    @Test
+    void telegramTablesShowEachTenantOnlyItsOwnRows() throws Exception {
+        UUID tokenA = UUID.randomUUID();
+        UUID tokenB = UUID.randomUUID();
+        UUID clientA = UUID.randomUUID();
+        UUID clientB = UUID.randomUUID();
+        UUID visitA = UUID.randomUUID();
+        UUID visitB = UUID.randomUUID();
+        try (Connection owner = ownerConnection()) {
+            insertVisit(owner, DemoIds.LUMEN, clientA, visitA, DemoIds.NINO, DemoIds.HAIRCUT);
+            insertVisit(owner, DemoIds.AURA, clientB, visitB, DemoIds.AURA_MASTER, DemoIds.AURA_CUT);
+            insertToken(owner, tokenA, DemoIds.LUMEN, clientA);
+            insertToken(owner, tokenB, DemoIds.AURA, clientB);
+            insertDispatch(owner, DemoIds.LUMEN, visitA, clientA);
+            insertDispatch(owner, DemoIds.AURA, visitB, clientB);
+        }
+        try {
+            try (Connection c = appConnection()) {
+                c.setAutoCommit(false);
+                bindTenant(c, DemoIds.LUMEN);
+                assertThat(count(c, "select count(*) from client_channel_link_token where id = ?", tokenA)).isEqualTo(1);
+                assertThat(count(c, "select count(*) from client_channel_link_token where id = ?", tokenB)).as("other tenant's token").isZero();
+                assertThat(count(c, "select count(*) from visit_message_dispatch where appointment_id = ?", visitA)).isEqualTo(1);
+                assertThat(count(c, "select count(*) from visit_message_dispatch where appointment_id = ?", visitB)).as("other tenant's queue row").isZero();
+                try (Statement st = c.createStatement()) {
+                    assertThat(st.executeUpdate("update visit_message_dispatch set status = 'SENDING' where appointment_id = '" + visitB + "'"))
+                            .as("foreign update").isZero();
+                }
+                c.rollback();
+            }
+        } finally {
+            try (Connection owner = ownerConnection(); Statement st = owner.createStatement()) {
+                st.execute("delete from visit_message_dispatch where appointment_id in ('" + visitA + "', '" + visitB + "')");
+                st.execute("delete from client_channel_link_token where id in ('" + tokenA + "', '" + tokenB + "')");
+                st.execute("delete from appointment where id in ('" + visitA + "', '" + visitB + "')");
+                st.execute("delete from client where id in ('" + clientA + "', '" + clientB + "')");
+            }
+        }
+    }
+
+    private static void insertVisit(Connection c, UUID tenant, UUID client, UUID visit, UUID specialist, UUID service) throws SQLException {
+        try (PreparedStatement ps = c.prepareStatement("insert into client (id, tenant_id, normalized_phone, display_name, marketing_consent)"
+                + " values (?, ?, ?, 'Rls It', false)")) {
+            ps.setObject(1, client);
+            ps.setObject(2, tenant);
+            ps.setString(3, "+1999" + Math.abs(client.hashCode()));
+            ps.executeUpdate();
+        }
+        try (PreparedStatement ps = c.prepareStatement("""
+                insert into appointment (id, tenant_id, specialist_id, service_id, client_id, status, service_start, service_end,
+                    occupied_start, occupied_end, service_name_snapshot, price_snapshot, duration_snapshot, buffer_before_snapshot,
+                    buffer_after_snapshot, currency_code, source)
+                values (?, ?, ?, ?, ?, 'CANCELLED_BY_CLIENT', timestamp '2040-01-01 10:00', timestamp '2040-01-01 11:00',
+                    timestamp '2040-01-01 10:00', timestamp '2040-01-01 11:00', 'x', 0, 60, 0, 0, 'GEL', 'RLS_IT')
+                """)) {
+            ps.setObject(1, visit);
+            ps.setObject(2, tenant);
+            ps.setObject(3, specialist);
+            ps.setObject(4, service);
+            ps.setObject(5, client);
+            ps.executeUpdate();
+        }
+    }
+
+    private static void insertToken(Connection c, UUID id, UUID tenant, UUID client) throws SQLException {
+        try (PreparedStatement ps = c.prepareStatement("insert into client_channel_link_token (id, tenant_id, client_id, channel_id, token_hash, expires_at)"
+                + " values (?, ?, ?, 'telegram', ?, now() at time zone 'utc' + interval '1 day')")) {
+            ps.setObject(1, id);
+            ps.setObject(2, tenant);
+            ps.setObject(3, client);
+            ps.setString(4, id.toString().replace("-", "") + "rls-it");
+            ps.executeUpdate();
+        }
+    }
+
+    private static void insertDispatch(Connection c, UUID tenant, UUID visit, UUID client) throws SQLException {
+        try (PreparedStatement ps = c.prepareStatement("insert into visit_message_dispatch (tenant_id, appointment_id, kind, service_start, client_id, service_name, manual_fallback, status)"
+                + " values (?, ?, 'RLS_IT', now() at time zone 'utc', ?, 'x', false, 'DONE')")) {
+            ps.setObject(1, tenant);
+            ps.setObject(2, visit);
+            ps.setObject(3, client);
+            ps.executeUpdate();
         }
     }
 

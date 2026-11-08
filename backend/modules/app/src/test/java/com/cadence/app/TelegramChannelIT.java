@@ -12,6 +12,7 @@ import com.cadence.platform.tenancy.TenantContext;
 import com.cadence.platform.tenant.TenantDirectory;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -68,6 +69,8 @@ class TelegramChannelIT extends AbstractTimescaleIT {
     private static final HttpServer BOT;
     private static final List<String[]> SENT = new CopyOnWriteArrayList<>();
     private static final AtomicInteger CALLS = new AtomicInteger();
+    /** Handlers still running in the stub (a delayed answer outlives the test that asked for it). */
+    private static final AtomicInteger INFLIGHT = new AtomicInteger();
     private static volatile int answer = 200;
     private static volatile long delayMs = 0;
     /** The next N calls answer {@code failStatus} (429 carries retry_after 1), then the stub answers {@code answer}. */
@@ -80,32 +83,42 @@ class TelegramChannelIT extends AbstractTimescaleIT {
         } catch (IOException ex) {
             throw new ExceptionInInitializerError(ex);
         }
+        BOT.setExecutor(Executors.newCachedThreadPool());
         BOT.createContext("/", exchange -> {
             CALLS.incrementAndGet();
-            if (delayMs > 0) {
-                try {
-                    Thread.sleep(delayMs);
-                } catch (InterruptedException ex) {
-                    Thread.currentThread().interrupt();
-                }
+            INFLIGHT.incrementAndGet();
+            try {
+                handle(exchange);
+            } finally {
+                INFLIGHT.decrementAndGet();
             }
-            int status = failNext.getAndUpdate(n -> Math.max(0, n - 1)) > 0 ? failStatus : answer;
-            String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
-            byte[] reply;
-            if (status == 200) {
-                JsonNode json = new ObjectMapper().readTree(body);
-                SENT.add(new String[] {json.path("chat_id").asText(), json.path("text").asText()});
-                reply = "{\"ok\":true,\"result\":{}}".getBytes(StandardCharsets.UTF_8);
-            } else {
-                reply = ("{\"ok\":false,\"error_code\":" + status + ",\"description\":\"stub says " + status + "\""
-                        + (status == 429 ? ",\"parameters\":{\"retry_after\":1}" : "") + "}")
-                        .getBytes(StandardCharsets.UTF_8);
-            }
-            exchange.sendResponseHeaders(status, reply.length);
-            exchange.getResponseBody().write(reply);
-            exchange.close();
         });
         BOT.start();
+    }
+
+    private static void handle(HttpExchange exchange) throws IOException {
+        if (delayMs > 0) {
+            try {
+                Thread.sleep(delayMs);
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        int status = failNext.getAndUpdate(n -> Math.max(0, n - 1)) > 0 ? failStatus : answer;
+        String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+        byte[] reply;
+        if (status == 200) {
+            JsonNode json = new ObjectMapper().readTree(body);
+            SENT.add(new String[] {json.path("chat_id").asText(), json.path("text").asText()});
+            reply = "{\"ok\":true,\"result\":{}}".getBytes(StandardCharsets.UTF_8);
+        } else {
+            reply = ("{\"ok\":false,\"error_code\":" + status + ",\"description\":\"stub says " + status + "\""
+                    + (status == 429 ? ",\"parameters\":{\"retry_after\":1}" : "") + "}")
+                    .getBytes(StandardCharsets.UTF_8);
+        }
+        exchange.sendResponseHeaders(status, reply.length);
+        exchange.getResponseBody().write(reply);
+        exchange.close();
     }
 
     @DynamicPropertySource
@@ -141,9 +154,13 @@ class TelegramChannelIT extends AbstractTimescaleIT {
     private final ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
 
     @BeforeEach
-    void resetBot() throws SQLException {
+    void resetBot() throws SQLException, InterruptedException {
         // Leftovers of an earlier test (a message put back in the queue) must not be delivered during this one.
         update("update visit_message_dispatch set status = 'DONE' where status <> 'DONE'");
+        long deadline = System.nanoTime() + 15_000_000_000L;
+        while (INFLIGHT.get() > 0 && System.nanoTime() < deadline) {
+            Thread.sleep(50);
+        }
         SENT.clear();
         CALLS.set(0);
         answer = 200;
@@ -499,29 +516,167 @@ class TelegramChannelIT extends AbstractTimescaleIT {
     }
 
     @Test
-    void aShutdownDuringTheCallPutsTheMessageBackInTheQueue() throws Exception {
+    void aShutdownInsideTheCallLeavesTheMessageInDoubtAndNeverResendsIt() throws Exception {
         Booking booking = book(phone(20), "en");
         bind(booking, 70_190);
+        queue(booking);
         delayMs = 5_000;
+
+        Thread worker = interruptWhenSending(() -> deliveries.runOnce(), booking);
+
+        assertThat(queueStatus(booking, MessageKind.CONFIRMATION)).as("outcome unknown: not put back in the queue").isEqualTo("SENDING");
+        assertThat(delivery(booking, MessageKind.CONFIRMATION)).isNull();
+        assertThat(worker.isAlive()).isFalse();
+        // The next pass does not send it again; only the stale path (see the test below) settles it.
+        delayMs = 0;
+        int callsBefore = CALLS.get();
+        deliveries.runOnce();
+        assertThat(CALLS.get()).isEqualTo(callsBefore);
+    }
+
+    @Test
+    void aCrashPutsOnlyTheMessageInFlightInDoubtNotTheWholeBatch() throws Exception {
+        Booking first = book(phone(22), "en");
+        Booking second = book(phone(23), "en");
+        bind(first, 70_210);
+        bind(second, 70_211);
+        queue(first);
+        queue(second);
+        delayMs = 5_000;
+
+        interruptWhenSending(() -> deliveries.runOnce(), first, second);
+
+        assertThat(scalar("select count(*) from visit_message_dispatch where status = 'SENDING'")).as("one attempted").isEqualTo("1");
+        assertThat(scalar("select count(*) from visit_message_dispatch where status = 'PENDING'")).as("the other untouched").isEqualTo("1");
+        // A restart settles exactly the one in doubt as stale and delivers the other normally.
+        update("update visit_message_dispatch set claimed_at = (now() at time zone 'utc') - interval '1 hour' where status = 'SENDING'");
+        delayMs = 0;
+        deliveries.runOnce();
+        assertThat(scalar("select count(*) from notification_delivery where status = 'FAILED' and error like 'Delivery state unknown%'"
+                + " and appointment_id in (?::uuid, ?::uuid)", first.id(), second.id())).isEqualTo("1");
+        assertThat(SENT).as("the second visit was delivered normally").filteredOn(m -> m[0].equals("70211")).hasSize(1);
+    }
+
+    @Test
+    void concurrentClaimsInOpenTransactionsGetDifferentRows() throws Exception {
+        Booking first = book(phone(24), "en");
+        Booking second = book(phone(25), "en");
+        bind(first, 70_220);
+        bind(second, 70_221);
+        queue(first);
+        queue(second);
+        try (Connection a = appConnection(); Connection b = appConnection(); Connection c = appConnection()) {
+            a.setAutoCommit(false);
+            b.setAutoCommit(false);
+            c.setAutoCommit(false);
+            UUID fromA = claimOne(a);
+            UUID fromB = claimOne(b);
+            assertThat(fromA).isNotNull();
+            assertThat(fromB).as("A still holds its row in an open transaction").isNotNull().isNotEqualTo(fromA);
+            assertThat(claimOne(c)).as("both rows are taken").isNull();
+            a.rollback();
+            b.rollback();
+            c.rollback();
+        }
+    }
+
+    private static Connection appConnection() throws SQLException {
+        return DriverManager.getConnection(DB.getJdbcUrl(), APP_USER, APP_PASSWORD);
+    }
+
+    private static UUID claimOne(Connection c) throws SQLException {
+        try (PreparedStatement ps = c.prepareStatement("select appointment_id from visit_message_claim(1, localtimestamp - interval '5 minutes')");
+             ResultSet rs = ps.executeQuery()) {
+            return rs.next() ? rs.getObject(1, UUID.class) : null;
+        }
+    }
+
+    private void queue(Booking booking) {
         try (TenantContext.Scope ignored = TenantContext.open(DemoIds.LUMEN)) {
             ActorContext.set(ActorContext.system());
             clientMessages.enqueue(new VisitMessage(UUID.fromString(booking.id()), booking.clientId(), MessageKind.CONFIRMATION, "Haircut", booking.start(), true));
         } finally {
             ActorContext.clear();
         }
-        Thread worker = new Thread(() -> deliveries.runOnce());
+    }
+
+    /** Runs the pass in a thread, waits until one of the visits is SENDING (its call is in flight), interrupts and joins it. */
+    private Thread interruptWhenSending(Runnable pass, Booking... visits) throws Exception {
+        Thread worker = new Thread(pass);
         worker.start();
         long deadline = System.nanoTime() + 20_000_000_000L;
-        while (!"SENDING".equals(queueStatus(booking, MessageKind.CONFIRMATION)) && System.nanoTime() < deadline) {
+        while (System.nanoTime() < deadline && Long.parseLong(scalar("select count(*) from visit_message_dispatch where status = 'SENDING'")) == 0) {
             Thread.sleep(50);
         }
         Thread.sleep(300);
         worker.interrupt();
         worker.join(10_000);
+        return worker;
+    }
 
-        assertThat(queueStatus(booking, MessageKind.CONFIRMATION)).as("claim is available again, not burnt").isEqualTo("PENDING");
-        assertThat(delivery(booking, MessageKind.CONFIRMATION)).isNull();
-        assertThat(manualTasks(booking)).isZero();
+    @Test
+    void aShutdownBeforeTheCallPutsTheMessageBackInTheQueue() throws Exception {
+        Booking booking = book(phone(26), "en");
+        bind(booking, 70_230);
+        queue(booking);
+
+        Thread worker = new Thread(() -> {
+            Thread.currentThread().interrupt();
+            deliveries.runOnce();
+        });
+        worker.start();
+        worker.join(10_000);
+
+        assertThat(CALLS.get()).isZero();
+        assertThat(queueStatus(booking, MessageKind.CONFIRMATION)).isEqualTo("PENDING");
+    }
+
+    @Test
+    void aSecondStartOnTheSameLinkAsksForTheContactAgain() throws Exception {
+        Booking booking = book(phone(27), "en");
+        String token = startToken(booking);
+        assertThat(webhook(SECRET, startUpdate(70_240, token))).isEqualTo(200);
+        SENT.clear();
+
+        assertThat(webhook(SECRET, startUpdate(70_240, token))).isEqualTo(200);
+        assertThat(SENT).hasSize(1);
+        assertThat(SENT.get(0)[1]).as("asks for the contact again (the sender's language)").contains("поделитесь").doesNotContain("устарела");
+        SENT.clear();
+        // Another chat pressing Start on the same link is refused.
+        assertThat(webhook(SECRET, startUpdate(70_241, token))).isEqualTo(200);
+        assertThat(SENT.get(0)[1]).contains("устарела");
+    }
+
+    @Test
+    void aContactWithoutUserIdDoesNotBind() throws Exception {
+        Booking booking = book(phone(28), "en");
+        start(booking, 70_250);
+
+        String noUserId = """
+                {"update_id": 3, "message": {"chat": {"id": 70250, "type": "private"}, "from": {"id": 70250},
+                 "contact": {"phone_number": "%s"}}}
+                """.formatted(withoutPlus(booking.phone()));
+        assertThat(webhook(SECRET, noUserId)).isEqualTo(200);
+        assertThat(chatOf(booking.clientId())).isNull();
+    }
+
+    @Test
+    void aVisitInThePastGetsNoMessageAndNoOwnerTask() throws Exception {
+        Booking booking = book(phone(29), "en");
+        bind(booking, 70_260);
+        update("update appointment set service_start = (now() at time zone 'utc') - interval '2 hours',"
+                + " service_end = (now() at time zone 'utc') - interval '90 minutes',"
+                + " occupied_start = (now() at time zone 'utc') - interval '2 hours', occupied_end = (now() at time zone 'utc') - interval '90 minutes',"
+                + " specialist_id = '00000000-0000-4000-8000-000000000013' where id = ?::uuid", booking.id());
+        Booking past = new Booking(booking.id(), booking.token(), booking.clientId(), Instant.now().minusSeconds(7_200), booking.phone());
+        String startNow = scalar("select to_char(service_start, 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') from appointment where id = ?::uuid", booking.id());
+        Booking exact = new Booking(past.id(), past.token(), past.clientId(), Instant.parse(startNow), past.phone());
+
+        send(exact, MessageKind.CONFIRMATION, true);
+
+        assertThat(SENT).isEmpty();
+        assertThat(manualTasks(exact)).isZero();
+        assertThat(queueStatus(exact, MessageKind.CONFIRMATION)).isEqualTo("DONE");
     }
 
     @Test

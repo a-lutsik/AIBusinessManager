@@ -6,6 +6,10 @@ spring:
       # More than one thread: the delivery worker waits on Telegram and must not hold up the outbox poller or the reminders.
       pool:
         size: 4
+      # A graceful stop waits for a Telegram call in flight (read timeout 5 s, up to 3 attempts); see stop_grace_period in docker-compose.prod.yml.
+      shutdown:
+        await-termination: true
+        await-termination-period: 30s
   datasource:
     url: jdbc:postgresql://localhost:5433/cadence
     # Runtime role: not the table owner, NOBYPASSRLS, so Postgres RLS applies (created by V7 migration).
@@ -91,6 +95,8 @@ app:
     # How long a one-time deep link stays valid, and the pause between runs of the reminder job.
     link-ttl: 72h
     reminder-poll-ms: 60000
+    # Handled delivery-queue rows older than this are removed by the nightly job.
+    dispatch-retention: 90d
   seed:
     enabled: true
   outbox:

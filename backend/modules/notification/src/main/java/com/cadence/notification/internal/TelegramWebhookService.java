@@ -117,7 +117,8 @@ class TelegramWebhookService implements TelegramWebhook {
         Boolean started = tx.execute(status -> {
             Optional<LinkTokenStore.Target> target = tokens.lookup(tokenHash);
             if (target.isEmpty()) {
-                return false;
+                // The same chat pressing Start again on its own, still unspent link: ask for the contact again.
+                return tokens.pendingOf(chatId).filter(p -> p.tokenHash().equals(tokenHash)).isPresent();
             }
             try (TenantContext.Scope ignored = TenantContext.open(target.get().tenantId())) {
                 return tokens.attachChat(tokenHash, chatId);
