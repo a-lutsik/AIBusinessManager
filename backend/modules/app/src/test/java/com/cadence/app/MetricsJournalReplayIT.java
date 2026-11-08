@@ -495,7 +495,8 @@ class MetricsJournalReplayIT extends AbstractTimescaleIT {
                 "rescheduleByAccessToken", "reassignClient");
         Set<String> noFactChange = Set.of("moduleName", "freeSlots", "calendar", "find", "clientIdsOf", "clientHistory",
                 "findByAccessToken", "publicVisitByAccessToken", "withdrawConsentByAccessToken", "ics",
-                "icsByAccessToken", "issueAccessLink", "eraseClientVisits");
+                "icsByAccessToken", "issueAccessLink", "eraseClientVisits", "visitNotice", "confirmedVisitsStartingBetween",
+                "telegramLinkByAccessToken");
         Set<String> declared = new TreeSet<>();
         Arrays.stream(BookingService.class.getMethods()).map(Method::getName).forEach(declared::add);
         Set<String> classified = new TreeSet<>(mutating);

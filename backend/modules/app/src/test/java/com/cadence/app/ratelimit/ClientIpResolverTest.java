@@ -11,7 +11,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class ClientIpResolverTest {
 
     private static ClientIpResolver resolver(String... trusted) {
-        return new ClientIpResolver(new RateLimitProperties(5, 3, 20, 20, 1000, List.of(trusted)));
+        return new ClientIpResolver(new RateLimitProperties(5, 3, 20, 20, 1000, 600, 20, List.of(trusted)));
     }
 
     private static MockHttpServletRequest request(String peer, String... forwardedFor) {

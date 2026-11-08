@@ -63,5 +63,8 @@
   "unit.minutesWord": "წთ",
   "unit.hoursWord": "სთ",
   "unit.daysWord": "{count, plural, one {დღე} other {დღე}}",
-  "service.buffer": "+{before}/{after} ბუფერი"
+  "service.buffer": "+{before}/{after} ბუფერი",
+  "book.telegram.action": "შეხსენებები Telegram-ში",
+  "book.telegram.error": "Telegram ახლა მიუწვდომელია. ვიზიტს მართეთ ზემოთ მოცემული ბმულით.",
+  "book.telegram.linked": "Telegram ამ ნომრისთვის უკვე დაკავშირებულია."
 }

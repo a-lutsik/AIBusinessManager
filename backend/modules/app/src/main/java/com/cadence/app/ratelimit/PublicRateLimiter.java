@@ -70,6 +70,24 @@ public class PublicRateLimiter {
         }
     }
 
+    /** Counts one Telegram webhook call of {@code clientIp}. */
+    public void checkTelegramWebhook(String clientIp) {
+        Decision decision = limiter.tryAcquire(List.of(new Limit(
+                "telegram_webhook_per_ip", "tg:webhook:ip:" + clientIp, props.telegramWebhookPerMinutePerIp(), MINUTE)));
+        if (!decision.allowed()) {
+            reject(decision, clientIp, null, "Too many requests. Please wait a minute and try again.");
+        }
+    }
+
+    /** Counts one request for a Telegram link of {@code clientIp}. */
+    public void checkTelegramLink(String clientIp) {
+        Decision decision = limiter.tryAcquire(List.of(new Limit(
+                "telegram_links_per_ip_hour", "tg:link:ip:" + clientIp, props.telegramLinksPerHourPerIp(), HOUR)));
+        if (!decision.allowed()) {
+            reject(decision, clientIp, null, "Too many requests. Please try again later.");
+        }
+    }
+
     /**
      * Counts one public booking attempt. An unparsable phone is not counted per phone or per tenant and is left to the
      * regular validation of the booking service.

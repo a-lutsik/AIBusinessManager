@@ -21,10 +21,10 @@
 - Без `chat_id`, при ошибке доставки и при отключённом канале — всегда ручная задача, сообщение не теряется.
 
 ## Задачи
-- [ ] T1 миграция V17: токены привязки (`client_channel_link_token`), статусы доставки, ключ идемпотентности напоминаний; RLS и `cadence_chunks` для hypertable — исполнитель: complex_coder
-- [ ] T2 Bot API клиент и `TelegramNotificationChannel` (отправка, ошибки, 403, таймауты, retry с ограничением) — complex_coder
-- [ ] T3 deep-link и webhook привязки, эндпоинт выдачи ссылки владельцем и на экране успешной записи — complex_coder
-- [ ] T4 подтверждение записи и напоминания (планировщик, идемпотентность, отмена/перенос, TZ) — complex_coder
+- [x] T1 миграция V17: токены привязки (`client_channel_link_token`), статусы доставки, ключ идемпотентности напоминаний; RLS и `cadence_chunks` для hypertable — исполнитель: complex_coder
+- [x] T2 Bot API клиент и `TelegramNotificationChannel` (отправка, ошибки, 403, таймауты, retry с ограничением) — complex_coder
+- [x] T3 deep-link и webhook привязки, эндпоинт выдачи ссылки владельцем и на экране успешной записи — complex_coder
+- [x] T4 подтверждение записи и напоминания (планировщик, идемпотентность, отмена/перенос, TZ) — complex_coder
 - [ ] T5 каталог сообщений на 5 локалей, OpenAPI, README (настройка бота и webhook), конфиг `prod`-проверок — worker
 - [ ] T6 тесты: IT на каждый статус доставки, идемпотентность, webhook secret, RLS; E2E привязки на stub — test_writer
 - [ ] T7 независимое ревью HIGH — reviewer; приёмка этапа — architect

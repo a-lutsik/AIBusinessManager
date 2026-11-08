@@ -15,6 +15,9 @@ import java.util.List;
  * @param bookingsPerHourPerIp      booking attempts per client IP per hour; the only throttle for attempts whose
  *                                  phone cannot be parsed (those are not counted per phone or per tenant)
  * @param maxTrackedKeys            upper bound of tracked counters; further new keys are refused until old ones expire
+ * @param telegramWebhookPerMinutePerIp Telegram webhook calls per client IP per minute; generous, because the calls of
+ *                                  all clients arrive from a few Telegram addresses
+ * @param telegramLinksPerHourPerIp one-time Telegram link requests (booking-success page) per client IP per hour
  * @param trustedProxies            CIDRs (or single addresses) of reverse proxies whose {@code X-Forwarded-For} is
  *                                  honoured; empty (default) means the header is ignored
  */
@@ -25,6 +28,8 @@ public record RateLimitProperties(
         @DefaultValue("20") int bookingsPerHourPerTenant,
         @DefaultValue("20") int bookingsPerHourPerIp,
         @DefaultValue("100000") int maxTrackedKeys,
+        @DefaultValue("600") int telegramWebhookPerMinutePerIp,
+        @DefaultValue("20") int telegramLinksPerHourPerIp,
         List<String> trustedProxies
 ) {
 
@@ -34,11 +39,13 @@ public record RateLimitProperties(
         require(bookingsPerHourPerTenant, "bookings-per-hour-per-tenant");
         require(bookingsPerHourPerIp, "bookings-per-hour-per-ip");
         require(maxTrackedKeys, "max-tracked-keys");
+        require(telegramWebhookPerMinutePerIp, "telegram-webhook-per-minute-per-ip");
+        require(telegramLinksPerHourPerIp, "telegram-links-per-hour-per-ip");
         trustedProxies = trustedProxies == null ? List.of() : List.copyOf(trustedProxies);
     }
 
     public static RateLimitProperties defaults() {
-        return new RateLimitProperties(5, 3, 20, 20, 100_000, List.of());
+        return new RateLimitProperties(5, 3, 20, 20, 100_000, 600, 20, List.of());
     }
 
     private static void require(int value, String name) {

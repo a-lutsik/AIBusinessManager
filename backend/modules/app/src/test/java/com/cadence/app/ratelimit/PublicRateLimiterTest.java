@@ -205,8 +205,8 @@ class PublicRateLimiterTest {
 
     @Test
     void propertiesValidateLimits() {
-        assertThatThrownBy(() -> new RateLimitProperties(0, 3, 20, 20, 10, List.of()))
+        assertThatThrownBy(() -> new RateLimitProperties(0, 3, 20, 20, 10, 600, 20, List.of()))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("slots-per-minute-per-ip");
-        assertThat(new RateLimitProperties(5, 3, 20, 20, 10, null).trustedProxies()).isEmpty();
+        assertThat(new RateLimitProperties(5, 3, 20, 20, 10, 600, 20, null).trustedProxies()).isEmpty();
     }
 }

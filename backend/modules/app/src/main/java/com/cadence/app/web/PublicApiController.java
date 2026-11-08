@@ -9,6 +9,7 @@ import com.cadence.catalog.api.CatalogService;
 import com.cadence.catalog.api.Offering;
 import com.cadence.catalog.api.ServiceView;
 import com.cadence.catalog.api.SpecialistView;
+import com.cadence.notification.api.TelegramLinkService;
 import com.cadence.app.ratelimit.ClientIpResolver;
 import com.cadence.app.ratelimit.PublicRateLimiter;
 import com.cadence.app.web.dto.CreatePublicBookingRequest;
@@ -48,19 +49,22 @@ public class PublicApiController {
     private final TenantDirectory tenants;
     private final PublicRateLimiter rateLimiter;
     private final ClientIpResolver clientIps;
+    private final TelegramLinkService telegramLinks;
 
     public PublicApiController(
             CatalogService catalogService,
             BookingService bookingService,
             TenantDirectory tenants,
             PublicRateLimiter rateLimiter,
-            ClientIpResolver clientIps
+            ClientIpResolver clientIps,
+            TelegramLinkService telegramLinks
     ) {
         this.catalogService = catalogService;
         this.bookingService = bookingService;
         this.tenants = tenants;
         this.rateLimiter = rateLimiter;
         this.clientIps = clientIps;
+        this.telegramLinks = telegramLinks;
     }
 
     @GetMapping("/health")
@@ -83,6 +87,7 @@ public class PublicApiController {
         body.put("timezone", tenant.getTimezone());
         body.put("currencyCode", tenant.getCurrencyCode());
         body.put("countryCode", tenant.getCountryCode());
+        body.put("telegramEnabled", telegramLinks.enabled());
         return body;
     }
 

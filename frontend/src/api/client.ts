@@ -462,6 +462,12 @@ export const api = {
       `/api/public/bookings/${id}/consent/withdraw?token=${encodeURIComponent(token)}`,
       { method: 'POST' }
     ),
+  /** A one-time https://t.me/<bot>?start=<token> link for the client behind this manage link. */
+  publicTelegramLink: (id: string, token: string) =>
+    request<{ url: string; expiresAt: string }>(
+      `/api/public/bookings/${id}/telegram-link?token=${encodeURIComponent(token)}`,
+      { method: 'POST' }
+    ),
   /** Optional until BE lands; returns null on 404. */
   publicReschedule: (id: string, token: string, start: string) =>
     optionalRequest<PublicVisitView>(
@@ -501,6 +507,9 @@ export const api = {
   /** Owner only: withdraws a client's marketing consent on their request. */
   withdrawConsent: (tenantId: string, id: string) =>
     request<unknown>(`/api/app/clients/${id}/consent/withdraw`, { method: 'POST' }, tenantId),
+  /** Owner only: a one-time Telegram link to pass to the client; also re-links a client who has a chat. */
+  telegramLink: (tenantId: string, id: string) =>
+    request<{ url: string; expiresAt: string }>(`/api/app/clients/${id}/telegram-link`, { method: 'POST' }, tenantId),
   /** Owner only, irreversible: erases the client's personal data (PRODUCT_PLAN §10). */
   anonymizeClient: (tenantId: string, id: string) =>
     request<unknown>(`/api/app/clients/${id}/anonymize`, { method: 'POST' }, tenantId),

@@ -1,30 +1,25 @@
 package com.cadence.notification.internal;
 
+import com.cadence.notification.api.DeliveryOutcome;
+import com.cadence.notification.api.DeliveryOutcome.Status;
 import com.cadence.notification.api.NotificationChannel;
+import com.cadence.notification.api.OutboundMessage;
 import com.cadence.notification.api.OwnerTaskService;
 import com.cadence.platform.i18n.MessageCatalog;
-import com.cadence.platform.tenancy.TenantContext;
-import com.cadence.platform.time.Utc;
-import org.jooq.DSLContext;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Instant;
-import java.util.UUID;
-
-import static com.cadence.platform.jooq.Tables.NOTIFICATION_DELIVERY;
-
-/** Manual-fallback channel: creates an owner task with ready-made text. */
+/** Manual-fallback channel: creates an owner task with the ready-made text, so the owner can send it by hand. */
 @Component
 public class ManualTaskNotificationChannel implements NotificationChannel {
 
     private final OwnerTaskService ownerTaskService;
-    private final DSLContext dsl;
+    private final DeliveryJournal journal;
     private final MessageCatalog messages;
 
-    public ManualTaskNotificationChannel(OwnerTaskService ownerTaskService, DSLContext dsl, MessageCatalog messages) {
+    ManualTaskNotificationChannel(OwnerTaskService ownerTaskService, DeliveryJournal journal, MessageCatalog messages) {
         this.ownerTaskService = ownerTaskService;
-        this.dsl = dsl;
+        this.journal = journal;
         this.messages = messages;
     }
 
@@ -35,24 +30,17 @@ public class ManualTaskNotificationChannel implements NotificationChannel {
 
     @Override
     @Transactional
-    public void send(String tenantScopedPayloadJson) {
+    public DeliveryOutcome send(OutboundMessage message) {
         ownerTaskService.create(
                 "MANUAL_MESSAGE",
                 messages.forOwner("owner.task.manualMessage.title"),
-                tenantScopedPayloadJson,
-                tenantScopedPayloadJson,
+                message.text(),
+                message.text(),
                 null,
-                null,
-                null
+                message.appointmentId(),
+                message.clientId()
         );
-        dsl.insertInto(NOTIFICATION_DELIVERY)
-                .set(NOTIFICATION_DELIVERY.ID, UUID.randomUUID())
-                .set(NOTIFICATION_DELIVERY.TENANT_ID, TenantContext.require())
-                .set(NOTIFICATION_DELIVERY.CHANNEL_ID, channelId())
-                .set(NOTIFICATION_DELIVERY.TEMPLATE_KEY, "manual")
-                .set(NOTIFICATION_DELIVERY.PAYLOAD, tenantScopedPayloadJson)
-                .set(NOTIFICATION_DELIVERY.STATUS, "QUEUED_MANUAL")
-                .set(NOTIFICATION_DELIVERY.CREATED_AT, Utc.toLocal(Instant.now()))
-                .execute();
+        journal.record(channelId(), message, "QUEUED_MANUAL", null);
+        return new DeliveryOutcome(Status.QUEUED_MANUAL, null);
     }
 }

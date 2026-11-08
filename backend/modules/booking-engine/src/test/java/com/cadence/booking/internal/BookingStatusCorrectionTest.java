@@ -5,6 +5,7 @@ import com.cadence.booking.api.AppointmentView;
 import com.cadence.catalog.api.CatalogService;
 import com.cadence.crm.api.CrmService;
 import com.cadence.notification.api.OwnerTaskService;
+import com.cadence.notification.api.TelegramLinkService;
 import com.cadence.platform.audit.AuditLogger;
 import com.cadence.platform.error.DomainException;
 import com.cadence.platform.outbox.OutboxPublisher;
@@ -68,6 +69,7 @@ class BookingStatusCorrectionTest {
                 mock(OutboxPublisher.class),
                 audit,
                 mock(OwnerTaskService.class),
+                mock(TelegramLinkService.class),
                 mock(PhoneNormalizer.class),
                 Clock.systemUTC(),
                 TestMessages.catalog()

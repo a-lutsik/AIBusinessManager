@@ -291,6 +291,8 @@ CREATE TABLE notification_delivery (
     status              VARCHAR(32) NOT NULL,
     error               VARCHAR(2048),
     created_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    client_id           UUID,
+    appointment_id      UUID,
     CONSTRAINT notification_delivery_pk PRIMARY KEY (id, created_at),
     CONSTRAINT notification_delivery_tenant_fk FOREIGN KEY (tenant_id) REFERENCES tenant (id)
 );
@@ -470,3 +472,32 @@ CREATE TABLE growth_signal (
 
 ALTER TABLE ai_draft ADD CONSTRAINT ai_draft_conversation_fk FOREIGN KEY (tenant_id, conversation_id)
     REFERENCES ai_conversation (tenant_id, id) ON DELETE CASCADE;
+
+-- V17: Telegram channel.
+CREATE TABLE client_channel_link_token (
+    id          UUID NOT NULL,
+    tenant_id   UUID NOT NULL,
+    client_id   UUID NOT NULL,
+    channel_id  VARCHAR(32) NOT NULL,
+    token_hash  VARCHAR(64) NOT NULL,
+    expires_at  TIMESTAMP NOT NULL,
+    used_at     TIMESTAMP,
+    created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT client_channel_link_token_pk PRIMARY KEY (id),
+    CONSTRAINT client_channel_link_token_hash_uq UNIQUE (token_hash),
+    CONSTRAINT client_channel_link_token_tenant_fk FOREIGN KEY (tenant_id) REFERENCES tenant (id),
+    CONSTRAINT client_channel_link_token_client_fk FOREIGN KEY (client_id) REFERENCES client (id)
+);
+
+CREATE INDEX client_channel_link_token_client_idx ON client_channel_link_token (tenant_id, client_id);
+
+CREATE TABLE visit_message_dispatch (
+    tenant_id       UUID NOT NULL,
+    appointment_id  UUID NOT NULL,
+    kind            VARCHAR(32) NOT NULL,
+    service_start   TIMESTAMP NOT NULL,
+    created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT visit_message_dispatch_pk PRIMARY KEY (appointment_id, kind, service_start),
+    CONSTRAINT visit_message_dispatch_tenant_fk FOREIGN KEY (tenant_id) REFERENCES tenant (id),
+    CONSTRAINT visit_message_dispatch_appt_fk FOREIGN KEY (appointment_id) REFERENCES appointment (id)
+);

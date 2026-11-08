@@ -16,6 +16,7 @@ import com.cadence.crm.api.ClientRetirement;
 import com.cadence.crm.api.CrmService;
 import com.cadence.growth.api.GrowthService;
 import com.cadence.notification.api.OwnerTaskService;
+import com.cadence.notification.api.TelegramLinkService;
 import com.cadence.platform.jooq.tables.records.TenantRecord;
 import com.cadence.platform.tenancy.ActorContext;
 import com.cadence.platform.tenancy.TenantContext;
@@ -63,7 +64,7 @@ class HiddenClientResponsesTest {
             retention, mock(GrowthService.class), mock(AiAssistantService.class), mock(OwnerTaskService.class), tenants,
             mock(ClientMergeService.class), mock(ClientAnonymizationService.class));
     private final PublicApiController publicApi = new PublicApiController(mock(CatalogService.class), booking, tenants,
-            mock(PublicRateLimiter.class), mock(ClientIpResolver.class));
+            mock(PublicRateLimiter.class), mock(ClientIpResolver.class), mock(TelegramLinkService.class));
     private final JsonMapper mapper = JsonMapper.builder().build();
     private TenantContext.Scope scope;
 

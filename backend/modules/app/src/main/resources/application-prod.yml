@@ -31,6 +31,12 @@ app:
   cors:
     # Comma-separated exact origins of the web console, e.g. https://app.example.com. No default: fail closed.
     allowed-origins: ${APP_CORS_ALLOWED_ORIGINS}
+  telegram:
+    # Same variables as application.yml. With APP_TELEGRAM_ENABLED=true the bot token (APP_TELEGRAM_BOT_TOKEN), the bot
+    # username and the webhook secret are required and a missing one stops the startup; a placeholder is not accepted.
+    enabled: ${APP_TELEGRAM_ENABLED:false}
+    # Fixed: the bot token is part of the request URL, so no environment variable may redirect it.
+    api-base-url: https://api.telegram.org
   rate-limit:
     # CIDRs of the reverse proxy whose X-Forwarded-For is trusted. Empty: the header is ignored and all clients behind
     # the proxy share its IP (see README, "Production deployment").

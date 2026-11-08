@@ -3,7 +3,9 @@ package com.cadence.booking.internal;
 import com.cadence.booking.api.AppointmentEventType;
 import com.cadence.booking.api.AppointmentStatus;
 import com.cadence.booking.api.AppointmentView;
+import com.cadence.booking.api.VisitNotice;
 import com.cadence.platform.error.DomainException;
+import com.cadence.platform.jooq.tables.records.AppointmentRecord;
 import com.cadence.platform.persistence.SqlStates;
 import com.cadence.platform.persistence.TenantAwareDsl;
 import com.cadence.platform.tenancy.TenantContext;
@@ -271,6 +273,27 @@ class AppointmentRepository {
                 .where(condition)
                 .orderBy(APPOINTMENT.SERVICE_START.asc())
                 .fetch(this::toView);
+    }
+
+    Optional<VisitNotice> notice(UUID id) {
+        return dsl.selectFrom(APPOINTMENT)
+                .where(TenantAwareDsl.tenantEquals(APPOINTMENT.TENANT_ID).and(APPOINTMENT.ID.eq(id)))
+                .fetchOptional(AppointmentRepository::toNotice);
+    }
+
+    List<VisitNotice> confirmedStartingBetween(Instant from, Instant to) {
+        return dsl.selectFrom(APPOINTMENT)
+                .where(TenantAwareDsl.tenantEquals(APPOINTMENT.TENANT_ID)
+                        .and(APPOINTMENT.STATUS.eq(AppointmentStatus.CONFIRMED.name()))
+                        .and(APPOINTMENT.SERVICE_START.gt(Utc.toLocal(from)))
+                        .and(APPOINTMENT.SERVICE_START.le(Utc.toLocal(to))))
+                .orderBy(APPOINTMENT.SERVICE_START.asc())
+                .fetch(AppointmentRepository::toNotice);
+    }
+
+    private static VisitNotice toNotice(AppointmentRecord r) {
+        return new VisitNotice(r.getId(), r.getClientId(), AppointmentStatus.valueOf(r.getStatus()),
+                Utc.toInstant(r.getServiceStart()), r.getServiceNameSnapshot(), r.getSource(), Utc.toInstant(r.getCreatedAt()));
     }
 
     /** Statuses that give a master access to the client: every status except the two cancellations (TD-19). */

@@ -298,6 +298,16 @@ class ClientRepository {
                 .execute();
     }
 
+    /** Returns the rows written: 0 for an anonymized profile. */
+    int setTelegramChat(UUID id, String chatId) {
+        return dsl.update(CLIENT)
+                .set(CLIENT.TELEGRAM_CHAT_ID, chatId)
+                .where(TenantAwareDsl.tenantEquals(CLIENT.TENANT_ID)
+                        .and(CLIENT.ID.eq(id))
+                        .and(CLIENT.ANONYMIZED_AT.isNull()))
+                .execute();
+    }
+
     void anonymize(UUID id) {
         dsl.update(CLIENT)
                 .set(CLIENT.DISPLAY_NAME, "anonymized")

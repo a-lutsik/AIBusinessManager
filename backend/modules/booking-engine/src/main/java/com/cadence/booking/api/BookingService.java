@@ -1,5 +1,7 @@
 package com.cadence.booking.api;
 
+import com.cadence.notification.api.TelegramLink;
+
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
@@ -85,6 +87,24 @@ public interface BookingService {
      * {@code appointmentId} ({@code TOKEN_INVALID}, 403, nothing written); an unknown or expired token is 404.
      */
     AppointmentView withdrawConsentByAccessToken(UUID appointmentId, String rawToken);
+
+    /**
+     * The facts a client message about a visit needs, with no actor check (system callers: outbox handler, reminder job);
+     * empty when the visit does not exist in the current tenant.
+     */
+    Optional<VisitNotice> visitNotice(UUID appointmentId);
+
+    /** CONFIRMED visits whose service start lies in {@code (from, to]}, soonest first, for the reminder job (system caller). */
+    List<VisitNotice> confirmedVisitsStartingBetween(Instant from, Instant to);
+
+    /**
+     * One-time Telegram deep link for the client behind a manage link, for the booking-success page. The token must belong to
+     * {@code appointmentId} ({@code TOKEN_INVALID}, 403); an unknown or expired token is 404. A client who already linked
+     * Telegram is not offered a second link here ({@code TELEGRAM_ALREADY_LINKED}, 409): whoever knows a phone number can
+     * book with it, so a public link must not be able to take over an existing chat; the owner re-links from the console.
+     * {@code TELEGRAM_DISABLED}, 409, when the channel is off.
+     */
+    TelegramLink telegramLinkByAccessToken(UUID appointmentId, String rawToken);
 
     String ics(UUID appointmentId);
 

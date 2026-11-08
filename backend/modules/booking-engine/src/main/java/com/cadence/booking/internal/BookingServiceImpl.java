@@ -8,6 +8,7 @@ import com.cadence.booking.api.BookingService;
 import com.cadence.booking.api.CreateBookingCommand;
 import com.cadence.booking.api.PublicBookingResult;
 import com.cadence.booking.api.PublicVisit;
+import com.cadence.booking.api.VisitNotice;
 import com.cadence.catalog.api.BookingRulesView;
 import com.cadence.catalog.api.CatalogService;
 import com.cadence.catalog.api.Offering;
@@ -17,6 +18,8 @@ import com.cadence.catalog.api.WeeklyInterval;
 import com.cadence.crm.api.ClientView;
 import com.cadence.crm.api.CrmService;
 import com.cadence.notification.api.OwnerTaskService;
+import com.cadence.notification.api.TelegramLink;
+import com.cadence.notification.api.TelegramLinkService;
 import com.cadence.platform.audit.AuditLogger;
 import com.cadence.platform.error.DomainException;
 import com.cadence.platform.i18n.MessageCatalog;
@@ -57,6 +60,7 @@ public class BookingServiceImpl implements BookingService {
     private final OutboxPublisher outbox;
     private final AuditLogger auditLogger;
     private final OwnerTaskService ownerTasks;
+    private final TelegramLinkService telegramLinks;
     private final PhoneNormalizer phones;
     private final Clock clock;
     private final MessageCatalog messages;
@@ -71,6 +75,7 @@ public class BookingServiceImpl implements BookingService {
             OutboxPublisher outbox,
             AuditLogger auditLogger,
             OwnerTaskService ownerTasks,
+            TelegramLinkService telegramLinks,
             PhoneNormalizer phones,
             Clock clock,
             MessageCatalog messages
@@ -83,6 +88,7 @@ public class BookingServiceImpl implements BookingService {
         this.outbox = outbox;
         this.auditLogger = auditLogger;
         this.ownerTasks = ownerTasks;
+        this.telegramLinks = telegramLinks;
         this.phones = phones;
         this.clock = clock;
         this.messages = messages;
@@ -572,6 +578,34 @@ public class BookingServiceImpl implements BookingService {
             AppointmentView view = appointments.find(target.appointmentId()).orElseThrow(BookingServiceImpl::tokenInvalid);
             crmService.withdrawMarketingConsent(view.clientId(), "public-link");
             return publicView(view);
+        }
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<VisitNotice> visitNotice(UUID appointmentId) {
+        return appointments.notice(appointmentId);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<VisitNotice> confirmedVisitsStartingBetween(Instant from, Instant to) {
+        return appointments.confirmedStartingBetween(from, to);
+    }
+
+    @Override
+    @Transactional
+    public TelegramLink telegramLinkByAccessToken(UUID appointmentId, String rawToken) {
+        AppointmentRepository.TokenTarget target = requireToken(appointmentId, rawToken);
+        try (TenantContext.Scope ignored = TenantContext.open(target.tenantId())) {
+            AppointmentView view = appointments.find(target.appointmentId()).orElseThrow(BookingServiceImpl::tokenInvalid);
+            ClientView client = crmService.findActiveById(view.clientId())
+                    .orElseThrow(() -> DomainException.conflict("CLIENT_ANONYMIZED", "This client was anonymized"));
+            if (client.telegramChatId() != null) {
+                log.info("Telegram link refused, already linked: appointment={}, client={}", appointmentId, client.id());
+                throw DomainException.conflict("TELEGRAM_ALREADY_LINKED", "Telegram is already linked for this client");
+            }
+            return telegramLinks.issue(client.id());
         }
     }
 

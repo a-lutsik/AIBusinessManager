@@ -263,6 +263,41 @@ public class CrmServiceImpl implements CrmService {
 
     @Override
     @Transactional
+    public ClientView linkTelegram(UUID clientId, String chatId, String source) {
+        ClientView existing = requireActive(clientId);
+        repository.setTelegramChat(clientId, chatId);
+        auditTelegram("client.telegram.link", clientId, existing.telegramChatId() != null, true, source);
+        log.info("Telegram linked: client={}, replaced={}, source={}", clientId, existing.telegramChatId() != null, source);
+        return repository.findById(clientId).orElse(existing);
+    }
+
+    @Override
+    @Transactional
+    public void unlinkTelegram(UUID clientId, String source) {
+        Optional<ClientView> existing = repository.findById(clientId).filter(c -> c.telegramChatId() != null);
+        if (existing.isEmpty() || repository.setTelegramChat(clientId, null) == 0) {
+            return;
+        }
+        auditTelegram("client.telegram.unlink", clientId, true, false, source);
+        log.info("Telegram unlinked: client={}, source={}", clientId, source);
+    }
+
+    private void auditTelegram(String action, UUID clientId, boolean before, boolean after, String source) {
+        auditLogger.record(
+                ActorContext.current().map(ActorContext.Actor::actorId).orElse("public"),
+                ActorContext.current().map(a -> a.role().name()).orElse("PUBLIC"),
+                action,
+                "client",
+                clientId,
+                "{\"telegramLinked\":" + before + "}",
+                "{\"telegramLinked\":" + after + "}",
+                source,
+                null
+        );
+    }
+
+    @Override
+    @Transactional
     public void recordCompletedVisit(UUID clientId, Instant when, int valueMinor) {
         repository.bumpCompleted(clientId, when, valueMinor);
     }

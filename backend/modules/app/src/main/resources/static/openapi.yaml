@@ -52,7 +52,7 @@ paths:
             type: string
       responses:
         "200":
-          description: Tenant
+          description: "Tenant: id, slug, displayName, timezone, currencyCode, countryCode and telegramEnabled (the Telegram channel is on, so the booking-success page offers the bot link)"
   /api/public/tenants/{slug}/services:
     get:
       summary: Public services
@@ -236,6 +236,52 @@ paths:
         "200": { description: "{ id, marketingConsent: false }" }
         "403": { description: "TOKEN_INVALID - the token belongs to another visit; nothing is written" }
         "404": { description: "TOKEN_INVALID - unknown, revoked or expired token" }
+  /api/public/bookings/{id}/telegram-link:
+    post:
+      summary: One-time Telegram link for the client behind a manage link
+      description: >
+        Mints a deep link https://t.me/<bot>?start=<token> for the booking-success page. The client opens it, presses Start
+        in the bot and from then on gets confirmations and reminders there (this is the consent to service messages). The
+        token is valid for app.telegram.link-ttl (default 72 h), works once and is stored only as a SHA-256 hash. Limited
+        per client IP per hour (429 RATE_LIMITED). A client who already linked Telegram gets 409 so a public link cannot take
+        over an existing chat; the owner re-links from the console.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+        - in: query
+          name: token
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: "{ url, expiresAt }" }
+        "403": { description: "TOKEN_INVALID - the token belongs to another visit" }
+        "404": { description: "TOKEN_INVALID - unknown, revoked or expired token" }
+        "409": { description: "TELEGRAM_DISABLED - the channel is off; TELEGRAM_ALREADY_LINKED; CLIENT_ANONYMIZED" }
+        "429": { description: "RATE_LIMITED" }
+  /api/public/telegram/webhook:
+    post:
+      summary: Telegram Bot API webhook
+      description: >
+        Called by Telegram only (setWebhook with secret_token). Without the exact X-Telegram-Bot-Api-Secret-Token header
+        the answer is 401 and nothing is read. Every other update, unknown or malformed ones included, is answered 200 and
+        ignored; only a private-chat message "/start <token>" binds the chat to the client behind a live one-time token.
+        Limited per client IP per minute (429 RATE_LIMITED).
+      parameters:
+        - in: header
+          name: X-Telegram-Bot-Api-Secret-Token
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200": { description: Accepted }
+        "401": { description: Secret header missing or wrong, or the channel is off }
+        "429": { description: "RATE_LIMITED" }
   /api/public/bookings/{id}/calendar.ics:
     get:
       summary: Download .ics
@@ -697,6 +743,24 @@ paths:
         "404": { description: "CLIENT_NOT_FOUND" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "409": { description: "CLIENT_ANONYMIZED - this client was anonymized" }
+  /api/app/clients/{id}/telegram-link:
+    post:
+      summary: One-time Telegram link for a client (owner only)
+      description: >
+        Mints a deep link https://t.me/<bot>?start=<token> to pass to the client by hand. The client presses Start in the
+        bot and from then on gets confirmations and reminders there; a client who already has a chat is re-linked to the new
+        one. Valid for app.telegram.link-ttl, works once, stored only as a hash; audited as client.telegram.link_issue.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: "{ url, expiresAt }" }
+        "403": { description: "FORBIDDEN_RESOURCE - caller is not an owner" }
+        "404": { description: "CLIENT_NOT_FOUND" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { description: "TELEGRAM_DISABLED - the channel is off; CLIENT_ANONYMIZED" }
   /api/app/clients/{id}/merge:
     post:
       summary: Merge a duplicate client into this one (owner only)

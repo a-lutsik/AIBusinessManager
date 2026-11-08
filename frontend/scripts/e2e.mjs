@@ -19,6 +19,7 @@ const PROJECT = 'cadence-e2e';
 const API_PORT = 18080;
 const DB_PORT = 15433;
 const KEYCLOAK_PORT = 18081;
+const TELEGRAM_STUB_PORT = 18090;
 const API_URL = `http://localhost:${API_PORT}`;
 const ISSUER = `http://localhost:${KEYCLOAK_PORT}/realms/cadence`;
 
@@ -27,7 +28,7 @@ const MODES = {
     config: 'e2e/playwright.config.ts',
     webPort: 19005,
     profile: [],
-    ports: [DB_PORT, API_PORT, 19005],
+    ports: [DB_PORT, API_PORT, TELEGRAM_STUB_PORT, 19005],
     backendEnv: { SPRING_PROFILES_ACTIVE: 'dev-headers' },
     bundleEnv: { EXPO_PUBLIC_AUTH_MODE: 'dev-headers' },
   },
@@ -35,7 +36,7 @@ const MODES = {
     config: 'e2e/playwright.oidc.config.ts',
     webPort: 19006,
     profile: ['--profile', 'oidc'],
-    ports: [DB_PORT, KEYCLOAK_PORT, API_PORT, 19006],
+    ports: [DB_PORT, KEYCLOAK_PORT, API_PORT, TELEGRAM_STUB_PORT, 19006],
     backendEnv: { APP_SECURITY_ISSUER_URI: ISSUER },
     bundleEnv: { EXPO_PUBLIC_AUTH_MODE: 'oidc', EXPO_PUBLIC_OIDC_ISSUER: ISSUER },
   },
@@ -210,6 +211,7 @@ function requireGradleJdk() {
 }
 
 let backend;
+let telegramStub;
 let web;
 let cleaned;
 let exitCode = 1;
@@ -219,6 +221,7 @@ async function cleanup() {
     log('teardown');
     await stop(web, mode.webPort);
     await stop(backend, API_PORT);
+    await stop(telegramStub, TELEGRAM_STUB_PORT);
     composeDown();
     const left = projectLeftovers();
     if (left.length > 0) {
@@ -257,6 +260,9 @@ try {
   const up = compose([...mode.profile, 'up', '-d', '--wait']);
   if (up.status !== 0) throw new Error('docker compose up failed');
 
+  telegramStub = start('telegram-stub', 'node', ['scripts/telegram-stub.mjs', String(TELEGRAM_STUB_PORT)], { cwd: FRONTEND, env: baseEnv });
+  await waitFor('telegram stub', () => httpOk(`http://127.0.0.1:${TELEGRAM_STUB_PORT}/__sent`), { timeoutMs: 15_000, proc: telegramStub });
+
   log(`backend: ./gradlew :modules:app:bootRun on ${API_URL} (log: ${path.join(logDir, 'backend.log')})`);
   backend = start('backend', './gradlew', [':modules:app:bootRun', '--console=plain'], {
     cwd: path.join(ROOT, 'backend'),
@@ -272,6 +278,12 @@ try {
       APP_RATE_LIMIT_BOOKINGS_PER_DAY_PER_PHONE: '100',
       // Never a live model in a test run.
       APP_AI_PROVIDER: 'stub',
+      // The Telegram channel runs against the stub Bot API; the token is a made-up value that only matches the token format.
+      APP_TELEGRAM_ENABLED: 'true',
+      APP_TELEGRAM_BOT_TOKEN: '123456789:E2E_stub_token_not_a_real_bot',
+      APP_TELEGRAM_BOT_USERNAME: 'cadence_e2e_bot',
+      APP_TELEGRAM_WEBHOOK_SECRET: 'e2e-webhook-secret',
+      APP_TELEGRAM_API_BASE_URL: `http://127.0.0.1:${TELEGRAM_STUB_PORT}`,
     },
   });
 
@@ -304,6 +316,7 @@ try {
       E2E_API_URL: API_URL,
       E2E_BASE_URL: webUrl,
       E2E_OUT_DIR: OUT,
+      E2E_TELEGRAM_STUB_URL: `http://127.0.0.1:${TELEGRAM_STUB_PORT}`,
       E2E_COMPOSE_FILE: COMPOSE_FILE,
       E2E_COMPOSE_PROJECT: PROJECT,
       ...(modeName === 'oidc' ? { E2E_ISSUER: ISSUER } : {}),

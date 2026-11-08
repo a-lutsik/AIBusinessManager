@@ -201,6 +201,40 @@ The owner role `cadence` bypasses RLS, so the queries see all tenants.
 5. Known unverified points (the unit tests only mock the wire): the shape of `tool_calls` on assistant messages sent back to DeepSeek in the second call (`id`, `type: function`, `function.arguments` as a string) and the `tool` message with `tool_call_id`; `tool_choice: none` together with `tools` in the final forced call; a `system` message after tool results in that final call. A 400 from the provider on the second call of a turn points to one of these (the failed attempt is in `ai_prompt_log` with `finish_reason` `ERROR`, the cause is in the backend log).
 6. If tool calls prove unreliable (the model ignores the tools, invents references, arguments are not valid JSON, or the format is rejected): do not widen the prompt. Follow plan B of ADR 0002 section 11: structured output (JSON the model returns, validated by us) through the same `LlmProvider` port, so only `DeepSeekLlmProvider` changes. Record the finding in `docs/tech-debt.md` (TD-41).
 
+### Telegram channel
+
+Clients who link Telegram get the booking confirmation and reminders about a day and about two hours before the visit
+there; everyone else (no chat, channel off, delivery failed, the client blocked the bot) stays on a manual owner task with
+the ready text, so no message is lost. One bot serves the whole installation; the tenant is found by the one-time link
+token. The channel is off by default and needs the operator's steps below (the code never calls Telegram in tests: they use
+a stub HTTP server).
+
+1. Create the bot with @BotFather and note the token. The token is a secret: it comes from the environment only
+   (`APP_TELEGRAM_BOT_TOKEN`), never from a committed file, and the application never logs or returns it.
+2. Set `APP_TELEGRAM_ENABLED=true`, `APP_TELEGRAM_BOT_TOKEN`, `APP_TELEGRAM_BOT_USERNAME` (without `@`) and
+   `APP_TELEGRAM_WEBHOOK_SECRET` (1-256 characters of `A-Z a-z 0-9 _ -`). With the channel enabled a missing or malformed
+   value stops the startup. `prod` pins the Bot API URL to `https://api.telegram.org`.
+3. Register the webhook once, with the same secret (the backend must be reachable over HTTPS):
+
+   ```bash
+   curl -sS "https://api.telegram.org/bot${APP_TELEGRAM_BOT_TOKEN}/setWebhook" \
+     --data-urlencode "url=https://<api-host>/api/public/telegram/webhook" \
+     --data-urlencode "secret_token=${APP_TELEGRAM_WEBHOOK_SECRET}" \
+     --data-urlencode 'allowed_updates=["message"]'
+   ```
+
+   Telegram then sends the secret in `X-Telegram-Bot-Api-Secret-Token`; any other caller gets 401. The webhook sits inside
+   the per-IP limit of the public API (`app.rate-limit.telegram-webhook-per-minute-per-ip`).
+4. Linking: the booking-success page offers "Get reminders in Telegram" (a one-time `https://t.me/<bot>?start=<token>` link,
+   valid 72 h, stored as a hash), and the owner can create one on the client card. Pressing Start in the bot is the client's
+   consent to service messages (marketing consent is separate and unchanged). A client who blocks the bot (HTTP 403) is
+   unlinked automatically.
+
+The delivery journal is `notification_delivery` (`SENT`, `FAILED` with the reason, `SKIPPED_NO_CHAT`, `SKIPPED_DISABLED`,
+`QUEUED_MANUAL`). Message texts live in `messages_<locale>.properties` (`client.telegram.*`) and use the client's
+`preferred_locale` and the tenant's time zone. Reminders run in the backend (`app.telegram.reminder-poll-ms`), once per visit
+start and kind, and only while the channel is enabled. A live check with a real bot is an operator step.
+
 ### Tests and code generation
 
 ArchUnit + unit + Testcontainers ITs:

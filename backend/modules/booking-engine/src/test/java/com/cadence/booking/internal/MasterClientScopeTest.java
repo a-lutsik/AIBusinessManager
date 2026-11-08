@@ -9,6 +9,7 @@ import com.cadence.catalog.api.WeeklyInterval;
 import com.cadence.crm.api.ClientView;
 import com.cadence.crm.api.CrmService;
 import com.cadence.notification.api.OwnerTaskService;
+import com.cadence.notification.api.TelegramLinkService;
 import com.cadence.platform.audit.AuditLogger;
 import com.cadence.platform.error.DomainException;
 import com.cadence.platform.jooq.tables.records.TenantRecord;
@@ -77,7 +78,7 @@ class MasterClientScopeTest {
         TenantDirectory tenants = mock(TenantDirectory.class);
         PhoneNormalizer phones = mock(PhoneNormalizer.class);
         service = new BookingServiceImpl(catalog, crm, retention, appointments, tenants,
-                mock(OutboxPublisher.class), mock(AuditLogger.class), mock(OwnerTaskService.class), phones,
+                mock(OutboxPublisher.class), mock(AuditLogger.class), mock(OwnerTaskService.class), mock(TelegramLinkService.class), phones,
                 Clock.fixed(NOW, ZoneOffset.UTC), TestMessages.catalog());
         TenantRecord tenant = new TenantRecord();
         tenant.setId(TENANT);

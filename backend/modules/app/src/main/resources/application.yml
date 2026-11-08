@@ -59,6 +59,10 @@ app:
     bookings-per-hour-per-tenant: 20
     # Throttle for attempts without a parsable phone (those are not counted per phone or per tenant).
     bookings-per-hour-per-ip: 20
+    # Telegram webhook calls per IP per minute (Telegram calls from a few addresses, so the limit is generous) and
+    # one-time Telegram link requests per IP per hour (booking-success page).
+    telegram-webhook-per-minute-per-ip: 600
+    telegram-links-per-hour-per-ip: 20
     # Cap on tracked counters; when reached, requests needing a new counter get 429.
     max-tracked-keys: 100000
     # CIDRs of reverse proxies whose X-Forwarded-For is trusted (env: APP_RATE_LIMIT_TRUSTED_PROXIES=10.0.0.0/8,...).
@@ -69,6 +73,19 @@ app:
     # No per-owner locale exists yet, so one value serves every tenant. Client-facing texts ignore it: they use the
     # client's preferred_locale and fall back to en. One of en, ru, ka, uk, cs (env: APP_I18N_OWNER_LOCALE).
     owner-locale: ${APP_I18N_OWNER_LOCALE:en}
+  telegram:
+    # Telegram channel (stage 09): confirmations and reminders to clients who linked the bot. Off by default. When on,
+    # the token, the bot username and the webhook secret are mandatory (the application refuses to start without them).
+    # The token comes from the environment only, never from a committed file; see README, "Telegram channel".
+    enabled: ${APP_TELEGRAM_ENABLED:false}
+    bot-token: ${APP_TELEGRAM_BOT_TOKEN:}
+    bot-username: ${APP_TELEGRAM_BOT_USERNAME:}
+    webhook-secret: ${APP_TELEGRAM_WEBHOOK_SECRET:}
+    # Only the E2E run points this at a stub; the prod profile pins it.
+    api-base-url: ${APP_TELEGRAM_API_BASE_URL:https://api.telegram.org}
+    # How long a one-time deep link stays valid, and the pause between runs of the reminder job.
+    link-ttl: 72h
+    reminder-poll-ms: 60000
   seed:
     enabled: true
   outbox:

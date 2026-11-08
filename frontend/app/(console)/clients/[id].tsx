@@ -1,3 +1,4 @@
+import * as Clipboard from 'expo-clipboard';
 import { useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/Button';
@@ -19,6 +20,9 @@ export default function ClientDetail() {
   const [confirmingAnonymize, setConfirmingAnonymize] = useState(false);
   const [anonymizeBusy, setAnonymizeBusy] = useState(false);
   const [anonymizeError, setAnonymizeError] = useState<string | null>(null);
+  const [telegramLink, setTelegramLink] = useState<string | null>(null);
+  const [telegramError, setTelegramError] = useState<string | null>(null);
+  const [telegramCopied, setTelegramCopied] = useState(false);
   useEffect(() => {
     if (id) {
       api.client(LUMEN_TENANT_ID, id).then(setData).catch(() => setData(null));
@@ -52,6 +56,18 @@ export default function ClientDetail() {
     reload();
   };
 
+  const createTelegramLink = async () => {
+    if (!id) return;
+    setTelegramError(null);
+    setTelegramCopied(false);
+    try {
+      setTelegramLink((await api.telegramLink(LUMEN_TENANT_ID, id)).url);
+    } catch (e: unknown) {
+      setTelegramLink(null);
+      setTelegramError(t(e instanceof ApiError && e.code === 'TELEGRAM_DISABLED' ? 'client.telegram.disabled' : 'client.telegram.error'));
+    }
+  };
+
   if (!data) {
     return <EmptyState title={t('empty.clients')} />;
   }
@@ -80,6 +96,31 @@ export default function ClientDetail() {
               .catch(() => undefined)
           }
         />
+      ) : null}
+      {/* Owner only: a one-time link that binds the client's Telegram chat (confirmations and reminders go there). */}
+      {role === 'OWNER' && !retirement ? (
+        <View testID="telegram-link-card" style={{ marginTop: space.sm, gap: space.sm }}>
+          {data.client?.telegramChatId ? <Text style={{ color: color.muted }}>{t('client.telegram.connected')}</Text> : null}
+          <Button label={t('client.telegram.action')} variant="ghost" onPress={createTelegramLink} />
+          {telegramLink ? (
+            <>
+              <Text style={{ color: color.muted }}>{t('client.telegram.hint')}</Text>
+              <Text testID="telegram-link-url" selectable style={{ color: color.ink }}>
+                {telegramLink}
+              </Text>
+              <Button
+                label={telegramCopied ? t('book.linkCopied') : t('book.copyLink')}
+                variant="ghost"
+                onPress={() => Clipboard.setStringAsync(telegramLink).then(() => setTelegramCopied(true)).catch(() => undefined)}
+              />
+            </>
+          ) : null}
+          {telegramError ? (
+            <Text accessibilityRole="alert" style={{ color: color.status.noShow }}>
+              {telegramError}
+            </Text>
+          ) : null}
+        </View>
       ) : null}
       {/* Owner only: erasure on the client's request; irreversible, so it asks in place before anything is sent. */}
       {role === 'OWNER' && !retirement && !confirmingAnonymize ? (

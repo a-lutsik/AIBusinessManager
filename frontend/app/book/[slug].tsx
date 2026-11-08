@@ -39,6 +39,7 @@ export default function PublicBookScreen() {
   const [slotsFailure, setSlotsFailure] = useState<'limit' | 'other' | null>(null);
   const [slotTaken, setSlotTaken] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
+  const [telegramBusy, setTelegramBusy] = useState(false);
   const activeLocale = useLocale();
   const timeZone: string | undefined = tenant?.timezone;
 
@@ -183,6 +184,28 @@ export default function PublicBookScreen() {
                   .then(() => setLinkCopied(true))
                   .catch(() => setError(t('task.copyFailed')))
               }
+            />
+          ) : null}
+          {tenant?.telegramEnabled ? (
+            <Button
+              label={t('book.telegram.action')}
+              variant="ghost"
+              disabled={telegramBusy}
+              onPress={() => {
+                setTelegramBusy(true);
+                setError(null);
+                api
+                  .publicTelegramLink(result.id, result.accessToken)
+                  .then((link) => {
+                    if (typeof window !== 'undefined') {
+                      window.open(link.url, '_blank');
+                    }
+                  })
+                  .catch((e: unknown) =>
+                    setError(t(e instanceof ApiError && e.code === 'TELEGRAM_ALREADY_LINKED' ? 'book.telegram.linked' : 'book.telegram.error'))
+                  )
+                  .finally(() => setTelegramBusy(false));
+              }}
             />
           ) : null}
           <Button

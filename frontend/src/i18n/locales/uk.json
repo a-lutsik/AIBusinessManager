@@ -63,5 +63,8 @@
   "unit.minutesWord": "хв",
   "unit.hoursWord": "год",
   "unit.daysWord": "{count, plural, one {день} few {дні} many {днів} other {дня}}",
-  "service.buffer": "+{before}/{after} буфер"
+  "service.buffer": "+{before}/{after} буфер",
+  "book.telegram.action": "Отримувати нагадування в Telegram",
+  "book.telegram.error": "Telegram зараз недоступний. Керуйте візитом за посиланням вище.",
+  "book.telegram.linked": "Telegram для цього номера вже підключено."
 }

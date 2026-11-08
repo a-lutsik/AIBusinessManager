@@ -9,6 +9,7 @@ import com.cadence.catalog.api.Offering;
 import com.cadence.catalog.api.WeeklyInterval;
 import com.cadence.crm.api.CrmService;
 import com.cadence.notification.api.OwnerTaskService;
+import com.cadence.notification.api.TelegramLinkService;
 import com.cadence.platform.audit.AuditLogger;
 import com.cadence.platform.error.DomainException;
 import com.cadence.platform.jooq.tables.records.TenantRecord;
@@ -81,6 +82,7 @@ class MasterCreateRulesTest {
                 mock(OutboxPublisher.class),
                 mock(AuditLogger.class),
                 mock(OwnerTaskService.class),
+                mock(TelegramLinkService.class),
                 mock(PhoneNormalizer.class),
                 Clock.fixed(NOW, ZoneOffset.UTC),
                 TestMessages.catalog()

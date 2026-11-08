@@ -72,6 +72,17 @@ public interface CrmService {
      */
     ClientView withdrawMarketingConsent(UUID clientId, String source);
 
+    /**
+     * Stores the Telegram chat the client agreed to receive service messages in (the client opened the bot through a one-time
+     * link); replaces a previous chat. Audited as {@code client.telegram.link} with the source, never with the chat id.
+     *
+     * @throws com.cadence.platform.error.DomainException {@code CLIENT_NOT_FOUND} (404), {@code CLIENT_ANONYMIZED} (409)
+     */
+    ClientView linkTelegram(UUID clientId, String chatId, String source);
+
+    /** Forgets the Telegram chat (the client blocked the bot); audited as {@code client.telegram.unlink}. Idempotent, silent for a retired client. */
+    void unlinkTelegram(UUID clientId, String source);
+
     void recordCompletedVisit(UUID clientId, Instant when, int valueMinor);
 
     void recordNoShow(UUID clientId);

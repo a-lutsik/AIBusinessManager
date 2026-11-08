@@ -10,6 +10,8 @@ import com.cadence.catalog.api.CatalogService;
 import com.cadence.crm.api.CrmService;
 import com.cadence.growth.api.GrowthService;
 import com.cadence.notification.api.OwnerTaskService;
+import com.cadence.notification.api.TelegramLinkService;
+import com.cadence.notification.api.TelegramWebhook;
 import com.cadence.platform.tenant.TenantDirectory;
 import com.cadence.retention.api.RetentionService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -43,6 +45,10 @@ abstract class CorsWebTestBase {
 
     @MockitoBean
     ClientAnonymizationService clientAnonymizationService;
+    @MockitoBean
+    TelegramWebhook telegramWebhook;
+    @MockitoBean
+    TelegramLinkService telegramLinkService;
     @MockitoBean
     PublicRateLimiter publicRateLimiter;
     @MockitoBean

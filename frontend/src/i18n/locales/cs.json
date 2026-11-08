@@ -63,5 +63,8 @@
   "unit.minutesWord": "min",
   "unit.hoursWord": "h",
   "unit.daysWord": "{count, plural, one {den} few {dny} many {dne} other {dní}}",
-  "service.buffer": "+{before}/{after} rezerva"
+  "service.buffer": "+{before}/{after} rezerva",
+  "book.telegram.action": "Dostávat připomínky v Telegramu",
+  "book.telegram.error": "Telegram teď není dostupný. Návštěvu spravujte pomocí odkazu výše.",
+  "book.telegram.linked": "Telegram je pro toto číslo již připojen."
 }
