@@ -501,6 +501,8 @@ CREATE TABLE visit_message_dispatch (
     service_name    VARCHAR(256) NOT NULL,
     manual_fallback BOOLEAN NOT NULL,
     status          VARCHAR(16) NOT NULL DEFAULT 'PENDING',
+    attempts        INT NOT NULL DEFAULT 0,
+    next_attempt_at TIMESTAMP,
     claimed_at      TIMESTAMP,
     created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT visit_message_dispatch_pk PRIMARY KEY (appointment_id, kind, service_start),

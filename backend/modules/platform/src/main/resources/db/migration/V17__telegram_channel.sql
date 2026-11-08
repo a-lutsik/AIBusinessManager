@@ -16,7 +16,9 @@
 --    so the Telegram call runs outside any database transaction. visit_message_claim hands rows (the worker asks for one at a time) to the delivery
 --    worker across tenants (SECURITY DEFINER, FOR UPDATE SKIP LOCKED, like outbox_claim); a SENDING row older than the
 --    cutoff (the process died mid-send) comes back flagged stale and is never sent again, because the answer of
---    Telegram is unknown: it is journaled as FAILED and falls back to the manual task.
+--    Telegram is unknown: it is journaled as FAILED and falls back to the manual task. A row whose preparation fails
+--    (attempts, next_attempt_at) goes back with a growing delay and is skipped by the claim until then, so one bad row
+--    never blocks the queue; after the last attempt the worker closes it as FAILED.
 -- 6. Binding needs proof of the phone: /start <token> only records the chat on the token (chat_id), the chat is stored on
 --    the client once the contact the person shares matches the client's phone. channel_link_pending_lookup finds that
 --    token by chat, channel_link_token_purge removes used and long expired tokens.
@@ -120,6 +122,8 @@ CREATE TABLE visit_message_dispatch (
     service_name    VARCHAR(256) NOT NULL,
     manual_fallback BOOLEAN NOT NULL,
     status          VARCHAR(16) NOT NULL DEFAULT 'PENDING',
+    attempts        INT NOT NULL DEFAULT 0,
+    next_attempt_at TIMESTAMP,
     claimed_at      TIMESTAMP,
     created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT visit_message_dispatch_status_chk CHECK (status IN ('PENDING', 'SENDING', 'DONE')),
@@ -137,7 +141,7 @@ CREATE INDEX visit_message_dispatch_open_idx ON visit_message_dispatch (created_
 
 CREATE OR REPLACE FUNCTION visit_message_claim(p_limit int, p_stale_before timestamp)
     RETURNS TABLE (tenant_id uuid, appointment_id uuid, kind text, service_start timestamp, client_id uuid,
-                   service_name text, manual_fallback boolean, stale boolean)
+                   service_name text, manual_fallback boolean, stale boolean, attempts int)
     LANGUAGE sql
     VOLATILE
     SECURITY DEFINER
@@ -146,7 +150,8 @@ AS $$
     WITH due AS (
         SELECT d.appointment_id, d.kind, d.service_start, (d.status = 'SENDING') AS was_sending
         FROM visit_message_dispatch d
-        WHERE d.status = 'PENDING' OR (d.status = 'SENDING' AND d.claimed_at < p_stale_before)
+        WHERE (d.status = 'PENDING' AND (d.next_attempt_at IS NULL OR d.next_attempt_at <= (now() AT TIME ZONE 'UTC')))
+           OR (d.status = 'SENDING' AND d.claimed_at < p_stale_before)
         ORDER BY d.created_at
         LIMIT p_limit
         FOR UPDATE SKIP LOCKED
@@ -156,7 +161,7 @@ AS $$
     FROM due
     WHERE d.appointment_id = due.appointment_id AND d.kind = due.kind AND d.service_start = due.service_start
     RETURNING d.tenant_id, d.appointment_id, d.kind::text, d.service_start, d.client_id, d.service_name::text,
-              d.manual_fallback, due.was_sending
+              d.manual_fallback, due.was_sending, d.attempts
 $$;
 
 REVOKE ALL ON FUNCTION visit_message_claim(int, timestamp) FROM PUBLIC;

@@ -11,6 +11,7 @@ import org.jooq.impl.DSL;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -27,7 +28,7 @@ class DispatchQueue {
 
     /** A queued message handed to the worker; {@code stale}: a SENDING row left by a process that died, never sent again. */
     record Claimed(UUID tenantId, UUID appointmentId, MessageKind kind, Instant serviceStart, UUID clientId,
-                   String serviceName, boolean manualFallback, boolean stale) {
+                   String serviceName, boolean manualFallback, boolean stale, int attempts) {
     }
 
     private final DSLContext dsl;
@@ -60,7 +61,7 @@ class DispatchQueue {
                 .fetch(r -> new Claimed(
                         r.get(0, UUID.class), r.get(1, UUID.class), MessageKind.valueOf(r.get(2, String.class)),
                         Utc.toInstant(r.get(3, LocalDateTime.class)), r.get(4, UUID.class), r.get(5, String.class),
-                        r.get(6, Boolean.class), r.get(7, Boolean.class)));
+                        r.get(6, Boolean.class), r.get(7, Boolean.class), r.get(8, Integer.class)));
     }
 
     /** Tenant scope required. */
@@ -73,6 +74,17 @@ class DispatchQueue {
     @Transactional
     void release(Claimed c) {
         set(c, "PENDING");
+    }
+
+    /** Preparation failed: back in the queue after {@code delay}, one attempt counted; the claim skips it until then. */
+    @Transactional
+    void retryLater(Claimed c, Duration delay) {
+        dsl.update(VISIT_MESSAGE_DISPATCH)
+                .set(VISIT_MESSAGE_DISPATCH.STATUS, "PENDING")
+                .set(VISIT_MESSAGE_DISPATCH.ATTEMPTS, c.attempts() + 1)
+                .set(VISIT_MESSAGE_DISPATCH.NEXT_ATTEMPT_AT, Utc.toLocal(Instant.now().plus(delay)))
+                .where(key(c))
+                .execute();
     }
 
     private void set(Claimed c, String status) {

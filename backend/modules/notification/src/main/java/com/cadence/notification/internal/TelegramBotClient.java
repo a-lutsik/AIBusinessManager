@@ -78,6 +78,7 @@ class TelegramBotClient {
             return new Result(false, 0, "interrupted before the call", true, false);
         }
         Result result = null;
+        boolean sawNoAnswer = false;
         for (int attempt = 1; attempt <= props.maxAttempts(); attempt++) {
             Duration pause = Duration.ofMillis(250L * attempt);
             try {
@@ -89,6 +90,7 @@ class TelegramBotClient {
                 pause = retryAfter(response).orElse(pause);
             } catch (IOException ex) {
                 result = new Result(false, 0, ex.getClass().getSimpleName());
+                sawNoAnswer = true;
             } catch (InterruptedException ex) {
                 Thread.currentThread().interrupt();
                 return new Result(false, 0, "interrupted during the call", false, true);
@@ -96,7 +98,8 @@ class TelegramBotClient {
             if (attempt < props.maxAttempts()) {
                 log.debug("Telegram sendMessage attempt {} of {} failed ({}), retrying", attempt, props.maxAttempts(), result.reason());
                 if (!sleep(pause.compareTo(MAX_WAIT) > 0 ? MAX_WAIT : pause)) {
-                    boolean refused = result.httpStatus() > 0;
+                    // Only if every attempt so far was answered: an earlier timeout may have reached Telegram.
+                    boolean refused = !sawNoAnswer;
                     return new Result(false, 0, "interrupted while waiting to retry", refused, !refused);
                 }
             }

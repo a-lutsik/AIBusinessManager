@@ -664,9 +664,9 @@ class TelegramChannelIT extends AbstractTimescaleIT {
     void aVisitInThePastGetsNoMessageAndNoOwnerTask() throws Exception {
         Booking booking = book(phone(29), "en");
         bind(booking, 70_260);
-        update("update appointment set service_start = (now() at time zone 'utc') - interval '2 hours',"
-                + " service_end = (now() at time zone 'utc') - interval '90 minutes',"
-                + " occupied_start = (now() at time zone 'utc') - interval '2 hours', occupied_end = (now() at time zone 'utc') - interval '90 minutes',"
+        // Years back: no seeded or test visit lives there, so the no-overlap constraint cannot get in the way.
+        update("update appointment set service_start = timestamp '2020-01-01 03:00', service_end = timestamp '2020-01-01 03:30',"
+                + " occupied_start = timestamp '2020-01-01 03:00', occupied_end = timestamp '2020-01-01 03:30',"
                 + " specialist_id = '00000000-0000-4000-8000-000000000013' where id = ?::uuid", booking.id());
         Booking past = new Booking(booking.id(), booking.token(), booking.clientId(), Instant.now().minusSeconds(7_200), booking.phone());
         String startNow = scalar("select to_char(service_start, 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') from appointment where id = ?::uuid", booking.id());
@@ -697,6 +697,79 @@ class TelegramChannelIT extends AbstractTimescaleIT {
         assertThat(delivery(booking, MessageKind.CONFIRMATION)).startsWith("FAILED|Delivery state unknown");
         assertThat(manualTasks(booking)).isEqualTo(1);
         assertThat(queueStatus(booking, MessageKind.CONFIRMATION)).isEqualTo("DONE");
+    }
+
+    @Test
+    void aMessageThatCannotBePreparedDoesNotBlockTheQueueAndIsClosedAsFailedAfterTheAttempts() throws Exception {
+        UUID clientB = UUID.randomUUID();
+        UUID visitB = UUID.randomUUID();
+        update("insert into client (id, tenant_id, normalized_phone, display_name, marketing_consent) values (?, ?, '+420777000111', 'Tz It', false)",
+                clientB, DemoIds.AURA);
+        update("""
+                insert into appointment (id, tenant_id, specialist_id, service_id, client_id, status, service_start, service_end,
+                    occupied_start, occupied_end, service_name_snapshot, price_snapshot, duration_snapshot, buffer_before_snapshot,
+                    buffer_after_snapshot, currency_code, source)
+                values (?, ?, ?, ?, ?, 'CONFIRMED', now() at time zone 'utc' + interval '3 days', now() at time zone 'utc' + interval '3 days 1 hour',
+                    now() at time zone 'utc' + interval '3 days', now() at time zone 'utc' + interval '3 days 1 hour', 'Cut', 0, 60, 0, 0, 'CZK', 'TG_IT')
+                """, visitB, DemoIds.AURA, DemoIds.AURA_MASTER, DemoIds.AURA_CUT, clientB);
+        Instant startB = Instant.parse(scalar("select to_char(service_start, 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') from appointment where id = ?", visitB));
+        Booking good = book(phone(40), "en");
+        bind(good, 71_100);
+        try {
+            update("update tenant set timezone = 'Not/AZone' where id = ?", DemoIds.AURA);
+            // The broken tenant's message is the oldest in the queue; it must not hold the other one back.
+            try (TenantContext.Scope ignored = TenantContext.open(DemoIds.AURA)) {
+                ActorContext.set(ActorContext.system());
+                clientMessages.enqueue(new VisitMessage(visitB, clientB, MessageKind.CONFIRMATION, "Cut", startB, true));
+            } finally {
+                ActorContext.clear();
+            }
+            queue(good);
+
+            deliveries.runOnce();
+
+            assertThat(SENT).as("the healthy tenant's message went out").filteredOn(m -> m[0].equals("71100")).hasSize(1);
+            assertThat(scalar("select status || ':' || attempts from visit_message_dispatch where appointment_id = ?", visitB)).isEqualTo("PENDING:1");
+            int calls = CALLS.get();
+            deliveries.runOnce();
+            assertThat(scalar("select attempts from visit_message_dispatch where appointment_id = ?", visitB)).as("backed off, not retried at once").isEqualTo("1");
+            assertThat(CALLS.get()).isEqualTo(calls);
+
+            // Attempts used up: closed as FAILED, the owner gets a task.
+            update("update visit_message_dispatch set attempts = 4, next_attempt_at = null where appointment_id = ?", visitB);
+            deliveries.runOnce();
+            assertThat(scalar("select status from visit_message_dispatch where appointment_id = ?", visitB)).isEqualTo("DONE");
+            assertThat(scalar("select status || '|' || error from notification_delivery where appointment_id = ? and channel_id = 'telegram'", visitB))
+                    .startsWith("FAILED|Could not be prepared");
+            assertThat(scalar("select count(*) from owner_task where appointment_id = ? and kind = 'MANUAL_MESSAGE'", visitB)).isEqualTo("1");
+        } finally {
+            update("update tenant set timezone = 'Europe/Prague' where id = ?", DemoIds.AURA);
+            update("delete from owner_task where appointment_id = ?", visitB);
+            update("delete from notification_delivery where appointment_id = ?", visitB);
+            update("delete from visit_message_dispatch where appointment_id = ?", visitB);
+            update("delete from appointment where id = ?", visitB);
+            update("delete from client where id = ?", clientB);
+        }
+    }
+
+    @Test
+    void purgeRemovesOnlyHandledRowsOlderThanTheCutoff() throws Exception {
+        Booking booking = book(phone(41), "en");
+        String sql = "insert into visit_message_dispatch (tenant_id, appointment_id, kind, service_start, client_id, service_name, manual_fallback, status, created_at)"
+                + " values (?, ?::uuid, ?, timestamp '2030-02-01 10:00', ?, 'x', false, ?, ?::timestamp)";
+        update(sql, DemoIds.LUMEN, booking.id(), "KEEP_PENDING_OLD", booking.clientId(), "PENDING", "2030-01-01 00:00:00");
+        update(sql, DemoIds.LUMEN, booking.id(), "KEEP_SENDING_OLD", booking.clientId(), "SENDING", "2030-01-01 00:00:00");
+        update(sql, DemoIds.LUMEN, booking.id(), "DROP_DONE_BEFORE", booking.clientId(), "DONE", "2030-01-09 23:59:59");
+        update(sql, DemoIds.LUMEN, booking.id(), "KEEP_DONE_AFTER", booking.clientId(), "DONE", "2030-01-10 00:00:01");
+        try (Connection c = DriverManager.getConnection(DB.getJdbcUrl(), APP_USER, APP_PASSWORD);
+             PreparedStatement ps = c.prepareStatement("select visit_message_purge(timestamp '2030-01-10 00:00:00')");
+             ResultSet rs = ps.executeQuery()) {
+            rs.next();
+            assertThat(rs.getInt(1)).isGreaterThanOrEqualTo(1);
+        }
+        assertThat(scalar("select string_agg(kind, ',' order by kind) from visit_message_dispatch where appointment_id = ?::uuid and kind like '%\\_%'", booking.id()))
+                .isEqualTo("KEEP_DONE_AFTER,KEEP_PENDING_OLD,KEEP_SENDING_OLD");
+        update("delete from visit_message_dispatch where appointment_id = ?::uuid and kind like 'KEEP%'", booking.id());
     }
 
     @Test

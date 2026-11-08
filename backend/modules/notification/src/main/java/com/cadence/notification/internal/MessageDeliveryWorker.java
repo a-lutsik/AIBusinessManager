@@ -15,6 +15,8 @@ import com.cadence.platform.tenant.TenantInfo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.event.ContextClosedEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -46,6 +48,8 @@ class MessageDeliveryWorker implements DeliveryRunner {
 
     static final int BATCH_SIZE = 20;
     static final Duration STALE_AFTER = Duration.ofMinutes(5);
+    /** Preparation attempts per message (a broken tenant setting, a missing catalog key, a lock timeout); then it is closed as FAILED. */
+    static final int MAX_ATTEMPTS = 5;
 
     private static final Logger log = LoggerFactory.getLogger(MessageDeliveryWorker.class);
 
@@ -59,6 +63,7 @@ class MessageDeliveryWorker implements DeliveryRunner {
     private final DeliveryJournal journal;
     private final TransactionTemplate tx;
     private final boolean pollEnabled;
+    private volatile boolean stopping;
 
     MessageDeliveryWorker(
             DispatchQueue queue,
@@ -91,10 +96,16 @@ class MessageDeliveryWorker implements DeliveryRunner {
         }
     }
 
+    /** A graceful stop must not start new rows: the call in flight finishes (see the shutdown settings), nothing else is claimed. */
+    @EventListener(ContextClosedEvent.class)
+    void onContextClosing() {
+        stopping = true;
+    }
+
     @Override
     public int runOnce() {
         int handled = 0;
-        while (handled < BATCH_SIZE) {
+        while (handled < BATCH_SIZE && !stopping) {
             // One row at a time: a row is marked SENDING only when its own turn comes, so a crash leaves at most one in doubt.
             List<DispatchQueue.Claimed> claimed = tx.execute(status -> queue.claim(1, Instant.now().minus(STALE_AFTER)));
             if (claimed == null || claimed.isEmpty()) {
@@ -106,8 +117,10 @@ class MessageDeliveryWorker implements DeliveryRunner {
                 ActorContext.set(ActorContext.system());
                 goOn = deliver(claimed.get(0));
             } catch (RuntimeException ex) {
-                log.error("Delivery failed, the message is retried or settled as stale: tenant={}, visit={}, kind={}",
+                // Unexpected, after the call or in the bookkeeping: the row stays SENDING and is settled as stale later.
+                log.error("Delivery bookkeeping failed, the message is settled as stale later: tenant={}, visit={}, kind={}",
                         claimed.get(0).tenantId(), claimed.get(0).appointmentId(), claimed.get(0).kind(), ex);
+                goOn = true;
             } finally {
                 ActorContext.clear();
             }
@@ -130,8 +143,8 @@ class MessageDeliveryWorker implements DeliveryRunner {
         try {
             plan = tx.execute(status -> prepare(claimed));
         } catch (RuntimeException ex) {
-            tx.executeWithoutResult(status -> queue.release(claimed));
-            throw ex;
+            prepareFailed(claimed, ex);
+            return true;
         }
         if (plan == null) {
             tx.executeWithoutResult(status -> queue.done(claimed));
@@ -152,6 +165,36 @@ class MessageDeliveryWorker implements DeliveryRunner {
         }
         tx.executeWithoutResult(status -> finish(claimed, plan.message(), outcome));
         return true;
+    }
+
+    /**
+     * The message could not be prepared. A stale row is closed (it must never be sent). Otherwise it goes back with a growing
+     * delay, so the rest of the queue keeps moving; after {@link #MAX_ATTEMPTS} it is closed as FAILED, with a manual task for a
+     * message that asks for one (the owner's generic text: the client text could not be built).
+     */
+    private void prepareFailed(DispatchQueue.Claimed claimed, RuntimeException ex) {
+        int attempt = claimed.attempts() + 1;
+        if (claimed.stale() || attempt >= MAX_ATTEMPTS) {
+            log.error("Visit message given up after {} attempts: tenant={}, visit={}, kind={}",
+                    attempt, claimed.tenantId(), claimed.appointmentId(), claimed.kind(), ex);
+            tx.executeWithoutResult(status -> {
+                OutboundMessage message = new OutboundMessage(claimed.clientId(), claimed.appointmentId(), null,
+                        claimed.kind().name(), messages.forOwner("owner.task.messageFailed.body"));
+                if (!claimed.stale()) {
+                    journal.record(telegram.channelId(), message, "FAILED", "Could not be prepared: " + ex.getClass().getSimpleName());
+                    if (claimed.manualFallback()) {
+                        manual.send(message);
+                        journal.record(manual.channelId(), message, "QUEUED_MANUAL", null);
+                    }
+                }
+                queue.done(claimed);
+            });
+            return;
+        }
+        Duration delay = Duration.ofMinutes(Math.min(30, 1L << attempt));
+        log.warn("Visit message could not be prepared, attempt {} of {}, next in {}: tenant={}, visit={}, kind={}, cause={}",
+                attempt, MAX_ATTEMPTS, delay, claimed.tenantId(), claimed.appointmentId(), claimed.kind(), ex.toString());
+        tx.executeWithoutResult(status -> queue.retryLater(claimed, delay));
     }
 
     /** Null: the message is no longer wanted (visit cancelled or moved, client retired). */
