@@ -60,13 +60,32 @@ class TelegramBotClientTest {
         AtomicReference<TelegramBotClient.Result> result = new AtomicReference<>();
         Thread caller = new Thread(() -> result.set(client().sendMessage("1", "hi", null)));
         caller.start();
-        while (calls.get() < callsSeen) {
-            Thread.sleep(10);
+        // Interrupt only once the client is in its retry pause after the call it was waiting for. A fixed delay after the
+        // stub saw the request raced on slow CI runners: the interrupt could land while the answer was still on its way,
+        // i.e. inside the call, which is a different (unknown) outcome.
+        long deadline = System.nanoTime() + Duration.ofSeconds(10).toNanos();
+        while (calls.get() < callsSeen || !inRetryPause(caller)) {
+            if (System.nanoTime() > deadline) {
+                throw new AssertionError("the client never reached its retry pause after call " + callsSeen);
+            }
+            Thread.sleep(5);
         }
-        Thread.sleep(100);
         caller.interrupt();
         caller.join(10_000);
         return result.get();
+    }
+
+    /** Whether the thread is parked in {@code TelegramBotClient.sleep}, the pause between attempts. */
+    private static boolean inRetryPause(Thread thread) {
+        if (thread.getState() != Thread.State.TIMED_WAITING) {
+            return false;
+        }
+        for (StackTraceElement frame : thread.getStackTrace()) {
+            if (frame.getClassName().equals(TelegramBotClient.class.getName()) && frame.getMethodName().equals("sleep")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Test
