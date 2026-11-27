@@ -19,6 +19,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** The Bot API client against a local stub (no real Telegram call): what an interrupt means depends on what came before it. */
 class TelegramBotClientTest {
 
+    /**
+     * Long enough that a cold first call on a slow CI runner (client start-up, stub thread pool) is still answered: with
+     * 300 ms the first answer timed out there, the client counted it as "no answer", and the clean-interrupt test failed.
+     * Still well under the 1.5 s delay the "no answer" test uses.
+     */
+    private static final Duration READ_TIMEOUT = Duration.ofMillis(1_000);
+
     private HttpServer stub;
     private final AtomicInteger calls = new AtomicInteger();
     private volatile long firstCallDelayMs;
@@ -53,7 +60,7 @@ class TelegramBotClientTest {
 
     private TelegramBotClient client() {
         return new TelegramBotClient(new TelegramProperties(true, "123456789:STUB_token_for_the_stub_server_only", "cadence_bot", "secret",
-                "http://127.0.0.1:" + stub.getAddress().getPort(), Duration.ofSeconds(1), Duration.ofMillis(300), 3, Duration.ofHours(1), 1000));
+                "http://127.0.0.1:" + stub.getAddress().getPort(), Duration.ofSeconds(1), READ_TIMEOUT, 3, Duration.ofHours(1), 1000));
     }
 
     private TelegramBotClient.Result sendAndInterruptWhen(int callsSeen) throws InterruptedException {
@@ -92,7 +99,7 @@ class TelegramBotClientTest {
     void anInterruptWhileWaitingAfterARefusalIsClean() throws Exception {
         TelegramBotClient.Result result = sendAndInterruptWhen(1);
 
-        assertThat(result.interrupted()).isTrue();
+        assertThat(result.interrupted()).as("%s", result).isTrue();
         assertThat(result.outcomeUnknown()).isFalse();
     }
 
