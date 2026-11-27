@@ -19,6 +19,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** The Bot API client against a local stub (no real Telegram call): what an interrupt means depends on what came before it. */
 class TelegramBotClientTest {
 
+    /**
+     * Long enough that a cold first call on a slow CI runner (client start-up, stub thread pool) is still answered: with
+     * 300 ms the first answer timed out there, the client counted it as "no answer", and the clean-interrupt test failed.
+     * Still well under the 1.5 s delay the "no answer" test uses.
+     */
+    private static final Duration READ_TIMEOUT = Duration.ofMillis(1_000);
+
     private HttpServer stub;
     private final AtomicInteger calls = new AtomicInteger();
     private volatile long firstCallDelayMs;
@@ -53,27 +60,46 @@ class TelegramBotClientTest {
 
     private TelegramBotClient client() {
         return new TelegramBotClient(new TelegramProperties(true, "123456789:STUB_token_for_the_stub_server_only", "cadence_bot", "secret",
-                "http://127.0.0.1:" + stub.getAddress().getPort(), Duration.ofSeconds(1), Duration.ofMillis(300), 3, Duration.ofHours(1), 1000));
+                "http://127.0.0.1:" + stub.getAddress().getPort(), Duration.ofSeconds(1), READ_TIMEOUT, 3, Duration.ofHours(1), 1000));
     }
 
     private TelegramBotClient.Result sendAndInterruptWhen(int callsSeen) throws InterruptedException {
         AtomicReference<TelegramBotClient.Result> result = new AtomicReference<>();
         Thread caller = new Thread(() -> result.set(client().sendMessage("1", "hi", null)));
         caller.start();
-        while (calls.get() < callsSeen) {
-            Thread.sleep(10);
+        // Interrupt only once the client is in its retry pause after the call it was waiting for. A fixed delay after the
+        // stub saw the request raced on slow CI runners: the interrupt could land while the answer was still on its way,
+        // i.e. inside the call, which is a different (unknown) outcome.
+        long deadline = System.nanoTime() + Duration.ofSeconds(10).toNanos();
+        while (calls.get() < callsSeen || !inRetryPause(caller)) {
+            if (System.nanoTime() > deadline) {
+                throw new AssertionError("the client never reached its retry pause after call " + callsSeen);
+            }
+            Thread.sleep(5);
         }
-        Thread.sleep(100);
         caller.interrupt();
         caller.join(10_000);
         return result.get();
+    }
+
+    /** Whether the thread is parked in {@code TelegramBotClient.sleep}, the pause between attempts. */
+    private static boolean inRetryPause(Thread thread) {
+        if (thread.getState() != Thread.State.TIMED_WAITING) {
+            return false;
+        }
+        for (StackTraceElement frame : thread.getStackTrace()) {
+            if (frame.getClassName().equals(TelegramBotClient.class.getName()) && frame.getMethodName().equals("sleep")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Test
     void anInterruptWhileWaitingAfterARefusalIsClean() throws Exception {
         TelegramBotClient.Result result = sendAndInterruptWhen(1);
 
-        assertThat(result.interrupted()).isTrue();
+        assertThat(result.interrupted()).as("%s", result).isTrue();
         assertThat(result.outcomeUnknown()).isFalse();
     }
 
