@@ -24,6 +24,8 @@ public final class SqlStates {
     public static final String UNIQUE_VIOLATION = "23505";
     /** {@code exclusion_violation}. */
     public static final String EXCLUSION_VIOLATION = "23P01";
+    /** {@code deadlock_detected}. */
+    public static final String DEADLOCK_DETECTED = "40P01";
 
     private static final int MAX_DEPTH = 32;
 
@@ -38,6 +40,11 @@ public final class SqlStates {
     /** True when the chain holds an exclusion violation (SQLSTATE 23P01); {@code constraint} may be {@code null}. */
     public static boolean isExclusionViolation(Throwable failure, String constraint) {
         return hasViolation(failure, EXCLUSION_VIOLATION, constraint);
+    }
+
+    /** True when the chain holds a deadlock (SQLSTATE 40P01): PostgreSQL aborted this transaction to free another. */
+    public static boolean isDeadlock(Throwable failure) {
+        return hasViolation(failure, DEADLOCK_DETECTED, null);
     }
 
     /**

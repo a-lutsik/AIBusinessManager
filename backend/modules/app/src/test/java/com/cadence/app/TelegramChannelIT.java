@@ -481,8 +481,16 @@ class TelegramChannelIT extends AbstractTimescaleIT {
         } finally {
             ActorContext.clear();
         }
-        update("update appointment set service_start = service_start + interval '1 day', service_end = service_end + interval '1 day',"
-                + " occupied_start = occupied_start + interval '1 day', occupied_end = occupied_end + interval '1 day' where id = ?::uuid", moved.id());
+        // Onto another free slot: a fixed shift (a day later) can land on a visit that other ITs of this JVM booked.
+        Instant target = TestSlots.free(mvc, mapper, DemoIds.HAIRCUT, DemoIds.NINO, 2).stream()
+                .map(Instant::parse)
+                .filter(start -> !start.equals(moved.start()))
+                .findFirst()
+                .orElseThrow();
+        long shift = java.time.Duration.between(moved.start(), target).toSeconds();
+        update("update appointment set service_start = service_start + ? * interval '1 second', service_end = service_end + ? * interval '1 second',"
+                + " occupied_start = occupied_start + ? * interval '1 second', occupied_end = occupied_end + ? * interval '1 second'"
+                + " where id = ?::uuid", shift, shift, shift, shift, moved.id());
         deliveries.runOnce();
         assertThat(SENT).as("the visit moved after the message was queued").isEmpty();
     }

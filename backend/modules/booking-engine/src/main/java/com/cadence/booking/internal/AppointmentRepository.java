@@ -176,8 +176,16 @@ class AppointmentRepository {
                 .execute();
     }
 
+    /**
+     * The loser of a race for one slot. PostgreSQL checks an exclusion constraint after the new index entry is in place,
+     * so two writers of overlapping visits can each find the other's uncommitted row and wait for it: the deadlock
+     * detector then aborts one of them (40P01) and the other commits. That loser lost the same race as the one that gets
+     * 23P01, so both are {@code SLOT_OCCUPIED}. Only these statements are mapped: the visit row is already locked or new,
+     * so the exclusion check is the only wait a visit insert or update can deadlock on (TD-81 deadlocks happen on other
+     * statements and stay {@code CONCURRENT_RETRY}).
+     */
     private static RuntimeException slotConflictOrSame(RuntimeException ex) {
-        if (SqlStates.isExclusionViolation(ex, NO_OVERLAP_CONSTRAINT)) {
+        if (SqlStates.isExclusionViolation(ex, NO_OVERLAP_CONSTRAINT) || SqlStates.isDeadlock(ex)) {
             DomainException conflict = DomainException.conflict("SLOT_OCCUPIED", "Slot is not available");
             conflict.initCause(ex);
             return conflict;
