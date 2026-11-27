@@ -111,6 +111,17 @@ class AppointmentRepositorySlotConflictTest {
         }
     }
 
+    /** Two writers of one slot can wait for each other's exclusion check; the one PostgreSQL aborts lost the slot. */
+    @Test
+    void deadlockOnTheExclusionCheckBecomesSlotOccupied() {
+        var deadlock = new SQLException("ERROR: deadlock detected", "40P01");
+        for (boolean spring : new boolean[]{false, true}) {
+            var repository = repositoryFailingWith(deadlock, spring);
+            assertThatThrownBy(() -> create(repository)).satisfies(AppointmentRepositorySlotConflictTest::assertSlotOccupied);
+            assertThatThrownBy(() -> move(repository)).satisfies(AppointmentRepositorySlotConflictTest::assertSlotOccupied);
+        }
+    }
+
     @Test
     void statusGuardedUpdateThatMatchesNoRowIsAConcurrentModificationConflict() {
         DSLContext dsl = DSL.using(new MockConnection(ctx -> new MockResult[]{new MockResult(0)}), SQLDialect.POSTGRES);

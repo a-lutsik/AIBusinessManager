@@ -189,8 +189,14 @@ final class ChatHarness {
                 ENTERED_NAME, "note about " + CLIENT_NAME, "console", CLIENT_NAME, CLIENT_PHONE, "HIGH", false);
     }
 
+    /**
+     * Tool call ids are counted, not random: tests search everything sent to the provider for digits such as "555", and a
+     * random UUID contains them now and then.
+     */
+    private static final java.util.concurrent.atomic.AtomicLong CALL_IDS = new java.util.concurrent.atomic.AtomicLong();
+
     static LlmResponse toolCall(String name, String args) {
-        return new LlmResponse(new LlmMessage.Assistant(null, List.of(new ToolCall("call_" + UUID.randomUUID(), name, args))),
+        return new LlmResponse(new LlmMessage.Assistant(null, List.of(new ToolCall("call_" + CALL_IDS.incrementAndGet(), name, args))),
                 FinishReason.TOOL_CALLS, new Usage(10, 5));
     }
 

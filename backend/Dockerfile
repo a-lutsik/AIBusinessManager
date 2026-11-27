@@ -14,9 +14,11 @@ WORKDIR /workspace
 COPY gradlew settings.gradle.kts build.gradle.kts gradle.properties ./
 COPY gradle gradle
 COPY modules modules
-# Tests run in CI, not in the image build (the integration tests need Docker).
+COPY ci/gradle-retry.sh ci/gradle-retry.sh
+# Tests run in CI, not in the image build (the integration tests need Docker). gradle-retry.sh repeats the run after a
+# pause when Maven Central answers 429: this build starts with an empty Gradle cache, so it downloads everything.
 RUN --mount=type=cache,target=/root/.gradle \
-    ./gradlew --no-daemon --console=plain \
+    sh ci/gradle-retry.sh --no-daemon --console=plain \
         -Porg.gradle.java.installations.paths=/opt/jdk25 \
         :modules:app:bootJar -x test \
     && cp modules/app/build/libs/cadence-*.jar /workspace/app.jar

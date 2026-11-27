@@ -61,11 +61,12 @@ jobs:
       # without starting the containers (the image tag is not a task input), so CI always executes the tests.
       # CI=true (GitHub sets it anyway, stated here so nobody removes the dependency by accident): AbstractTimescaleIT
       # then FAILS instead of skipping every Testcontainers IT when the Docker daemon is not reachable.
+      # ci/gradle-retry.sh repeats the run after a pause only when Maven Central answered 429 (Gradle retries 5xx only).
       - name: Gradle build
         env:
           CI: "true"
         run: >
-          ./gradlew build --no-build-cache --console=plain --stacktrace
+          ci/gradle-retry.sh build --no-build-cache --console=plain --stacktrace
           -Porg.gradle.java.installations.paths="$JAVA_HOME_25_X64"
 
       # Second line of defence behind AbstractTimescaleIT: the job fails when any test was skipped, when fewer than
@@ -158,6 +159,12 @@ jobs:
           echo "JAVA_HOME=$JAVA_HOME"
           java -version
           command -v docker lsof
+
+      # e2e.mjs starts ./gradlew bootRun itself; downloading and compiling here first lets a Maven Central 429 be
+      # retried (ci/gradle-retry.sh) instead of failing the backend start inside the E2E run.
+      - name: Resolve and compile the backend
+        working-directory: backend
+        run: ci/gradle-retry.sh :modules:app:classes --console=plain
 
       - name: Set up Node 22
         uses: actions/setup-node@v4
